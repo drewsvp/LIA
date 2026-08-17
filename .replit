@@ -1,0 +1,50 @@
+modules = ["python-3.12", "postgresql-16", "nodejs-20"]
+
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+[userenv]
+
+[userenv.shared]
+EMAIL_FROM_ADDRESS = "onboarding@resend.dev"
+EMAIL_FROM_NAME = "Love in Action"
+STAFF_NOTIFY_PRIMARY = "tiffany@defendingthecause.org"
+STAFF_NOTIFY_SECONDARY = "christina@defendingthecause.org"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[objectStorage]
+defaultBucketID = "replit-objstore-78fe5153-2524-4ba6-b9a4-13ff9d3bb310"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000

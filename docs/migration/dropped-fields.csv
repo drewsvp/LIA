@@ -1,0 +1,46 @@
+collection,source_field,disposition,reason
+Organizations,Edit Organization,dropped,Wix dynamic page link. Routes are computed from organizations.slug and id.
+Organizations,View Donors / Volunteers,dropped,Wix dynamic page link. Replaced by MP-13 at /dashboard/supporters.
+Organizations,Dashboard - Organizations,dropped,Wix dynamic page link.
+Organizations,Owner,dropped,Wix member id of the record creator. No equivalent concept in the new model and no use case.
+Organizations,Primary Population Served,transformed,Normalized into the populations and organization_populations tables. The JSON array itself is not stored.
+Organizations,Logo,transformed,Wix internal reference. Never written to the database (D38). organizations.logo_url is populated in phase two; member-org logos are not in the LIA CMS (D50).
+Organizations,Org Address,transformed,"Split into address_line1, address_line2, city, state, postal_code, address_formatted. The JSON object itself is not stored."
+Organizations,Primary Contact Name,transformed,Split into a people row per Handbook section 8. Resolved to organizations.primary_contact_person_id.
+Organizations,Approved Email Sent,transformed,Replaced by email_log. Seeded as a sent row per D37 rather than carried as a boolean. True on 47 organizations.
+Item Requests,Add Items - Item Requests,dropped,Wix dynamic page link.
+Item Requests,View / Sign Up - Item Requests,dropped,Wix dynamic page link. The legacy public path is preserved in redirects.csv.
+Item Requests,Edit - Item Requests,dropped,Wix dynamic page link.
+Item Requests,Area Needs - Needs Requests (Item),dropped,Wix dynamic page link. Populated on one row.
+Item Requests,Owner,dropped,Wix member id of the record creator.
+Item Requests,Title,dropped,Null on all 120 rows. Request Title is the real title field. The two-field fallback logic was removed.
+Item Requests,Items,dropped,Parent-side multi-reference, null on all 120 rows. Child rows carry the parent id.
+Item Requests,Image,transformed,Wix internal reference. Rehosted by the media pass; source-hosted URLs are never written (D38).
+Item Requests,Primary Contact Name,transformed,Split into a people row. Resolved to item_requests.contact_person_id.
+Items,Owner,dropped,Wix member id of the record creator.
+Items,Claimed Quantity,dropped,Counter column. Recomputed from item_pledge_lines, never imported. Source drifts on 61 of 403 rows.
+Items,Remaining Quantity,dropped,"Generated column in the new schema, computed as greatest(requested - claimed, 0). Never written."
+Items,Donors,dropped,Multi-reference without quantities. Reconstructed from the Donors collection, which carries both.
+Items,AreaNeeds-NeedsRequests_items,dropped,Parent-side multi-reference, null on all rows.
+Volunteer Requests,Add Roles - Volunteer Request,dropped,Wix dynamic page link.
+Volunteer Requests,Edit - Volunteer Request,dropped,Wix dynamic page link.
+Volunteer Requests,View / Express Interest - Volunteer,dropped,Wix dynamic page link. The legacy public path is preserved in redirects.csv.
+Volunteer Requests,Owner,dropped,Wix member id of the record creator.
+Volunteer Requests,Roles,dropped,Parent-side multi-reference, null on all rows. Child rows carry the parent id.
+Volunteer Requests,Image,transformed,Wix internal reference. Rehosted by the media pass (D38).
+Volunteer Requests,Primary Contact Name,transformed,Split into a people row. Resolved to volunteer_requests.contact_person_id.
+Volunteer Roles,Owner,dropped,Wix member id of the record creator.
+Volunteer Roles,Claimed Quantity,dropped,Vestigial. Null on all 58 rows corpus-wide. The volunteer side tracks interest, not claims.
+Volunteer Roles,Remaining Quantity,dropped,Null on all 58 rows and generated in the new schema.
+Volunteer Roles,Interested Quantity,dropped,Counter column. Recomputed from volunteer_signup_roles, never imported. Source drifts on 11 of 58 rows.
+Volunteer Roles,AreaNeeds-VolunteerRequests_roles,dropped,Parent-side multi-reference, null on all rows.
+Volunteer Roles,AreaNeeds-Donor_roles,dropped,Multi-reference. Reconstructed from the Donors collection.
+Donors,Owner,dropped,Wix member id of the record creator.
+Donors,Title,dropped,System-generated display string. Null on all 127 rows.
+Donors,Multi Reference as String,dropped,Denormalized display text. Null on all 127 rows.
+Donors,Donated Item Quantities,dropped,Denormalized display text such as '1x Sensory swing'. Now computed in one shared place so the screen and the email cannot disagree (Handbook section 11).
+Donors,Organization,dropped,The organization resolves through the request. Verified across all 83 item pledges: the two never disagree. Storing it twice would let them.
+Donors,Items,dropped,"Multi-reference without quantities. Item to Quantity Array carries both and is used instead, except on the 10 rows where that array is empty."
+Donors,Name,transformed,Split into a people row per Handbook section 8. Resolved to item_pledges.person_id or volunteer_signups.person_id.
+Donors,Item to Quantity Array,transformed,"Normalized into item_pledge_lines, one row per item."
+Donors,Volunteer Roles,transformed,"Normalized into volunteer_signup_roles, one row per role."

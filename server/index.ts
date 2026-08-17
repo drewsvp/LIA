@@ -1,0 +1,88 @@
+/**
+ * Application entry point. One Express server on port 5000 serves the API,
+ * the auth handler, storage URLs, legacy redirects, and the SPA shell.
+ */
+import http from "node:http";
+import express, { type NextFunction, type Request, type Response } from "express";
+import cookieParser from "cookie-parser";
+import { registerRoutes } from "./routes/index";
+import { startExpiryScheduler } from "./jobs/expiry";
+import { startEmailSweep } from "./jobs/email-sweep";
+import { setupVite, serveStatic } from "./vite";
+
+const app = express();
+app.set("trust proxy", 1);
+
+// Better Auth's handler is registered inside registerRoutes BEFORE these
+// parsers would matter — it reads its own request body. JSON parsing applies
+// to the application's own /api routes.
+const jsonParser = express.json({ limit: "1mb" });
+const urlencodedParser = express.urlencoded({ extended: false });
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/auth/")) {
+    next();
+    return;
+  }
+  jsonParser(req, res, (err) => {
+    if (err) {
+      next(err);
+      return;
+    }
+    urlencodedParser(req, res, next);
+  });
+});
+
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret) throw new Error("SESSION_SECRET is not set.");
+app.use(cookieParser(sessionSecret));
+
+// Concise API request logging.
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api")) {
+    next();
+    return;
+  }
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    console.log(`${req.method} ${req.path} ${res.statusCode} ${Date.now() - startedAt}ms`);
+  });
+  next();
+});
+
+registerRoutes(app);
+
+// Central error handler: loud, JSON, no HTML stack pages.
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const status =
+    typeof err === "object" && err !== null && "status" in err && typeof (err as { status: unknown }).status === "number"
+      ? (err as { status: number }).status
+      : 500;
+  // Review fix: never echo internal error text (SQL, stack fragments) to
+  // public clients on 5xx. 4xx errors that carry an explicit status (e.g.
+  // body-parser JSON syntax errors) keep their message.
+  const message =
+    status >= 500 ? "Internal server error" : err instanceof Error ? err.message : "Bad request";
+  console.error("request failed:", err);
+  if (!res.headersSent) res.status(status).json({ message });
+});
+
+const server = http.createServer(app);
+const port = 5000;
+
+async function start(): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    serveStatic(app);
+  } else {
+    await setupVite(app, server);
+  }
+  server.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
+    console.log(`serving on port ${port}`);
+  });
+  startExpiryScheduler();
+  startEmailSweep();
+}
+
+start().catch((err) => {
+  console.error("failed to start server:", err);
+  process.exit(1);
+});

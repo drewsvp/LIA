@@ -1,0 +1,13 @@
+data/legacy-export/
+data/load/
+load.sql
+transform-report.md
+
+# app
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+attached_assets/
+/tmp/

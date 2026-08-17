@@ -1,0 +1,13 @@
+Subject: Item Request Pending Approval: Welcome Boxes for New Placements
+
+Item Request Pending Approval
+
+A new item request has been submitted. Here are the details for review & approval:
+
+Item Request Details
+Request Name: Welcome Boxes for New Placements
+Organization: Hearts & Hands Family Services
+Primary Contact: Dana Whitfield
+Primary Contact's Email: dana@heartsandhands.example.org
+
+View/Approve Item Request: https://1fa707d9-1a0a-408b-8c94-c8c14ac65531-00-3fmcecahrgz4s.janeway.replit.dev/admin/requests

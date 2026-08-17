@@ -1,0 +1,16 @@
+Subject: New Member Pending Approval: Dana Whitfield
+
+New Database User Pending Approval
+
+An Alliance Member has requested a new teammate be given access to the Love in Action Database. Here is their information:
+
+Requesting Member Details
+Organization: Hearts & Hands Family Services
+Requesting Contact: Dana Whitfield
+Requesting Contact's Email: dana@heartsandhands.example.org
+
+New Member Details
+Name: Dana Whitfield
+Email: dana@heartsandhands.example.org
+
+Review & Approve New Member: https://1fa707d9-1a0a-408b-8c94-c8c14ac65531-00-3fmcecahrgz4s.janeway.replit.dev/admin/members

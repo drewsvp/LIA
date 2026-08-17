@@ -1,0 +1,25 @@
+Subject: A Volunteer has Expressed Interest in Serving
+
+A New Volunteer Has Expressed Interest!
+
+Hi Hearts & Hands Family Services,
+
+Congratulations, someone is interested in volunteering with your organization! Their details and which role(s) they are interested in are included below. Please reach out to this person in the next 1–3 business days to confirm the requirements for this volunteer opportunity and provide any additional details they need for participating.
+
+Request Details
+Name: Move-In Day Volunteers
+Description: Help a newly licensed foster family set up bedrooms before a sibling set arrives.
+Request Link: https://1fa707d9-1a0a-408b-8c94-c8c14ac65531-00-3fmcecahrgz4s.janeway.replit.dev/volunteer/d913430f-46d4-43bc-b661-83f959cd3a03
+
+Role Details
+- Furniture mover
+- Meal train cook
+
+Volunteer Information
+Name: Lena Fischer
+Email: lena.fischer@example.org
+
+Thank you,
+The Alliance Love in Action Team
+
+View Volunteers: https://1fa707d9-1a0a-408b-8c94-c8c14ac65531-00-3fmcecahrgz4s.janeway.replit.dev/dashboard/supporters

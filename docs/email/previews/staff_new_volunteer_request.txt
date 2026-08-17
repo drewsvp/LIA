@@ -1,0 +1,13 @@
+Subject: Volunteer Request Pending Approval: Move-In Day Volunteers
+
+Volunteer Request Pending Approval
+
+A new volunteer opportunity has been submitted. Here are the details for review & approval:
+
+Volunteer Request Details
+Volunteer Request: Move-In Day Volunteers
+Organization: Hearts & Hands Family Services
+Primary Contact: Dana Whitfield
+Primary Contact's Email: dana@heartsandhands.example.org
+
+View/Approve Volunteer Request: https://1fa707d9-1a0a-408b-8c94-c8c14ac65531-00-3fmcecahrgz4s.janeway.replit.dev/admin/requests

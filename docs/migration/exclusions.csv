@@ -1,0 +1,24 @@
+kind,legacy_wix_id,identifier,reason,status_in_source,needs_human_decision
+item_request,34699d06-1e68-47a4-b403-c90a4a9fdced,Holiday Adopt-A-Family: Bed/Mattress Request,Organization reference 6fd6cda0-bb65-458c-a4e7-bdb162b08769 does not exist in Organizations export,Archived,no
+item_request,bc00a9d0-590d-49c8-9f4a-efb6abcc5ee1,Essential Appliance Needs for Local Organization,Organization reference ea1281fe-33d5-44b2-970e-1a90d5eb8a2b does not exist; Roseville Police Activities Leauge exists under a different id,Active,YES
+item_request,edc1ffbc-dc5b-4b84-bb57-8ca89596709b,"Mattress, Frame and bedding for foster youth",No organization reference and no status; abandoned draft,null,no
+item_request,fc7c70b1-694a-415b-bda1-df7397a42c0b,(no title),"No organization reference, no status, no title; abandoned draft",null,no
+item,42ad9a1b-b652-4f21-a504-be6f1ecbd87f,Double Stroller,Parent item request f63b13da-c0d5-45be-b8ea-388bb70902f7 does not exist,,no
+item,96c342cc-b204-473c-a014-9a17572e2954,toys,Parent item request f63b13da-c0d5-45be-b8ea-388bb70902f7 does not exist,,no
+item,7b498d0e-4c60-4883-9b66-44df85755a41,Backpacks and school supplies,Parent item request 8139b0ac-d7b3-455a-bb50-d615cd005449 does not exist,,no
+volunteer_role,13cb1b39-f7d1-4a8f-a13e-63ed574beb9f,female soccer coach,Parent volunteer request ae12ac87-5caf-4f01-a687-426788b67574 does not exist,,no
+volunteer_role,b24d22a6-b5c5-4e46-8a09-894cdc60d1e1,male soccer coach,Parent volunteer request ae12ac87-5caf-4f01-a687-426788b67574 does not exist,,no
+volunteer_role,b8acb0b3-846d-41a5-bd7b-8f9aacb2bbbc,Thrift Shop Organizer,Parent volunteer request 43c53c90-b160-4a32-a48e-28e1e585688b does not exist,,no
+volunteer_role,d32de4fa-e18d-47b5-aa77-1f9760b933a2,Thrift Shop Organizer,Parent volunteer request a3490007-f804-4f5c-9b79-9322037e8836 does not exist,,no
+donor_pledge,,Julie L Love / atj3@aol.com (3 rows),No item request and no volunteer request reference; person still imported,,no
+donor_pledge,,Rose Skolnick / rocklinrosie@gmail.com,No item request and no volunteer request reference; person still imported,,no
+donor_pledge,,Kyley Skaggs / kyley.skaggs@redwoodglen.net,No item request and no volunteer request reference; person still imported,,no
+donor_pledge,,Sara Corp / sara.corp@baldwin.com,No item request and no volunteer request reference; person still imported,,no
+volunteer_role,,Kerbal Space Guy,Suspected test data (quantity 333); confirm with program director before excluding,,YES
+volunteer_role,,Rocket to Space,Suspected test data; confirm with program director before excluding,,YES
+volunteer_role,,The CanadARM,Suspected test data; confirm with program director before excluding,,YES
+volunteer_role,,Metal Detector Holder,Suspected test data (quantity 222); confirm with program director before excluding,,YES
+volunteer_role,,Rock Taster,Suspected test data; confirm with program director before excluding,,YES
+item,,Meteorite,Suspected test data (quantity 555); confirm with program director before excluding,,YES
+item,,2026 Rock,Suspected test data; confirm with program director before excluding,,YES
+item,,Magenta,Suspected test data; confirm with program director before excluding,,YES

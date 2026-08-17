@@ -1,0 +1,26 @@
+Subject: Item(s) have been donated for Car Seats for Foster Placements
+
+New Item(s) Have Been Donated!
+
+Hi Hearts & Hands Family Services,
+
+Congratulations, someone is interested in donating items to your organization! Their details and which item(s) they've claimed are included below. This donor has been instructed to reach out to you in the next 2 weeks to set up delivery of the item(s) but you may also contact them directly.
+
+Request Details
+Name: Car Seats for Foster Placements
+Description: New placements often arrive with nothing. These seats let families say yes to emergency calls.
+Request Link: https://1fa707d9-1a0a-408b-8c94-c8c14ac65531-00-3fmcecahrgz4s.janeway.replit.dev/items/d38252ee-f2a9-4980-890a-c9835cb89a46
+
+Item(s) Donated
+Item | Number Donated
+Infant car seat (rear-facing) | 2
+Convertible car seat | 1
+
+Donor Information
+Name: Maria Lopez
+Email: maria.lopez@example.org
+
+Thank you,
+The Alliance Love in Action Team
+
+View Donors: https://1fa707d9-1a0a-408b-8c94-c8c14ac65531-00-3fmcecahrgz4s.janeway.replit.dev/dashboard/supporters
