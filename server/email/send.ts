@@ -25,7 +25,6 @@ import * as emailLog from "../dal/email-log";
 import { PRODUCT_TEMPLATES, type ProductTemplateKey } from "./templates";
 import { finalizeHtml } from "./render";
 import type { ProductEntityType } from "./templates/types";
-
 export class EmailConfigError extends Error {
   constructor(message: string) {
     super(message);

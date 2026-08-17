@@ -244,9 +244,9 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ======================================================================
+  // --------------------------------------------------------------------------
   // ADMIN-02 — request approval queue (docs/specs/ADMIN-02.md)
-  // ======================================================================
+  // --------------------------------------------------------------------------
 
   // ---- §4: one queue, both types, per status tab.
   app.get("/api/admin/requests", requireStaff, async (req: Request, res: Response, next) => {
@@ -578,9 +578,9 @@ export function registerAdminRoutes(app: Express): void {
     }
   }
 
-  // ======================================================================
+  // --------------------------------------------------------------------------
   // ADMIN-03 — member approval queue (docs/specs/ADMIN-03.md)
-  // ======================================================================
+  // --------------------------------------------------------------------------
 
   // ---- §4: one row per membership, per status tab. Owner memberships and
   // platform_owner rows never appear (§7/§11 — enforced in the DAL predicate).
@@ -739,10 +739,10 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ======================================================================
+  // --------------------------------------------------------------------------
   // ADMIN-04 — People review queue (docs/specs/ADMIN-04.md). Staff ADMIN
   // only (§11): a staff approver gets the same 404 as a nonexistent route.
-  // ======================================================================
+  // --------------------------------------------------------------------------
 
   // ---- §4 region 1: flagged people with counts of what hangs off them.
   app.get("/api/admin/people/review", requireStaffAdmin, async (req: Request, res: Response, next) => {
@@ -899,11 +899,11 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ======================================================================
+  // --------------------------------------------------------------------------
   // ADMIN-05 — Populations management (docs/specs/ADMIN-05.md). Staff
   // ADMIN only (§11). Region 3 (Other values) is the reason this surface
   // exists: free text that keeps recurring should become a real option.
-  // ======================================================================
+  // --------------------------------------------------------------------------
 
   app.get("/api/admin/populations", requireStaffAdmin, async (req: Request, res: Response, next) => {
     try {
@@ -1090,7 +1090,7 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // =====================================================================
+  // --------------------------------------------------------------------------
   // ADMIN-06 — Email log (docs/specs/ADMIN-06.md). Staff admin AND staff
   // approver read it (§11: requireStaff, unlike 04/05) — payloads are
   // reachable only behind this gate.
@@ -1202,7 +1202,7 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // =====================================================================
+  // --------------------------------------------------------------------------
   // ADMIN-07 — Audit trail (docs/specs/ADMIN-07.md). Read-only: this one
   // route is the whole surface and it writes nothing.
 
@@ -1279,7 +1279,7 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // =====================================================================
+  // --------------------------------------------------------------------------
   // ADMIN-08 — Digest subscribers (docs/specs/ADMIN-08.md). Staff ADMIN
   // only (§11): an approver gets the byte-identical unknown-route 404. The
   // list is public email addresses; the CSV export is the one export in

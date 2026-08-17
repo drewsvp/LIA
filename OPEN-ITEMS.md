@@ -28,7 +28,6 @@ Organized by **who can answer it**, because that is what determines whether it c
 **Monday morning rule.** Anything still open at kickoff gets resolved, proceeded past with the stated default, or logged as a known bug and built around. Nothing waits. A default that turns out wrong is a Wednesday fix; a lane that never starts is not.
 
 ---
-
 ## A. Captain decisions
 
 All captain decisions through D61 are recorded in `DECISIONS.md`. See that file for the full list and reasoning. Do not reopen settled items here. D40 confirmed on the Aug 14 call (closes B5). D49 closes B9. O1 closed as D45. O3 answered: 48-hour target is being hit. **O9 closed as D61** (Christina, Aug 16 2026): ten canonical populations plus Other, not seed-all-24. **O12 closed Aug 16 2026:** PB-04 on-screen copy harmonized to 1-3 business days, matching D52. **O13 closed Aug 16 2026:** PB-05 stays digest-only; other three lists deferred to phase two per `LIA_Phase_Two_Backlog.md` item 9.
@@ -39,7 +38,7 @@ All captain decisions through D61 are recorded in `DECISIONS.md`. See that file 
 |---|---|---|---|---|
 | B1 | ~~**Test export**, sample from all six CMS collections~~ | Site owner | The whole migration lane | **Closed 2026-08-14.** All six collections exported and audited. See `docs/migration/data-audit.md`. |
 | B2 | **Contacts export**, with labels and marketing subscriptions | Site owner | Member approval state, subscriber list | **Now the top blocker.** Lives in Customers & Leads, not CMS. The captain lacks the permission; Tiffany must pull it. A slice filtered to the labels `Member Organization Representatives` and `Approved Area Needs Member` (~150 rows) unblocks logins and memberships. The full export is only needed for the subscriber table, which is not critical path. Not reconstructable any other way. |
-| B3 | ~~**Twelve email body texts**~~ **One remaining: `org_member_approved`'s body**, from the sending platform's editor | Site owner, owner-level access | Lane B copy for that one template | Eleven of twelve closed 2026-08-16, see `docs/email/TEMPLATES.md` sections 4-6. `org_member_approved`'s own spec entry already assumes it's kept and reworded for magic link rather than dropped — confirm that reading against the delivered body, don't assume it. Wix's triggered-email editor has no mobile preview; formal mobile capture stays waived for these 12 (does not answer B6/O7, which covers the 18 bound surfaces) |
+| B3 | ~~**Twelve email body texts**~~ **One remaining: `org_member_approved`'s body**, from the sending platform's editor | Site owner, owner-level access | Lane B copy for that one template | Eleven of twelve closed 2026-08-16, see `docs/email/TEMPLATES.md` sections 4-6. `org_member_approved`'s own spec entry already assumes it's kept and reworded for magic link rather than dropped — confirm that reading against the delivered body, don't assume it. Wix's triggered-email editor has no mobile preview; formal mobile capture stays waived for these 12 (does not answer B6/O7, which covers the 19 bound UI surfaces) |
 | B4 | **Staff list with roles**, `staff_admin` or `staff_approver` | Executive director | All admin testing | Staff memberships are seeded and verified; the real roster replaces the seed |
 | B5 | **Login method notification** | Executive director | Nothing — decided | **Confirmed.** Magic link per D40. Tiffany reviewed the reasoning on the Aug 14 call and did not object |
 | B6 | **Screenshot folder**, confirm mobile coverage | Executive director | Every bound surface | If desktop-only, mobile capture joins the walkthrough |
@@ -52,7 +51,6 @@ All captain decisions through D61 are recorded in `DECISIONS.md`. See that file 
 **If B2 cannot be produced,** the fallback is staff re-approving the current member list by hand at ADMIN-03. That costs most of a day and needs scheduling Monday, not discovering Thursday.
 
 ---
-
 ## C. Capture walkthrough items
 
 Each spec's section 15 is its own checklist. This is the map, plus the items that break testing if missed.

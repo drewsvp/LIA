@@ -802,7 +802,6 @@ async function main(): Promise<void> {
   console.log("    staff_approver: approver@thealliance.example.org  (Riley Chen — synthetic, cannot receive mail)");
   console.log("  Org owner logins: dana@heartsandhands.example.org, samuel@newhorizons.example.org, grace@safeharbor.example.org");
 }
-
 main()
   .then(async () => {
     await pool.end();

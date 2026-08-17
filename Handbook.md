@@ -29,7 +29,6 @@ This file states the model, the invariants, and the behavior. It does not restat
 **Build one surface per task.** Read that surface's spec and its two screenshots. A surface with no spec and no screenshots does not get built.
 
 ---
-
 ## 1. What this system does
 
 The Alliance is a nonprofit backbone organization serving the greater Sacramento region. It does not deliver services directly. It coordinates a network of roughly 105 member organizations, including foster and adoption agencies, nonprofits, churches, and professional service providers, all of which work with vulnerable children and families.
@@ -141,7 +140,6 @@ Where a spec marks a value `[CAPTURE]`, that value is not yet known. Do not inve
 **Repo:** mirrored to a GitHub organization owned by The Alliance.
 
 `users.auth_subject` holds the provider's stable subject identifier and nothing else knows the provider, so swapping touches one column and one middleware file.
-
 ### Rules
 
 - TypeScript strict mode. No `any` in committed code.
@@ -152,7 +150,6 @@ Where a spec marks a value `[CAPTURE]`, that value is not yet known. Do not inve
 - Every mutation validates server-side. Client-side validation is a convenience, never a control.
 - Timestamps stored UTC as `timestamptz`, rendered America/Los_Angeles.
 - No currency anywhere. Do not add price fields.
-
 ### Authorization
 
 Every route that reads or writes organization-scoped data checks membership server-side, on every request, before the query. Never derive authorization from a URL parameter, a client-supplied org ID, or a hidden form field.
@@ -203,7 +200,6 @@ Both are in `migrations/0001_initial_schema.sql`. The merge's function, `merge_p
 **The email dedup index includes `to_email`.** Five templates send to more than one recipient for the same entity: the four staff notifications go to two addresses each, and `org_request_approved` goes to both the primary contact and the creator. Without `to_email` in the key the second row is rejected by the database and that person silently receives nothing. Semantics are once per recipient per entity, so approving twice still sends each person one email.
 
 ---
-
 ## 8. Person identity and name policy
 
 App-wide. No surface, function, or migration step is exempt.
@@ -434,7 +430,6 @@ Each is addressed by a property of this design. Each also needs a test, because 
 | **Public endpoints.** Member creation, deletion, lookup, and email were callable by anyone. | Membership checked server-side before every organization-scoped query; enforced in route guards and the data-access layer. | Enumerate every route. Call each unauthenticated and as a member of a different organization. No personal data, no other org's data, no mutation succeeds. Record the result as a table; it is presentation material. |
 
 ---
-
 ## 17. Out of scope
 
 Do not build. Do not add columns, routes, or UI in anticipation.

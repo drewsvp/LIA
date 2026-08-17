@@ -276,9 +276,9 @@ export async function removeById(ctx: DbContext, membershipId: string): Promise<
   if (!rows[0]) throw new Error(`memberships.removeById: membership not found: ${membershipId}`);
 }
 
-// ===========================================================================
+// ---------------------------------------------------------------------------
 // ADMIN-03 — member approval queue
-// ===========================================================================
+// ---------------------------------------------------------------------------
 
 /**
  * The queue predicate (ADMIN-03 §7): owner memberships never appear — they

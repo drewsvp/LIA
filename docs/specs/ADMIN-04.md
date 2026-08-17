@@ -89,7 +89,6 @@ Region 2 listing attached records by name rather than by count is what makes the
 - Direction: the operator chooses which record survives. Default the survivor to the record with the most attached rows, but let her override, since the better email or the better name may sit on the smaller record.
 - On success: the duplicate is gone, the survivor holds everything, and the result states what moved.
 - On failure: nothing written, stated error.
-
 ## 7. Conditional behavior
 
 | Trigger | Result |

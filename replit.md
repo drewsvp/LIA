@@ -36,7 +36,6 @@ This system is live and in use. Data loss is unacceptable. Silent failure is wor
 Surface IDs look like `MP-04`, `PB-02`, `ADMIN-03`. They appear in `Handbook.md` section 11, in branch names, and in commit messages.
 
 ---
-
 ## Rules that are never broken
 
 1. **No text-matching joins.** A person resolves to an organization through `org_memberships` and nothing else. A query comparing a name string to associate records is wrong.
@@ -113,7 +112,6 @@ Not this week, and do not add columns, routes, or UI in anticipation:
 - No currency anywhere in this system. Do not add price fields.
 
 ---
-
 ## Foundation (built, Aug 16 2026)
 
 The foundation task is done: schema applied and dumped, DAL, routes, auth, storage
