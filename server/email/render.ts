@@ -27,12 +27,36 @@ export function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-/** Full HTML document: white page, single navy-on-white column. */
+/**
+ * Slot the LIA email header image occupies in shell() output. Templates never
+ * know the absolute URL (it depends on the environment base URL), so shell
+ * emits this marker and send.ts swaps in the <img> via finalizeHtml() before
+ * anything is dispatched.
+ */
+export const HEADER_IMAGE_MARKER = "<!--lia-email-header-->";
+
+/**
+ * Replace the header slot with the actual banner <img>. Loud by design: a
+ * shell()-rendered document always carries the marker, so its absence means
+ * the HTML was not built by shell() — refuse rather than send a half-branded
+ * email silently.
+ */
+export function finalizeHtml(html: string, headerImageUrl: string): string {
+  if (!html.includes(HEADER_IMAGE_MARKER)) {
+    throw new Error("finalizeHtml: header slot marker missing from rendered HTML");
+  }
+  const img = `<img src="${escapeHtml(headerImageUrl)}" alt="Love in Action" width="560"
+        style="display:block;width:100%;max-width:560px;height:auto;margin:0 0 24px;" />`;
+  return html.replace(HEADER_IMAGE_MARKER, img);
+}
+
+/** Full HTML document: white page, LIA header banner, single navy-on-white column. */
 export function shell(heading: string, bodyHtml: string): string {
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:24px;background:#ffffff;font-family:${FONT_STACK};color:${NAVY};">
     <div style="max-width:560px;margin:0 auto;">
+      ${HEADER_IMAGE_MARKER}
       <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:${NAVY};">${escapeHtml(heading)}</h1>
 ${bodyHtml}
     </div>

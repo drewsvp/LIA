@@ -23,6 +23,7 @@ import type { PoolClient } from "pg";
 import { SYSTEM, type DbContext } from "../db/client";
 import * as emailLog from "../dal/email-log";
 import { PRODUCT_TEMPLATES, type ProductTemplateKey } from "./templates";
+import { finalizeHtml } from "./render";
 import type { ProductEntityType } from "./templates/types";
 
 export class EmailConfigError extends Error {
@@ -65,6 +66,13 @@ export function emailBaseUrl(): string {
   if (devDomain && devDomain.trim() !== "") return `https://${devDomain.trim()}`;
   return "http://localhost:5000";
 }
+
+/**
+ * The LIA email header banner, served from the app itself (client/public/ in
+ * dev via Vite, the built dist/ in production). Email clients fetch it from
+ * the same base URL every body link already uses.
+ */
+const EMAIL_HEADER_PATH = "/email-header.png";
 
 /** Absolute URL for an app path ("/admin/requests" → "https://…/admin/requests"). */
 export function absoluteUrl(path: string): string {
@@ -371,6 +379,9 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
   if (leftovers.length > 0) {
     throw new EmailConfigError(`${template.key}: literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
   }
+  // LIA header banner: swap the shell() slot for the absolute image URL.
+  // Throws (aborting the caller's transaction) if the slot is missing.
+  const html = finalizeHtml(rendered.html, absoluteUrl(EMAIL_HEADER_PATH));
 
   const entry = await emailLog.insertQueuedInTx(c, {
     templateKey: template.key,
@@ -384,7 +395,7 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
     emailLogId: entry.id,
     toEmail: input.toEmail,
     subject: rendered.subject,
-    html: rendered.html,
+    html,
     text: rendered.text,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
   };
@@ -429,13 +440,22 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
     return block(`literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
   }
 
+  // LIA header banner: swap the shell() slot for the absolute image URL.
+  let html: string;
+  try {
+    html = finalizeHtml(rendered.html, absoluteUrl(EMAIL_HEADER_PATH));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return block(`header image injection failed: ${message}`);
+  }
+
   return {
     outcome: "queued",
     dispatch: {
       emailLogId: entry.id,
       toEmail: input.toEmail,
       subject: rendered.subject,
-      html: rendered.html,
+      html,
       text: rendered.text,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     },
