@@ -10,4 +10,4 @@
 - [Staff-admin client gate lockstep](staff-admin-client-gate.md) — requireStaffAdmin surfaces must also join STAFF_ADMIN_ONLY_SURFACES in shared/routes.ts, or approvers can load the page shell.
 - [Email dispatch claim](email-dispatch-claim.md) — queued→sending claim before every provider call; sweep re-dispatches stranded queued, never retries stranded sending (possible double send).
 - [Test fixture conventions](test-fixture-conventions.md) — zz_fixture payload key / zz. email prefix mark deliberate rows; check markers before diagnosing "stuck" data as a bug.
-- [Shallow clone push fix](shallow-clone-push-fix.md) — repo was shallow; boundary commit had missing parent from deleted old repo; agent sessions can't get GitHub tokens from pid2; used temp deploy key + filter-branch to fix.
+- [Git push from broken shallow clone](shallow-clone-push-fix.md) — if the shallow boundary's parent object is gone, reinit + fresh commit + force-push; history rewrites diverge from task merges. Push via temp deploy key.
