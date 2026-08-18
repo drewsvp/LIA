@@ -6,10 +6,11 @@
  * any URL here (§11). A failed query renders a stated error in place of
  * the selector, never an empty selector (§12).
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
+import { apiRequest } from "../../lib/queryClient";
 import heroImg from "../../assets/dashboard/hero.png";
 import tileItem from "../../assets/dashboard/tile-item.png";
 import tileVolunteer from "../../assets/dashboard/tile-volunteer.png";
@@ -104,6 +105,86 @@ function RequestSelector({
   );
 }
 
+/**
+ * User chip with a real menu behind the chevron. Log out ends the Better
+ * Auth session server-side, then drops all cached queries so no
+ * authenticated data lingers, then lands on /login. Failures are stated
+ * in the menu — never a silent no-op that leaves the user looking logged in.
+ */
+function UserMenu({ firstName }: { firstName: string }) {
+  const [, navigate] = useLocation();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent): void {
+      if (rootRef.current !== null && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  async function logout(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiRequest("POST", "/api/auth/sign-out", {});
+      queryClient.clear();
+      navigate("/login");
+    } catch {
+      setError("Log out failed. Please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mp4-user" ref={rootRef}>
+      <button
+        type="button"
+        className="mp4-strip-user"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <svg className="mp4-strip-avatar" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="8" r="4" fill="currentColor" />
+          <path d="M4 20c0-4 4-6 8-6s8 2 8 6" fill="currentColor" />
+        </svg>
+        <span>{firstName}</span>
+        <svg className="mp4-strip-chevron" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="mp4-user-menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            className="mp4-user-menu-item"
+            disabled={busy}
+            onClick={() => void logout()}
+          >
+            {busy ? "Logging out…" : "Log out"}
+          </button>
+          {error !== null ? <p className="mp4-user-menu-error">{error}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const [, navigate] = useLocation();
   const { session } = useSession();
@@ -139,16 +220,7 @@ export function DashboardPage() {
           {logoUrl ? <img className="mp4-strip-logo" src={logoUrl} alt="" /> : null}
           <span className="mp4-strip-name">{orgName}</span>
         </div>
-        <div className="mp4-strip-user">
-          <svg className="mp4-strip-avatar" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="8" r="4" fill="currentColor" />
-            <path d="M4 20c0-4 4-6 8-6s8 2 8 6" fill="currentColor" />
-          </svg>
-          <span>{firstName}</span>
-          <svg className="mp4-strip-chevron" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </div>
+        <UserMenu firstName={firstName} />
       </div>
 
       <div className="mp4-body">
