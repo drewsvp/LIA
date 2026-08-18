@@ -1485,6 +1485,9 @@ export function registerAdminRoutes(app: Express): void {
         if (!isStaffRole && row.orgKind === "platform_owner") {
           return { kind: "wrong_org" as const, message: "Platform owner memberships can only hold staff roles." };
         }
+        if (row.userId === userId && row.role === "staff_admin" && newRole !== "staff_admin") {
+          return { kind: "self_demotion" as const };
+        }
         if (
           row.orgKind === "platform_owner" &&
           row.role === "staff_admin" &&
@@ -1508,6 +1511,11 @@ export function registerAdminRoutes(app: Express): void {
         }
         case "wrong_org":
           res.status(409).json({ message: result.message });
+          return;
+        case "self_demotion":
+          res.status(409).json({
+            message: "You cannot demote your own staff admin role. Nothing was changed.",
+          });
           return;
         case "last_admin":
           res.status(409).json({

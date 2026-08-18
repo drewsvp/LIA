@@ -11,9 +11,11 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "../../hooks/useSession";
 
 type Row = {
   id: string;
+  userId: string;
   role: "owner" | "member" | "staff_admin" | "staff_approver";
   status: "pending" | "active" | "removed";
   firstName: string;
@@ -41,10 +43,13 @@ function legalRoles(row: Row): Row["role"][] {
 
 export function RolesPage() {
   const queryClient = useQueryClient();
+  const { session } = useSession();
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState<{ row: Row; toRole: Row["role"] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const currentUserId = session?.user?.id;
 
   const listQuery = useQuery<{ memberships: Row[] }>({ queryKey: ["/api/admin/roles"] });
   const rows = listQuery.data?.memberships ?? [];
@@ -150,21 +155,34 @@ export function RolesPage() {
         </table>
       )}
 
-      {pending && (
-        <div className="adm-confirm">
-          <p>
-            Change {`${pending.row.firstName} ${pending.row.lastName}`.trim()} at {pending.row.orgName} from{" "}
-            {ROLE_NAMES[pending.row.role]} to {ROLE_NAMES[pending.toRole]}? The change applies the next time their
-            session is resolved.
-          </p>
-          <button className="adm-btn adm-btn-primary" disabled={busy} onClick={() => void confirmChange()}>
-            Change role
-          </button>
-          <button className="adm-btn" disabled={busy} onClick={() => setPending(null)}>
-            Cancel
-          </button>
-        </div>
-      )}
+      {pending && (() => {
+        const isSelfDemotion =
+          currentUserId !== undefined &&
+          pending.row.userId === currentUserId &&
+          pending.row.role === "staff_admin" &&
+          pending.toRole !== "staff_admin";
+        return (
+          <div className="adm-confirm">
+            {isSelfDemotion && (
+              <p className="adm-alert">
+                Warning: you are demoting your own staff admin role. You will lose admin access the next time your
+                session is resolved and will not be able to undo this yourself.
+              </p>
+            )}
+            <p>
+              Change {`${pending.row.firstName} ${pending.row.lastName}`.trim()} at {pending.row.orgName} from{" "}
+              {ROLE_NAMES[pending.row.role]} to {ROLE_NAMES[pending.toRole]}? The change applies the next time their
+              session is resolved.
+            </p>
+            <button className="adm-btn adm-btn-primary" disabled={busy || isSelfDemotion} onClick={() => void confirmChange()}>
+              Change role
+            </button>
+            <button className="adm-btn" disabled={busy} onClick={() => setPending(null)}>
+              Cancel
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
