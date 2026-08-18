@@ -2511,6 +2511,9 @@ a.site-nav-btn {
 }
 .adm-error-text {
   color: var(--adm-danger, #b3261e);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 
 /* --- email log failure diagnostics (Task 75) --- */
