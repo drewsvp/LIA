@@ -14,7 +14,7 @@ import type { DbContext } from "../db/client";
 import { PRODUCT_TEMPLATES, isProductTemplateKey, type ProductTemplateKey } from "../email/templates";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
 import { copyPlaceholders, finalizeHtml, type TemplateCopy } from "../email/render";
-import { absoluteUrl, EMAIL_HEADER_PATH } from "../email/send";
+import { absoluteUrl, headerImageDataUri } from "../email/send";
 import { effectiveCopy, envStaffRecipients, parseRecipientOverride, validateCopy } from "../email/overrides";
 import { templateDisplayName } from "../../shared/email-templates";
 
@@ -187,7 +187,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         const rendered = renderMagicLinkEmail({ firstName: "Maria", url: absoluteUrl("/login") });
         res.json({
           subject: rendered.subject,
-          html: finalizeHtml(rendered.html, absoluteUrl(EMAIL_HEADER_PATH)),
+          // Preview: data URI so the logo renders in the browser regardless of APP_BASE_URL.
+          html: finalizeHtml(rendered.html, headerImageDataUri()),
           text: rendered.text,
         });
         return;
@@ -221,7 +222,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
       const rendered = template.render(template.sample as never, copy);
       res.json({
         subject: rendered.subject,
-        html: finalizeHtml(rendered.html, absoluteUrl(EMAIL_HEADER_PATH)),
+        // Preview: data URI so the logo renders in the browser regardless of APP_BASE_URL.
+        html: finalizeHtml(rendered.html, headerImageDataUri()),
         text: rendered.text,
       });
     } catch (err) {

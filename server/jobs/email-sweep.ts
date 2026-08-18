@@ -25,7 +25,14 @@
  */
 import * as emailLog from "../dal/email-log";
 import { SYSTEM } from "../db/client";
-import { dispatchQueuedEmail, MAY_HAVE_SENT_MARKER, type PendingDispatch } from "../email/send";
+import {
+  dispatchQueuedEmail,
+  MAY_HAVE_SENT_MARKER,
+  EMAIL_HEADER_CID_URL,
+  EMAIL_HEADER_ATTACHMENT,
+  type PendingDispatch,
+} from "../email/send";
+import { finalizeHtml } from "../email/render";
 import { PRODUCT_TEMPLATES, type ProductTemplateKey } from "../email/templates";
 
 /** A row must be at least this old before the sweep touches it — a fresh
@@ -55,12 +62,16 @@ function rebuildDispatch(entry: {
   }
   try {
     const rendered = template.render(payload.vars as never);
+    // Inject the header banner via CID so the logo doesn't depend on the app
+    // being publicly reachable — same approach as normal product sends.
+    const html = finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL);
     return {
       emailLogId: entry.id,
       toEmail: entry.toEmail,
       subject: rendered.subject,
-      html: rendered.html,
+      html,
       text: rendered.text,
+      attachments: [EMAIL_HEADER_ATTACHMENT],
       ...(typeof payload.replyTo === "string" && payload.replyTo ? { replyTo: payload.replyTo } : {}),
     };
   } catch (err) {

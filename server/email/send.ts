@@ -18,6 +18,8 @@
  * are absolute, built from APP_BASE_URL (required in production; the Replit
  * dev domain is the workspace fallback).
  */
+import { readFileSync } from "fs";
+import { join } from "path";
 import { ServerClient } from "postmark";
 import type { PoolClient } from "pg";
 import { SYSTEM, type DbContext } from "../db/client";
@@ -33,6 +35,63 @@ export class EmailConfigError extends Error {
     this.name = "EmailConfigError";
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Header image — loaded once at startup, embedded in every send.      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Load the LIA header banner from disk. Tries the production build path
+ * first (dist/public/), falls back to the dev source (client/public/).
+ * Throws loudly at startup if neither exists — a missing logo is a
+ * misconfiguration, not a runtime option.
+ */
+function loadHeaderImage(): { base64: string; dataUri: string } {
+  const candidates = [
+    join(process.cwd(), "dist", "public", "email-header.png"),
+    join(process.cwd(), "client", "public", "email-header.png"),
+  ];
+  for (const p of candidates) {
+    try {
+      const buf = readFileSync(p);
+      const base64 = buf.toString("base64");
+      return { base64, dataUri: `data:image/png;base64,${base64}` };
+    } catch {
+      // try next candidate
+    }
+  }
+  throw new Error(
+    `email-header.png not found at ${candidates.join(" or ")} — check build output`,
+  );
+}
+
+const _headerImage = loadHeaderImage();
+
+/**
+ * CID src value used in outbound email HTML when the header is sent as an
+ * inline attachment. Mail clients fetch the image from the message itself,
+ * so the app never needs to be publicly reachable for the logo to render.
+ */
+export const EMAIL_HEADER_CID_URL = "cid:lia-email-header";
+
+/**
+ * Base64 data URI for use in browser-rendered admin previews. Browsers
+ * handle data URIs fine; mail clients do not, so real sends use CID instead.
+ */
+export function headerImageDataUri(): string {
+  return _headerImage.dataUri;
+}
+
+/**
+ * Postmark inline-attachment descriptor that pairs with EMAIL_HEADER_CID_URL.
+ * Include this in every real send so the logo is embedded in the message.
+ */
+export const EMAIL_HEADER_ATTACHMENT = {
+  Name: "email-header.png",
+  Content: _headerImage.base64,
+  ContentType: "image/png",
+  ContentID: EMAIL_HEADER_CID_URL,
+} as const;
 
 export class EmailSendError extends Error {
   constructor(message: string) {
@@ -69,9 +128,9 @@ export function emailBaseUrl(): string {
 }
 
 /**
- * The LIA email header banner, served from the app itself (client/public/ in
- * dev via Vite, the built dist/ in production). Email clients fetch it from
- * the same base URL every body link already uses.
+ * App-relative path for the LIA header banner (used only for routing, not for
+ * email image embedding — real sends use EMAIL_HEADER_CID_URL + EMAIL_HEADER_ATTACHMENT;
+ * previews use headerImageDataUri()).
  */
 export const EMAIL_HEADER_PATH = "/email-header.png";
 
@@ -100,6 +159,13 @@ export const MAY_HAVE_SENT_MARKER = "the provider MAY have sent this email";
  */
 const PROVIDER_TIMEOUT_MS = 60_000;
 
+export type EmailInlineAttachment = {
+  Name: string;
+  Content: string;
+  ContentType: string;
+  ContentID: string;
+};
+
 export type PendingDispatch = {
   emailLogId: string;
   toEmail: string;
@@ -107,6 +173,8 @@ export type PendingDispatch = {
   html: string;
   text?: string;
   replyTo?: string;
+  /** CID-referenced inline attachments (e.g. header logo). */
+  attachments?: readonly EmailInlineAttachment[];
 };
 
 export type DispatchOutcome =
@@ -158,6 +226,9 @@ export async function dispatchQueuedEmail(d: PendingDispatch): Promise<DispatchO
       HtmlBody: d.html,
       ...(d.text ? { TextBody: d.text } : {}),
       ...(d.replyTo ? { ReplyTo: d.replyTo } : {}),
+      // CID-referenced inline attachments (header logo and any others). Postmark
+      // embeds them inside the message so mail clients never need to fetch from the app.
+      ...(d.attachments?.length ? { Attachments: d.attachments as EmailInlineAttachment[] } : {}),
     });
 
     // Bounded provider call: past PROVIDER_TIMEOUT_MS the outcome is treated
@@ -255,6 +326,8 @@ export type SendEmailInput = {
   subject: string;
   html: string;
   text?: string;
+  /** CID-referenced inline attachments forwarded to the provider. */
+  attachments?: readonly EmailInlineAttachment[];
 };
 
 export type SendEmailResult =
@@ -281,6 +354,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     subject: input.subject,
     html: input.html,
     text: input.text,
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
   });
   if (outcome.outcome === "failed") {
     if (outcome.kind === "config") throw new EmailConfigError(outcome.error);
@@ -398,9 +472,10 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
   if (leftovers.length > 0) {
     throw new EmailConfigError(`${template.key}: literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
   }
-  // LIA header banner: swap the shell() slot for the absolute image URL.
-  // Throws (aborting the caller's transaction) if the slot is missing.
-  const html = finalizeHtml(rendered.html, absoluteUrl(EMAIL_HEADER_PATH));
+  // LIA header banner: embed via CID so mail clients never need to fetch
+  // from the app's origin. Throws (aborting the caller's transaction) if
+  // the shell() slot marker is missing from the rendered HTML.
+  const html = finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL);
 
   const entry = await emailLog.insertQueuedInTx(c, {
     templateKey: template.key,
@@ -416,6 +491,7 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
     subject: rendered.subject,
     html,
     text: rendered.text,
+    attachments: [EMAIL_HEADER_ATTACHMENT],
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
   };
 }
@@ -479,10 +555,11 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
     return block(`literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
   }
 
-  // LIA header banner: swap the shell() slot for the absolute image URL.
+  // LIA header banner: embed via CID so mail clients never need to fetch
+  // from the app's origin.
   let html: string;
   try {
-    html = finalizeHtml(rendered.html, absoluteUrl(EMAIL_HEADER_PATH));
+    html = finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return block(`header image injection failed: ${message}`);
@@ -496,6 +573,7 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
       subject: rendered.subject,
       html,
       text: rendered.text,
+      attachments: [EMAIL_HEADER_ATTACHMENT],
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     },
   };
