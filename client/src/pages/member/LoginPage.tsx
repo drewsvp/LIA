@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import { useLocation, useSearch } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
 
 const QUICK_LOGIN_ROLES = [
@@ -23,6 +24,7 @@ const QUICK_LOGIN_ROLES = [
 
 export function LoginPage(): ReactElement | null {
   const { session, isLoading } = useSession();
+  const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const search = useSearch();
   const [email, setEmail] = useState("");
@@ -112,6 +114,11 @@ export function LoginPage(): ReactElement | null {
         redirectTo?: string;
       } | null;
       if (res.ok) {
+        // The session cookie just changed identity: drop every cached query
+        // (session, dashboard data) so the app refetches as the NEW user.
+        // Without this, the UI keeps showing the previous user until a hard
+        // refresh.
+        queryClient.clear();
         setLocation(body?.redirectTo ?? "/dashboard", { replace: true });
         return;
       }
