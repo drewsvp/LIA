@@ -70,7 +70,7 @@ export function LoginPage(): ReactElement | null {
   return (
     <main className="mp1-page">
       <h1 className="mp1-heading">LOG IN</h1>
-      <p className="mp1-copy">Access for current database users.</p>
+      <p className="mp1-copy">Access for current Alliance members.</p>
       {sent ? (
         <p className="mp1-sent" role="status">
           Check your email for a link to log in.

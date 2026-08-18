@@ -358,9 +358,9 @@ h3 {
   color: var(--color-navy);
   font-weight: 700;
   font-size: 34px;
-  letter-spacing: 0.35em;
+  letter-spacing: 0.18em;
   margin: 0 0 6px;
-  padding-left: 0.35em; /* optical centering against the tracking */
+  padding-left: 0.18em; /* optical centering against the tracking */
 }
 .mp1-copy {
   color: var(--color-navy);
@@ -376,7 +376,8 @@ h3 {
   color: var(--color-teal);
   font-weight: 700;
   font-size: 19px;
-  margin: 0 0 8px 4px;
+  margin: 0 0 8px;
+  text-align: center;
 }
 .mp1-input {
   display: block;
