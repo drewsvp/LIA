@@ -423,6 +423,63 @@ h3 {
   }
 }
 
+/* ---- PB-06 About page ---- */
+/* Shared centered column for every body section, matching the width the
+   neighboring public sections use. Centering lives here so all three
+   sections sit on the same axis as the navy bands above and below. */
+.pb6-section {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 52px 20px;
+}
+.pb6-section h2 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-navy);
+  margin: 0 0 20px;
+  text-align: center;
+}
+.pb6-section p {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--color-text);
+  margin: 0 0 14px;
+}
+.pb6-section ul {
+  list-style: disc;
+  padding-left: 1.4em;
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--color-text);
+}
+.pb6-section li {
+  margin-bottom: 10px;
+}
+/* CTA row: the buttons are inline <Link>s centered by an inline style on the
+   wrapping <p>, so they need inline-block to honor .btn-teal's padding. */
+.pb6-section .btn-teal {
+  display: inline-block;
+  margin: 10px 6px 0;
+}
+/* Standard responsive 16:9 embed — padding-top holds the ratio so the video
+   scales with its column and never overflows on narrow screens. */
+.pb6-video-wrap {
+  position: relative;
+  padding-top: 56.25%;
+  width: 100%;
+  max-width: 720px;
+  margin: 28px auto 0;
+}
+.pb6-video-wrap iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 /* ---- Shared public page header image (PB-01, PB-03) ---- */
 .pb-page-header-img {
   display: block;
