@@ -71,7 +71,7 @@ export function emailBaseUrl(): string {
  * dev via Vite, the built dist/ in production). Email clients fetch it from
  * the same base URL every body link already uses.
  */
-const EMAIL_HEADER_PATH = "/email-header.png";
+export const EMAIL_HEADER_PATH = "/email-header.png";
 
 /** Absolute URL for an app path ("/admin/requests" → "https://…/admin/requests"). */
 export function absoluteUrl(path: string): string {

@@ -198,11 +198,21 @@ create policy organization_populations_system_staff_all on organization_populati
   with check (current_setting('app.context', true) in ('system','staff'));
 
 drop policy if exists organization_populations_public_member_select on organization_populations;
-create policy organization_populations_public_member_select on organization_populations for select
+-- Restates the parent org predicates (kept in lockstep with migration
+-- 0007_scope_public_child_policies.sql). Member context keeps its broader
+-- reach here: a member org reads populations for any approved member org,
+-- matching organizations_member_select.
+create policy organization_populations_public_member_select on organization_populations
+  for select
   using (
-    current_setting('app.context', true) in ('public','member')
-    and exists (select 1 from organizations o where o.id = org_id)
-    -- organizations' own policies scope which orgs are visible per context
+    current_setting('app.context', true) in ('public', 'member')
+    and exists (
+      select 1
+        from organizations o
+       where o.id = organization_populations.org_id
+         and o.kind = 'member_org'
+         and o.status = 'approved'
+    )
   );
 
 -- ---------------------------------------------------------------- item_requests
@@ -275,11 +285,22 @@ create policy items_system_staff_all on items
   with check (current_setting('app.context', true) in ('system','staff'));
 
 drop policy if exists items_public_select on items;
-create policy items_public_select on items for select
+-- Restates the parent predicates (kept in lockstep with migration
+-- 0007_scope_public_child_policies.sql): the child states its own scope so a
+-- future edit to item_requests_public_select cannot silently widen it.
+create policy items_public_select on items
+  for select
   using (
     current_setting('app.context', true) = 'public'
-    and exists (select 1 from item_requests r where r.id = item_request_id)
-    -- item_requests' public policy scopes which requests are visible
+    and exists (
+      select 1
+        from item_requests r
+        join organizations o on o.id = r.org_id
+       where r.id = items.item_request_id
+         and r.status in ('active', 'archived')
+         and o.kind = 'member_org'
+         and o.status = 'approved'
+    )
   );
 
 drop policy if exists items_member_all on items;
@@ -368,10 +389,21 @@ create policy volunteer_roles_system_staff_all on volunteer_roles
   with check (current_setting('app.context', true) in ('system','staff'));
 
 drop policy if exists volunteer_roles_public_select on volunteer_roles;
-create policy volunteer_roles_public_select on volunteer_roles for select
+-- Restates the parent predicates (kept in lockstep with migration
+-- 0007_scope_public_child_policies.sql).
+create policy volunteer_roles_public_select on volunteer_roles
+  for select
   using (
     current_setting('app.context', true) = 'public'
-    and exists (select 1 from volunteer_requests r where r.id = volunteer_request_id)
+    and exists (
+      select 1
+        from volunteer_requests r
+        join organizations o on o.id = r.org_id
+       where r.id = volunteer_roles.volunteer_request_id
+         and r.status in ('active', 'archived')
+         and o.kind = 'member_org'
+         and o.status = 'approved'
+    )
   );
 
 drop policy if exists volunteer_roles_member_all on volunteer_roles;

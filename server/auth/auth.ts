@@ -14,7 +14,8 @@ import { magicLink } from "better-auth/plugins";
 import { pool, SYSTEM } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as authProvider from "../dal/auth-provider";
-import { sendEmail } from "../email/send";
+import { sendEmail, absoluteUrl, EMAIL_HEADER_PATH } from "../email/send";
+import { finalizeHtml } from "../email/render";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
 
 /**
@@ -50,6 +51,8 @@ export const auth = betterAuth({
         const user = await usersDal.findByEmail(SYSTEM, email);
         if (!user || user.status === "disabled") return;
         const rendered = renderMagicLinkEmail({ firstName: user.firstName, url });
+        // LIA header banner: same slot-swap the product path uses (send.ts).
+        const html = finalizeHtml(rendered.html, absoluteUrl(EMAIL_HEADER_PATH));
         await sendEmail({
           templateKey: "auth_magic_link",
           toEmail: email,
@@ -59,7 +62,7 @@ export const auth = betterAuth({
           entityId: null,
           payload: { userId: user.id },
           subject: rendered.subject,
-          html: rendered.html,
+          html,
           text: rendered.text,
         });
       },

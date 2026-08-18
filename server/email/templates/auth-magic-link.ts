@@ -2,7 +2,12 @@
  * Magic-link login email. This is new auth infrastructure (D40 replaced the
  * legacy password flow), so it has no captured legacy copy; wording is
  * intentionally minimal. Design tokens from docs/Design.md.
+ *
+ * Carries the shared LIA header banner slot: like the product templates, the
+ * html embeds HEADER_IMAGE_MARKER and the caller (auth.ts) swaps in the
+ * absolute image URL via finalizeHtml() before sending.
  */
+import { HEADER_IMAGE_MARKER } from "../render";
 
 export type MagicLinkEmailVars = {
   firstName: string;
@@ -25,6 +30,7 @@ export function renderMagicLinkEmail(vars: MagicLinkEmailVars): { subject: strin
 <html>
   <body style="margin:0;padding:24px;background:#f5f5f5;font-family:'Open Sans',Arial,sans-serif;color:#333333;">
     <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:5px;padding:32px;">
+      ${HEADER_IMAGE_MARKER}
       <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:rgb(6,54,93);">Sign in to Love in Action</h1>
       <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">Hi ${escapeHtml(vars.firstName)},</p>
       <p style="margin:0 0 24px;font-size:14px;line-height:1.6;">

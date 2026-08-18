@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict DSRamKoJxIf6x5bjGidcpu15iJnAxpg869mXEav2YXa2SprtA25K9qr7Rn3epFH
+\restrict fBPqRnA8kJdeeOCFTIh6jFnVWEg1Di4vxIqQROeuxLjd3jGkk1ok0Q52s62KsSq
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -33,6 +33,85 @@ COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
 
 
 --
+-- Name: guard_counter_columns(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_counter_columns() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if current_setting('app.counter_write', true) = 'on' then
+    return new;
+  end if;
+
+  if tg_table_name = 'items'
+     and new.quantity_claimed is distinct from old.quantity_claimed then
+    raise exception
+      'items.quantity_claimed is written only by record_item_pledge()';
+  end if;
+
+  if tg_table_name = 'volunteer_roles'
+     and new.quantity_interested is distinct from old.quantity_interested then
+    raise exception
+      'volunteer_roles.quantity_interested is written only by record_volunteer_signup()';
+  end if;
+
+  return new;
+end;
+$$;
+
+
+--
+-- Name: guard_member_request_transitions(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_member_request_transitions() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if current_setting('app.context', true) is distinct from 'member' then
+    return new;
+  end if;
+
+  if new.org_id is distinct from old.org_id then
+    raise exception 'member_cannot_move_request_between_orgs';
+  end if;
+
+  if new.approved_at is distinct from old.approved_at
+     or new.approved_by is distinct from old.approved_by then
+    raise exception 'member_cannot_set_approval_fields';
+  end if;
+
+  if new.status is distinct from old.status then
+    if (old.status, new.status) not in
+         (('draft','pending'), ('pending','draft'), ('active','archived')) then
+      raise exception 'member_status_transition_not_allowed: % -> %',
+        old.status, new.status;
+    end if;
+
+    if old.status = 'draft' then
+      new.submitted_at := coalesce(new.submitted_at, now());
+    end if;
+
+    if new.status = 'archived' then
+      new.archived_at     := coalesce(new.archived_at, now());
+      new.archived_reason := 'manual';
+    end if;
+
+    -- Every status transition writes an event, including this one.
+    insert into approval_events
+      (entity_type, entity_id, from_status, to_status, actor_user_id)
+    values
+      (tg_argv[0], new.id, old.status, new.status,
+       nullif(current_setting('app.user_id', true), '')::uuid);
+  end if;
+
+  return new;
+end;
+$$;
+
+
+--
 -- Name: merge_people(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -48,6 +127,8 @@ declare
   n_email int;
   n_item_req_contacts int;
   n_vol_req_contacts int;
+  v_actor uuid;
+  v_note text;
 begin
   if p_duplicate is null or p_survivor is null then
     raise exception 'merge_people: both ids are required';
@@ -56,8 +137,6 @@ begin
     raise exception 'merge_people: duplicate and survivor are the same row';
   end if;
 
-  -- Lock both rows in id order, so two concurrent merges touching the same
-  -- pair cannot deadlock regardless of call direction.
   perform 1 from people where id = least(p_duplicate, p_survivor) for update;
   if not found then
     raise exception 'merge_people: person % not found', least(p_duplicate, p_survivor);
@@ -67,14 +146,19 @@ begin
     raise exception 'merge_people: person % not found', greatest(p_duplicate, p_survivor);
   end if;
 
-  -- Defense in depth behind the app-side pre-check (§12): users.person_id
-  -- is unique — two login accounts cannot collapse into one person row.
-  -- The app renders the readable reason; this guard makes the invariant
-  -- hold even for a caller that skipped the pre-check.
   if exists (select 1 from users where person_id = p_duplicate)
      and exists (select 1 from users where person_id = p_survivor) then
     raise exception 'merge_people: both records have login accounts';
   end if;
+
+  -- Capture identifying detail before the row is gone, so the audit row still
+  -- means something once the person no longer exists.
+  select format('Merged %s %s <%s> (%s) into %s.',
+                first_name, last_name, email, id, p_survivor)
+    into v_note
+    from people where id = p_duplicate;
+
+  v_actor := nullif(current_setting('app.user_id', true), '')::uuid;
 
   update item_pledges set person_id = p_survivor where person_id = p_duplicate;
   get diagnostics n_pledges = row_count;
@@ -101,6 +185,13 @@ begin
   update volunteer_requests set contact_person_id = p_survivor where contact_person_id = p_duplicate;
   get diagnostics n_vol_req_contacts = row_count;
 
+  -- Written before the delete: approval_events.entity_id is not a foreign key,
+  -- but ordering keeps the row correct even if that ever changes.
+  insert into approval_events
+    (entity_type, entity_id, from_status, to_status, actor_user_id, note)
+  values
+    ('person', p_duplicate, 'duplicate', 'merged', v_actor, v_note);
+
   delete from people where id = p_duplicate;
 
   return jsonb_build_object(
@@ -112,7 +203,7 @@ begin
     'emailLogEntries', n_email,
     'itemRequestContacts', n_item_req_contacts,
     'volunteerRequestContacts', n_vol_req_contacts);
-end
+end;
 $$;
 
 
@@ -136,8 +227,15 @@ declare
   v_match_list        text;
   v_needs_review      boolean := false;
   v_review_note       text;
+  v_prior_context     text;
 begin
-  -- Lock the request first, so an archive racing a pledge resolves one way.
+  -- This function is called from the public pledge flow, where app.context is
+  -- 'public' and people has no public policy. Run the body as system and put
+  -- the caller's context back before returning, so the escalation is bounded
+  -- by this function rather than by the surrounding transaction.
+  v_prior_context := coalesce(current_setting('app.context', true), '');
+  perform set_config('app.context', 'system', true);
+
   select status into v_status from item_requests where id = p_request_id for update;
   if v_status is null then
     raise exception 'request_not_found';
@@ -150,12 +248,10 @@ begin
     raise exception 'no_lines';
   end if;
 
-  -- One human is one row, keyed by email. Names update in place on a match.
   select id into v_person_id from people where lower(email) = lower(p_email);
   if v_person_id is null then
     v_phone_digits := regexp_replace(coalesce(nullif(trim(p_phone), ''), ''), '[^0-9]', '', 'g');
     if v_phone_digits <> '' then
-      -- Name the actual suspected duplicate(s) — all of them, oldest first.
       select count(*),
              string_agg(
                format('%s %s <%s> (%s)', first_name, last_name, email, id),
@@ -204,8 +300,6 @@ begin
       raise exception 'invalid_quantity';
     end if;
 
-    -- Row lock: this is what makes two simultaneous claims on the last unit
-    -- resolve to one success and one insufficient_quantity.
     select quantity_remaining into v_remaining
       from items
      where id = v_item_id and item_request_id = p_request_id
@@ -221,13 +315,13 @@ begin
     insert into item_pledge_lines (item_pledge_id, item_id, quantity)
     values (v_pledge_id, v_item_id, v_qty);
 
+    perform set_config('app.counter_write', 'on', true);
     update items
        set quantity_claimed = quantity_claimed + v_qty
      where id = v_item_id;
+    perform set_config('app.counter_write', 'off', true);
   end loop;
 
-  -- A fully claimed request archives itself, and the transition is audited
-  -- like any other. Null actor: no human did this.
   if not exists (
     select 1 from items
      where item_request_id = p_request_id and quantity_remaining > 0
@@ -242,6 +336,7 @@ begin
     values ('item_request', p_request_id, 'active', 'archived', 'fulfilled');
   end if;
 
+  perform set_config('app.context', v_prior_context, true);
   return v_pledge_id;
 end;
 $$;
@@ -265,7 +360,12 @@ declare
   v_match_list        text;
   v_needs_review      boolean := false;
   v_review_note       text;
+  v_prior_context     text;
 begin
+  -- See the note in record_item_pledge(). Same reason, same bounded escalation.
+  v_prior_context := coalesce(current_setting('app.context', true), '');
+  perform set_config('app.context', 'system', true);
+
   select status into v_status from volunteer_requests where id = p_request_id for update;
   if v_status is null then
     raise exception 'request_not_found';
@@ -282,7 +382,6 @@ begin
   if v_person_id is null then
     v_phone_digits := regexp_replace(coalesce(nullif(trim(p_phone), ''), ''), '[^0-9]', '', 'g');
     if v_phone_digits <> '' then
-      -- Name the actual suspected duplicate(s) — all of them, oldest first.
       select count(*),
              string_agg(
                format('%s %s <%s> (%s)', first_name, last_name, email, id),
@@ -339,16 +438,14 @@ begin
     insert into volunteer_signup_roles (volunteer_signup_id, volunteer_role_id)
     values (v_signup_id, v_role_id);
 
+    perform set_config('app.counter_write', 'on', true);
     update volunteer_roles
        set quantity_interested = quantity_interested + 1
      where id = v_role_id;
+    perform set_config('app.counter_write', 'off', true);
   end loop;
 
-  -- Volunteer requests do NOT auto-archive when every role fills. Interest is
-  -- not commitment: people who express interest do not always follow through,
-  -- and an organization still wants to hear from someone after a role fills up.
-  -- Archiving on the volunteer side is manual or by expiry only.
-
+  perform set_config('app.context', v_prior_context, true);
   return v_signup_id;
 end;
 $$;
@@ -569,10 +666,17 @@ CREATE TABLE public.email_log (
     error text,
     sent_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT email_log_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sent'::text, 'failed'::text])))
+    CONSTRAINT email_log_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'failed'::text])))
 );
 
 ALTER TABLE ONLY public.email_log FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: COLUMN email_log.status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.email_log.status IS 'queued → sending (dispatch claim, set before the provider call) → sent/failed. A row stranded in sending means the process stopped mid-send: the sweep marks it failed rather than risking a double send.';
 
 
 --
@@ -1375,10 +1479,24 @@ CREATE TRIGGER item_pledges_set_updated_at BEFORE UPDATE ON public.item_pledges 
 
 
 --
+-- Name: item_requests item_requests_guard_member_transitions; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER item_requests_guard_member_transitions BEFORE UPDATE ON public.item_requests FOR EACH ROW EXECUTE FUNCTION public.guard_member_request_transitions('item_request');
+
+
+--
 -- Name: item_requests item_requests_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER item_requests_set_updated_at BEFORE UPDATE ON public.item_requests FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: items items_guard_counters; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER items_guard_counters BEFORE UPDATE ON public.items FOR EACH ROW EXECUTE FUNCTION public.guard_counter_columns();
 
 
 --
@@ -1417,10 +1535,24 @@ CREATE TRIGGER users_set_updated_at BEFORE UPDATE ON public.users FOR EACH ROW E
 
 
 --
+-- Name: volunteer_requests volunteer_requests_guard_member_transitions; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER volunteer_requests_guard_member_transitions BEFORE UPDATE ON public.volunteer_requests FOR EACH ROW EXECUTE FUNCTION public.guard_member_request_transitions('volunteer_request');
+
+
+--
 -- Name: volunteer_requests volunteer_requests_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER volunteer_requests_set_updated_at BEFORE UPDATE ON public.volunteer_requests FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: volunteer_roles volunteer_roles_guard_counters; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER volunteer_roles_guard_counters BEFORE UPDATE ON public.volunteer_roles FOR EACH ROW EXECUTE FUNCTION public.guard_counter_columns();
 
 
 --
@@ -1700,6 +1832,13 @@ ALTER TABLE ONLY public.volunteer_signups
 ALTER TABLE public.approval_events ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: approval_events approval_events_member_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY approval_events_member_insert ON public.approval_events FOR INSERT WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (entity_type = ANY (ARRAY['item_request'::text, 'volunteer_request'::text]))));
+
+
+--
 -- Name: approval_events approval_events_system_staff_all; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -1858,8 +1997,9 @@ CREATE POLICY items_member_all ON public.items USING (((current_setting('app.con
 --
 
 CREATE POLICY items_public_select ON public.items FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (EXISTS ( SELECT 1
-   FROM public.item_requests r
-  WHERE (r.id = items.item_request_id)))));
+   FROM (public.item_requests r
+     JOIN public.organizations o ON ((o.id = r.org_id)))
+  WHERE ((r.id = items.item_request_id) AND (r.status = ANY (ARRAY['active'::text, 'archived'::text])) AND (o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
 
 
 --
@@ -1901,7 +2041,7 @@ ALTER TABLE public.organization_populations ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY organization_populations_public_member_select ON public.organization_populations FOR SELECT USING (((current_setting('app.context'::text, true) = ANY (ARRAY['public'::text, 'member'::text])) AND (EXISTS ( SELECT 1
    FROM public.organizations o
-  WHERE (o.id = organization_populations.org_id)))));
+  WHERE ((o.id = organization_populations.org_id) AND (o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
 
 
 --
@@ -2104,8 +2244,9 @@ CREATE POLICY volunteer_roles_member_all ON public.volunteer_roles USING (((curr
 --
 
 CREATE POLICY volunteer_roles_public_select ON public.volunteer_roles FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_requests r
-  WHERE (r.id = volunteer_roles.volunteer_request_id)))));
+   FROM (public.volunteer_requests r
+     JOIN public.organizations o ON ((o.id = r.org_id)))
+  WHERE ((r.id = volunteer_roles.volunteer_request_id) AND (r.status = ANY (ARRAY['active'::text, 'archived'::text])) AND (o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
 
 
 --
@@ -2168,5 +2309,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict DSRamKoJxIf6x5bjGidcpu15iJnAxpg869mXEav2YXa2SprtA25K9qr7Rn3epFH
+\unrestrict fBPqRnA8kJdeeOCFTIh6jFnVWEg1Di4vxIqQROeuxLjd3jGkk1ok0Q52s62KsSq
 

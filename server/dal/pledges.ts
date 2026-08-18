@@ -5,7 +5,7 @@
  * auto-archives a fully claimed request with its approval event. The DAL
  * never updates counters itself (replit.md rule 2).
  */
-import { q, withDbContext, SYSTEM, type DbContext } from "../db/client";
+import { q, withDbContext, type DbContext } from "../db/client";
 import type { ItemPledge, PledgeWithSupporter } from "../../shared/types";
 
 const COLS = `ip.id, ip.legacy_wix_id as "legacyWixId", ip.person_id as "personId",
@@ -60,16 +60,18 @@ function toPledgeError(err: unknown): PledgeError | null {
 }
 
 /**
- * Record a pledge through the SQL function. Runs in system context regardless
- * of caller — the function itself revalidates everything under row locks, and
- * public browsers have no direct write access by design. Concurrency-safe:
- * a competing pledge that empties an item makes this throw
- * PledgeError('insufficient_quantity') — show the refreshed quantities.
+ * Record a pledge through the SQL function, under the caller's context.
+ * record_item_pledge() manages its own escalation internally (migration
+ * 0006): it runs its body as system and restores the caller's context
+ * before returning, and it revalidates everything under row locks.
+ * Concurrency-safe: a competing pledge that empties an item makes this
+ * throw PledgeError('insufficient_quantity') — show the refreshed
+ * quantities.
  */
-export async function recordItemPledge(_ctx: DbContext, input: RecordItemPledgeInput): Promise<{ pledgeId: string }> {
+export async function recordItemPledge(ctx: DbContext, input: RecordItemPledgeInput): Promise<{ pledgeId: string }> {
   const lines = input.lines.map((l) => ({ item_id: l.itemId, quantity: l.quantity }));
   try {
-    const rows = await withDbContext(SYSTEM, (c) =>
+    const rows = await withDbContext(ctx, (c) =>
       q<{ pledgeId: string }>(
         c,
         `select record_item_pledge($1, $2, $3, $4, $5, $6, $7::jsonb) as "pledgeId"`,

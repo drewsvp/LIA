@@ -4,7 +4,7 @@
  * roles, revalidates capacity, upserts the person, and moves
  * quantity_interested. Signups never auto-archive a request.
  */
-import { q, withDbContext, SYSTEM, type DbContext } from "../db/client";
+import { q, withDbContext, type DbContext } from "../db/client";
 import type { SignupWithSupporter, VolunteerSignup } from "../../shared/types";
 
 const COLS = `vs.id, vs.legacy_wix_id as "legacyWixId", vs.person_id as "personId",
@@ -58,16 +58,19 @@ function toSignupError(err: unknown): SignupError | null {
 }
 
 /**
- * Record a signup through the SQL function. Runs in system context regardless
- * of caller; the function revalidates capacity under row locks. A competing
- * signup that fills a role makes this throw SignupError('role_full').
+ * Record a signup through the SQL function, under the caller's context.
+ * record_volunteer_signup() manages its own escalation internally
+ * (migration 0006): it runs its body as system and restores the caller's
+ * context before returning, and it revalidates capacity under row locks.
+ * A competing signup that fills a role makes this throw
+ * SignupError('role_full').
  */
 export async function recordVolunteerSignup(
-  _ctx: DbContext,
+  ctx: DbContext,
   input: RecordVolunteerSignupInput,
 ): Promise<{ signupId: string }> {
   try {
-    const rows = await withDbContext(SYSTEM, (c) =>
+    const rows = await withDbContext(ctx, (c) =>
       q<{ signupId: string }>(
         c,
         `select record_volunteer_signup($1, $2, $3, $4, $5, $6, $7::uuid[]) as "signupId"`,
