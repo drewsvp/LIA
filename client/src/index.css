@@ -643,12 +643,12 @@ a.site-nav-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #ffffff;
+  color: var(--color-navy);
   font-size: 12px;
   font-weight: 700;
   font-family: inherit;
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.45);
+  border: 1px solid var(--color-navy);
   border-radius: var(--radius-card);
   padding: 6px 10px;
   cursor: pointer;
@@ -656,7 +656,7 @@ a.site-nav-btn {
 }
 .site-nav-user-trigger:hover,
 .site-nav-user-trigger:focus-visible {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(16, 42, 67, 0.08);
 }
 .site-nav-user-avatar {
   width: 16px;
