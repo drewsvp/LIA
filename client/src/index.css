@@ -230,6 +230,12 @@ h3 {
   display: block;
   width: 100%;
   height: auto;
+  /* Trim 50px of visible area off the top and bottom without scaling or
+     cropping the source image: clip it, then pull the layout back in by the
+     same amount so the hero section is 100px shorter. */
+  clip-path: inset(50px 0 50px 0);
+  margin-top: -50px;
+  margin-bottom: -50px;
 }
 .pb0-content {
   max-width: 760px;
