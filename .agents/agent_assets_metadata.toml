@@ -56,3 +56,45 @@ mtime_ms = 1787094633719
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/2905a9e6-0409-4bfe-9690-0151ab8de5c4/7ad83aae-720a-4538-8f6d-d61d09293bde"
 storage_version_token = "1787094663665400"
 content_type = "image/png"
+
+[[outputs]]
+id = "xly76SLWDY5akNJu2LjT5"
+uri = "file://.agents/outputs/og/og-d1-wash.png"
+type = "image"
+title = "Open Graph option D1"
+description = "Photo at full sharpness under an even light wash; logo sits directly on the image with no panel. Most detail, slightly busier behind the script."
+logical_id = "6d8cf76e-4a73-4883-b025-f37314626bcd"
+content_hash = "sha256:2ba52f88cea32eaad47cee4f545cf13ce970be8888faa0bd6ff3bf7523eec06a"
+size = 657638
+mtime_ms = 1787094778659
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/6d8cf76e-4a73-4883-b025-f37314626bcd/54b1f670-8063-430d-808a-80a63c19fe64"
+storage_version_token = "1787094800259584"
+content_type = "image/png"
+
+[[outputs]]
+id = "dClIcU3oG6tLdEc4wgEVA"
+uri = "file://.agents/outputs/og/og-d2-glow.png"
+type = "image"
+title = "Open Graph option D2"
+description = "Lighter overall wash with a soft glow centered behind the mark, so the logo separates without a hard-edged box. Photo stays sharp at the corners."
+logical_id = "7f5e3cef-0b88-4536-a0e7-4558e4c9375e"
+content_hash = "sha256:fc22fe2f77e61f5b61b155a638eb2dd8bb8e1fa5470708215a5f68836505ed81"
+size = 571279
+mtime_ms = 1787094779731
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/7f5e3cef-0b88-4536-a0e7-4558e4c9375e/d5d65253-6cae-4658-b8f7-6dd57bf13bcc"
+storage_version_token = "1787094800852320"
+content_type = "image/png"
+
+[[outputs]]
+id = "itgbl6xnzSqau-U5uHU2l"
+uri = "file://.agents/outputs/og/og-d3-blur.png"
+type = "image"
+title = "Open Graph option D3"
+description = "Photo softly blurred behind the wash — the calmest background and the cleanest read of the logo at thumbnail size."
+logical_id = "6c7a9779-f3a0-41da-a07e-e817d36a31f1"
+content_hash = "sha256:b88fb420fbedb29d01e061837bb53a82ca2cd22cf0e54ac5b672d9bdeffec067"
+size = 383668
+mtime_ms = 1787094780739
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/6c7a9779-f3a0-41da-a07e-e817d36a31f1/31d3823d-3404-456d-94ec-79b5017b7cba"
+storage_version_token = "1787094801504250"
+content_type = "image/png"
