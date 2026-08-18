@@ -6,7 +6,7 @@
  * authentication infrastructure, view-only. Saving refuses with a stated
  * error when a required placeholder is missing — the server validates too.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
@@ -68,6 +68,10 @@ export function EmailTemplatesPage(): ReactElement {
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  // Incremented each time the selected template changes so stale in-flight
+  // responses from a previous selection are discarded on arrival.
+  const previewGenRef = useRef(0);
 
   const templates = data?.templates ?? [];
   const selected = templates.find((t) => t.key === selectedKey) ?? null;
@@ -77,29 +81,44 @@ export function EmailTemplatesPage(): ReactElement {
     setMessage(null);
     setErrors([]);
     setPreview(null);
+    setPreviewing(false);
     if (!selected) {
       setDraft(null);
       return;
     }
     setDraft({ ...selected.copy, paragraphs: [...selected.copy.paragraphs] });
     setDraftRecipients(selected.recipientsOverride ?? "");
+
+    const gen = ++previewGenRef.current;
     void postJson(`/api/admin/email-templates/${selected.key}/preview`, {}).then(({ ok, data: body }) => {
+      if (previewGenRef.current !== gen) return; // stale — a different template was selected
       if (ok) setPreview(body as PreviewResponse);
+      // silently ignore errors on the initial auto-load; the user can click Preview to retry
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, data]);
 
   async function refreshPreview(): Promise<void> {
-    if (!selected || !draft) return;
+    if (!selected || !draft || previewing) return;
     setErrors([]);
-    const { ok, data: body } = await postJson(`/api/admin/email-templates/${selected.key}/preview`, {
-      copy: selected.authInfrastructure ? undefined : draft,
-    });
-    if (ok) {
-      setPreview(body as PreviewResponse);
-    } else {
-      const b = body as { errors?: string[]; message?: string } | null;
-      setErrors(b?.errors ?? [b?.message ?? "The preview could not be rendered."]);
+    setPreviewing(true);
+    const gen = ++previewGenRef.current;
+    try {
+      const { ok, data: body } = await postJson(`/api/admin/email-templates/${selected.key}/preview`, {
+        copy: selected.authInfrastructure ? undefined : draft,
+      });
+      if (previewGenRef.current !== gen) return; // stale — template switched while request was in flight
+      if (ok) {
+        setPreview(body as PreviewResponse);
+      } else {
+        const b = body as { errors?: string[]; message?: string } | null;
+        setErrors(b?.errors ?? [b?.message ?? "The preview could not be rendered."]);
+      }
+    } catch {
+      if (previewGenRef.current !== gen) return;
+      setErrors(["The preview could not be loaded. Check your connection and try again."]);
+    } finally {
+      if (previewGenRef.current === gen) setPreviewing(false);
     }
   }
 
@@ -294,8 +313,8 @@ export function EmailTemplatesPage(): ReactElement {
                   <button type="button" className="adm-btn" disabled={saving} onClick={() => void save(false)}>
                     {saving ? "Saving…" : "Save"}
                   </button>
-                  <button type="button" className="adm-btn-outline" onClick={() => void refreshPreview()}>
-                    Preview these edits
+                  <button type="button" className="adm-btn-outline" disabled={previewing} onClick={() => void refreshPreview()}>
+                    {previewing ? "Loading preview…" : "Preview these edits"}
                   </button>
                   {selected.hasCopyOverride && (
                     <button type="button" className="adm-btn-outline" disabled={saving} onClick={() => void save(true)}>
