@@ -27,10 +27,16 @@ export const queryClient = new QueryClient({
 });
 
 /** JSON request helper for mutations. Throws on non-2xx with the body text. */
-export async function apiRequest(method: string, url: string, body?: unknown): Promise<Response> {
+export async function apiRequest(
+  method: string,
+  url: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<Response> {
   const res = await fetch(url, {
     method,
     credentials: "include",
+    signal,
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

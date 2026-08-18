@@ -65,7 +65,9 @@ function NavUserMenu({ firstName }: { firstName: string }): ReactElement {
     setBusy(true);
     setError(null);
     try {
-      await apiRequest("POST", "/api/auth/sign-out", {});
+      // Timeout so a dead/restarting server yields a stated error instead of
+      // an infinite "Logging out…" spinner.
+      await apiRequest("POST", "/api/auth/sign-out", {}, AbortSignal.timeout(10_000));
       queryClient.clear();
       navigate("/login");
     } catch {

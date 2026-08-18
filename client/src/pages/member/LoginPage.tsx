@@ -106,6 +106,9 @@ export function LoginPage(): ReactElement | null {
       const res = await fetch("/api/login/quick", {
         method: "POST",
         credentials: "include",
+        // Timeout so a dead/restarting server yields a stated error instead
+        // of a button spinner that never resolves.
+        signal: AbortSignal.timeout(10_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role }),
       });
