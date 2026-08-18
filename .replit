@@ -14,6 +14,9 @@ EMAIL_FROM_NAME = "Love in Action"
 STAFF_NOTIFY_PRIMARY = "tiffany@defendingthecause.org"
 STAFF_NOTIFY_SECONDARY = "christina@defendingthecause.org"
 
+[userenv.production]
+APP_BASE_URL = "https://alliance-lia.replit.app"
+
 [workflows]
 runButton = "Project"
 
