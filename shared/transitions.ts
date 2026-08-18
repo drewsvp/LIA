@@ -43,6 +43,18 @@ const MEMBERSHIP_LABELS: Record<string, string> = {
   "removed:pending": "Reinstated",
 };
 
+const ROLE_NAMES: Record<string, string> = {
+  owner: "Owner",
+  member: "Member",
+  staff_admin: "Staff admin",
+  staff_approver: "Staff approver",
+};
+
+function roleName(status: string): string {
+  const slug = status.startsWith("role:") ? status.slice(5) : status;
+  return ROLE_NAMES[slug] ?? slug;
+}
+
 export function transitionLabel(
   entityType: string,
   fromStatus: string | null,
@@ -64,6 +76,13 @@ export function transitionLabel(
     if (label !== undefined) return label;
   }
   if (entityType === "org_membership") {
+    // Role changes: both statuses carry the "role:" prefix.
+    if (toStatus.startsWith("role:")) {
+      if (fromStatus !== null && fromStatus.startsWith("role:")) {
+        return `Role changed from ${roleName(fromStatus)} to ${roleName(toStatus)}`;
+      }
+      return `Role set to ${roleName(toStatus)}`;
+    }
     const label = MEMBERSHIP_LABELS[key];
     if (label !== undefined) return label;
   }
