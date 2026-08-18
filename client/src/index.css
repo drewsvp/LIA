@@ -492,6 +492,15 @@ h3 {
   font-size: 13px;
   margin: 10px 0 0;
 }
+.mp1-quick-seed-warning {
+  font-size: 13px;
+  color: #7a5c00;
+  background: #fffae6;
+  border: 1px solid #e6d07a;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 8px 0 0;
+}
 
 /* ---- MP-02 Global navigation ---- */
 .site-nav {

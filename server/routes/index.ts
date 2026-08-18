@@ -28,6 +28,37 @@ import { registerAdminRoutes } from "./admin";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// ---------------------------------------------------------------------------
+// Quick-login configuration — module-level so startup checks can use it
+// without going through a request.
+// ---------------------------------------------------------------------------
+
+const QUICK_LOGIN_ACCOUNTS: Record<string, { email: string; label: string }> = {
+  staff_admin: { email: "tiffany@defendingthecause.org", label: "Staff Admin (Tiffany)" },
+  staff_approver: { email: "approver@thealliance.example.org", label: "Staff Approver (Riley)" },
+  org_owner: { email: "dana@heartsandhands.example.org", label: "Org Owner (Dana)" },
+};
+
+function isQuickLoginEnabled(): boolean {
+  return process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true";
+}
+
+/**
+ * Checks whether all quick-login seed accounts exist and are active.
+ * Returns the list of missing account labels so callers can surface a
+ * helpful message directing developers to run the seed script.
+ */
+export async function checkQuickLoginSeed(): Promise<{ seeded: boolean; missing: string[] }> {
+  const missing: string[] = [];
+  for (const acct of Object.values(QUICK_LOGIN_ACCOUNTS)) {
+    const user = await usersDal.findByEmail(SYSTEM, acct.email);
+    if (!user || user.status !== "active") {
+      missing.push(acct.label);
+    }
+  }
+  return { seeded: missing.length === 0, missing };
+}
+
 export function registerRoutes(app: Express): void {
   // ---- Better Auth handler. Mounted before body parsers (it reads its own body).
   app.all("/api/auth/*", toNodeHandler(auth));
@@ -66,7 +97,7 @@ export function registerRoutes(app: Express): void {
       });
   });
 
-  // ---- Quick Login (seeded test accounts only — hardcoded allowlist).
+  // ---- Quick Login (seeded test accounts only — see module-level allowlist).
   //
   // Disabled by default. Enabled when NODE_ENV=development OR the deployer has
   // explicitly set QUICK_LOGIN_ENABLED=true. When disabled every request to
@@ -76,23 +107,16 @@ export function registerRoutes(app: Express): void {
   // Token generation bypasses the email-send path entirely: a one-off
   // verification row is written directly to the DB (same schema Better Auth
   // uses) and immediately consumed via magicLinkVerify. No email is dispatched.
-  const QUICK_LOGIN_ACCOUNTS: Record<string, { email: string; label: string }> = {
-    staff_admin: { email: "tiffany@defendingthecause.org", label: "Staff Admin (Tiffany)" },
-    staff_approver: { email: "approver@thealliance.example.org", label: "Staff Approver (Riley)" },
-    org_owner: { email: "dana@heartsandhands.example.org", label: "Org Owner (Dana)" },
-  };
 
-  function isQuickLoginEnabled(): boolean {
-    return process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true";
-  }
-
-  // Status endpoint — lets the client know whether to show the quick-login UI.
-  app.get("/api/login/quick/status", (_req: Request, res: Response) => {
+  // Status endpoint — lets the client know whether to show the quick-login UI
+  // and whether the seed accounts are present.
+  app.get("/api/login/quick/status", async (_req: Request, res: Response) => {
     if (!isQuickLoginEnabled()) {
       res.status(404).json(NOT_FOUND_BODY);
       return;
     }
-    res.json({ enabled: true });
+    const { seeded, missing } = await checkQuickLoginSeed();
+    res.json({ enabled: true, seeded, missing });
   });
 
   app.post("/api/login/quick", async (req: Request, res: Response) => {

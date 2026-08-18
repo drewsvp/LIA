@@ -31,8 +31,10 @@ export function LoginPage(): ReactElement | null {
   const [formError, setFormError] = useState<string | null>(null);
   const [quickLoading, setQuickLoading] = useState<string | null>(null);
   const [quickError, setQuickError] = useState<string | null>(null);
-  // null = checking, false = disabled/unavailable, true = enabled
+  // null = checking; false = disabled/unavailable; true = enabled
   const [quickEnabled, setQuickEnabled] = useState<boolean | null>(null);
+  // true = all seed accounts present; false = seed not yet run
+  const [quickSeeded, setQuickSeeded] = useState<boolean>(true);
 
   const linkError = new URLSearchParams(search).has("error");
 
@@ -49,7 +51,15 @@ export function LoginPage(): ReactElement | null {
     // when disabled (not development and QUICK_LOGIN_ENABLED !== true), so the
     // UI section only appears when the server has opted in.
     fetch("/api/login/quick/status", { credentials: "include" })
-      .then((r) => setQuickEnabled(r.ok))
+      .then(async (r) => {
+        if (!r.ok) {
+          setQuickEnabled(false);
+          return;
+        }
+        const body = (await r.json().catch(() => null)) as { seeded?: boolean } | null;
+        setQuickEnabled(true);
+        setQuickSeeded(body?.seeded !== false);
+      })
       .catch(() => setQuickEnabled(false));
   }, []);
 
@@ -158,24 +168,33 @@ export function LoginPage(): ReactElement | null {
       {quickEnabled ? (
         <section className="mp1-quick-section" aria-label="Quick login — test accounts">
           <p className="mp1-quick-heading">Quick Login — test accounts</p>
-          <div className="mp1-quick-buttons">
-            {QUICK_LOGIN_ROLES.map(({ role, label, name }) => (
-              <button
-                key={role}
-                className="mp1-quick-btn"
-                type="button"
-                disabled={quickLoading !== null}
-                onClick={() => void handleQuickLogin(role)}
-              >
-                {quickLoading === role ? "Signing in…" : `${label} — ${name}`}
-              </button>
-            ))}
-          </div>
-          {quickError ? (
-            <p className="mp1-quick-error" role="alert">
-              {quickError}
+          {quickSeeded ? (
+            <>
+              <div className="mp1-quick-buttons">
+                {QUICK_LOGIN_ROLES.map(({ role, label, name }) => (
+                  <button
+                    key={role}
+                    className="mp1-quick-btn"
+                    type="button"
+                    disabled={quickLoading !== null}
+                    onClick={() => void handleQuickLogin(role)}
+                  >
+                    {quickLoading === role ? "Signing in…" : `${label} — ${name}`}
+                  </button>
+                ))}
+              </div>
+              {quickError ? (
+                <p className="mp1-quick-error" role="alert">
+                  {quickError}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="mp1-quick-seed-warning" role="status">
+              Seed not yet run — test accounts are unavailable.{" "}
+              <code>npm run db:seed</code>
             </p>
-          ) : null}
+          )}
         </section>
       ) : null}
     </main>

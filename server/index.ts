@@ -5,7 +5,7 @@
 import http from "node:http";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cookieParser from "cookie-parser";
-import { registerRoutes } from "./routes/index";
+import { registerRoutes, checkQuickLoginSeed } from "./routes/index";
 import { startExpiryScheduler } from "./jobs/expiry";
 import { startEmailSweep } from "./jobs/email-sweep";
 import { setupVite, serveStatic } from "./vite";
@@ -80,6 +80,22 @@ async function start(): Promise<void> {
   });
   startExpiryScheduler();
   startEmailSweep();
+
+  // Startup check: warn if quick login is enabled but seed accounts are missing.
+  if (process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true") {
+    checkQuickLoginSeed()
+      .then(({ seeded, missing }) => {
+        if (!seeded) {
+          console.warn(
+            `[quick-login] ⚠  Seed accounts missing: ${missing.join(", ")}.\n` +
+              `             Quick login buttons will be disabled until you run: npm run db:seed`,
+          );
+        }
+      })
+      .catch(() => {
+        // Non-fatal: DB may still be initialising; the per-request check will catch it.
+      });
+  }
 }
 
 start().catch((err) => {
