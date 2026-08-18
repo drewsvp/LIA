@@ -152,6 +152,7 @@ export type ItemRequest = {
   imageGenerated: boolean;
   imageGenStatus: ImageGenStatus | null;
   imageGenError: string | null;
+  imageGenRetries: number;
   dropoffLocation: string | null;
   peopleHelped: number | null;
   deadlineType: DeadlineType;

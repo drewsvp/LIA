@@ -10,6 +10,7 @@ import { appBaseUrl, authTrustedOrigins } from "./auth/auth";
 import { startExpiryScheduler } from "./jobs/expiry";
 import { startEmailSweep } from "./jobs/email-sweep";
 import { startDigestScheduler } from "./jobs/digest";
+import { startImageSweep } from "./jobs/image-sweep";
 import { setupVite, serveStatic } from "./vite";
 
 const app = express();
@@ -97,6 +98,7 @@ async function start(): Promise<void> {
   startExpiryScheduler();
   startEmailSweep();
   startDigestScheduler();
+  startImageSweep();
 
   // Startup check: warn if quick login is enabled but seed accounts are missing.
   if (process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true") {

@@ -20,7 +20,7 @@ import { insertInTx } from "./approval-events";
 
 const COLS = `r.id, r.legacy_wix_id as "legacyWixId", r.org_id as "orgId", r.title, r.description,
   r.image_url as "imageUrl", r.image_generated as "imageGenerated", r.image_gen_status as "imageGenStatus",
-  r.image_gen_error as "imageGenError",
+  r.image_gen_error as "imageGenError", r.image_gen_retries as "imageGenRetries",
   r.dropoff_location as "dropoffLocation", r.people_helped as "peopleHelped",
   r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
   r.contact_person_id as "contactPersonId", r.status, r.submitted_at as "submittedAt",
@@ -125,6 +125,81 @@ export async function recordImageGenFailure(ctx: DbContext, requestId: string, m
       message.slice(0, 500),
     ]),
   );
+}
+
+export type ImageGenSweepRow = { id: string; title: string; imageGenStatus: string; imageGenRetries: number };
+
+/**
+ * Find item_requests that the image-sweep job should retry:
+ *   - image_gen_status = 'failed'  (a previous attempt recorded a failure)
+ *   - image_gen_status = 'pending' older than `afterMinutes` (stranded by a
+ *     process restart before the result could be recorded)
+ * Rows that have already been retried `maxRetries` times are excluded —
+ * repeated failures remain visible on the admin panel via image_gen_status.
+ */
+export async function listFailedOrStrandedImageGen(
+  ctx: DbContext,
+  afterMinutes: number,
+  maxRetries: number,
+): Promise<ImageGenSweepRow[]> {
+  return withDbContext(ctx, (c) =>
+    q<ImageGenSweepRow>(
+      c,
+      `select id, title, image_gen_status as "imageGenStatus", image_gen_retries as "imageGenRetries"
+       from item_requests
+       where image_gen_retries < $2
+         and (
+           image_gen_status = 'failed'
+           or (
+             image_gen_status = 'pending'
+             and updated_at < now() - ($1 || ' minutes')::interval
+           )
+         )`,
+      [afterMinutes, maxRetries],
+    ),
+  );
+}
+
+/**
+ * Atomically claim one item_request for a sweep retry.  Increments
+ * image_gen_retries and sets status to 'pending' so concurrent sweeps
+ * don't double-attempt the same row.  Returns false when the row was
+ * already claimed, succeeded, or hit the retry cap since selection.
+ *
+ * Concurrency safety: the WHERE clause distinguishes the two eligible states:
+ *   - 'failed' rows are always claimable (no age guard needed).
+ *   - 'pending' rows are only claimable when updated_at is old enough —
+ *     i.e. stranded by a crash.  After the first sweep claims a 'failed' row
+ *     (flipping it to 'pending' with a fresh updated_at), a concurrent second
+ *     sweep sees a recent-updated_at pending row and returns false.
+ */
+export async function claimImageGenForSweep(
+  ctx: DbContext,
+  requestId: string,
+  maxRetries: number,
+  strandedAfterMinutes: number,
+): Promise<boolean> {
+  return withDbContext(ctx, async (c) => {
+    const rows = await q<{ id: string }>(
+      c,
+      `update item_requests
+       set image_gen_status = 'pending',
+           image_gen_retries = image_gen_retries + 1,
+           image_gen_error   = null
+       where id = $1
+         and image_gen_retries < $2
+         and (
+           image_gen_status = 'failed'
+           or (
+             image_gen_status = 'pending'
+             and updated_at < now() - ($3 || ' minutes')::interval
+           )
+         )
+       returning id`,
+      [requestId, maxRetries, strandedAfterMinutes],
+    );
+    return rows.length > 0;
+  });
 }
 
 /** Remove an auto-sourced image. No-op (returns null) when the image was uploaded. */
