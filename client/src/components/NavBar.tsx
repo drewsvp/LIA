@@ -1,17 +1,18 @@
 /**
  * MP-02 — Global navigation bar, present on every page.
  *
- * Desktop: logo left; right side stacks the button row (DASHBOARD when
- * authenticated with an active membership, GIVE, MEET NEEDS) over the text
- * links (ABOUT US, RESOURCES, OUR NETWORK, REGIONAL CALENDAR).
- * Mobile (§10): logo, hamburger, DASHBOARD button when authenticated; the
- * remaining items collapse behind the hamburger.
+ * Desktop: logo left; a single right-aligned row holding ABOUT, MEMBER LOGIN
+ * (unauthenticated only), then the two primary calls to action PROVIDE AN
+ * ITEM and VOLUNTEER, plus the in-portal utilities (DASHBOARD, ADMIN, org
+ * switcher, user menu) when the session carries them.
+ * Mobile (§10): logo, hamburger, DASHBOARD/ADMIN buttons when authenticated;
+ * the remaining items collapse behind the hamburger.
  *
- * The main-site items' destinations are captured nowhere in docs/ — they
- * point at the Alliance's primary website, outside this system. Following
- * the PB-00 TEDx precedent they render as unlinked labels rather than
- * pointing somewhere invented (reported in the build log). The logo links
- * home (§8) and DASHBOARD navigates in-portal.
+ * The CTAs read teal against the navy utility buttons so browsing needs is
+ * visibly the primary action rather than the same weight as DASHBOARD. The
+ * former main-site labels (ABOUT US, RESOURCES, OUR NETWORK, REGIONAL
+ * CALENDAR, GIVE, MEET NEEDS) pointed at the Alliance's primary website,
+ * outside this system, and are gone rather than rendered dead.
  *
  * Org switcher (§5): only for sessions holding 2+ active memberships; lists
  * org names only, validated server-side against the caller's memberships.
@@ -28,7 +29,6 @@ import { useSession } from "../hooks/useSession";
 import { apiRequest } from "../lib/queryClient";
 import logoBlue from "../assets/alliance-logo-blue.png";
 
-const MAIN_SITE_LINKS = ["ABOUT US", "RESOURCES", "OUR NETWORK", "REGIONAL CALENDAR"] as const;
 
 /**
  * User chip shown in the nav bar when authenticated. Clicking the name opens
@@ -161,6 +161,9 @@ export function NavBar(): ReactElement {
   // authenticated session, membership or not — otherwise a member-less
   // login has no way to see who they are or sign out.
   const showUserMenu = session?.authenticated === true;
+  // Member login is offered only to visitors without a session; an
+  // authenticated visitor already has the user menu.
+  const showMemberLogin = session?.authenticated !== true;
   const firstName = session?.user?.firstName ?? "";
   // Admin link: visible to any staff session (approver or admin); both roles
   // can reach /admin/organizations (the first non-staff-admin-only surface).
@@ -177,32 +180,35 @@ export function NavBar(): ReactElement {
           />
         </Link>
 
-        {/* Desktop: buttons row over text links row */}
-        <div className="site-nav-right">
-          <div className="site-nav-buttons">
-            <OrgSwitcher className="site-nav-switcher" />
-            {showDashboard ? (
-              <Link href="/dashboard" className="site-nav-btn">
-                DASHBOARD
-              </Link>
-            ) : null}
-            {showAdmin ? (
-              <Link href="/admin/organizations" className="site-nav-btn">
-                ADMIN
-              </Link>
-            ) : null}
-            <span className="site-nav-btn site-nav-dead">GIVE</span>
-            <span className="site-nav-btn site-nav-dead">MEET NEEDS</span>
-            {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
-          </div>
-          <nav className="site-nav-links" aria-label="Main navigation">
-            {MAIN_SITE_LINKS.map((label) => (
-              <span key={label} className="site-nav-link site-nav-dead">
-                {label}
-              </span>
-            ))}
-          </nav>
-        </div>
+        {/* Desktop: one right-aligned row */}
+        <nav className="site-nav-right" aria-label="Main navigation">
+          <Link href="/about" className="site-nav-link">
+            ABOUT
+          </Link>
+          {showMemberLogin ? (
+            <Link href="/login" className="site-nav-link">
+              MEMBER LOGIN
+            </Link>
+          ) : null}
+          <Link href="/items" className="site-nav-btn site-nav-btn-cta">
+            PROVIDE AN ITEM
+          </Link>
+          <Link href="/volunteer" className="site-nav-btn site-nav-btn-cta">
+            VOLUNTEER
+          </Link>
+          <OrgSwitcher className="site-nav-switcher" />
+          {showDashboard ? (
+            <Link href="/dashboard" className="site-nav-btn">
+              DASHBOARD
+            </Link>
+          ) : null}
+          {showAdmin ? (
+            <Link href="/admin/organizations" className="site-nav-btn">
+              ADMIN
+            </Link>
+          ) : null}
+          {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
+        </nav>
 
         {/* Mobile: DASHBOARD and ADMIN stay outside the hamburger (§10) */}
         <div className="site-nav-mobile-controls">
@@ -232,13 +238,20 @@ export function NavBar(): ReactElement {
 
       {menuOpen ? (
         <div className="site-nav-panel">
-          {MAIN_SITE_LINKS.map((label) => (
-            <span key={label} className="site-nav-panel-item site-nav-dead">
-              {label}
-            </span>
-          ))}
-          <span className="site-nav-panel-item site-nav-dead">GIVE</span>
-          <span className="site-nav-panel-item site-nav-dead">MEET NEEDS</span>
+          <Link href="/about" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
+            ABOUT
+          </Link>
+          {showMemberLogin ? (
+            <Link href="/login" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
+              MEMBER LOGIN
+            </Link>
+          ) : null}
+          <Link href="/items" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
+            PROVIDE AN ITEM
+          </Link>
+          <Link href="/volunteer" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
+            VOLUNTEER
+          </Link>
           {showAdmin ? (
             <Link
               href="/admin/organizations"

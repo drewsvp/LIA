@@ -70,19 +70,6 @@ export function HomePage(): ReactElement {
           </Link>
         </p>
       </div>
-
-      {/* Join Us section — full-bleed navy (§4) */}
-      <div className="pb0-navy">
-        <h2 className="pb0-navy-heading">Join Us in Changing the World</h2>
-        <p className="pb0-navy-para">
-          Each of us have talents, resources and experience that can be used to make a difference for kids &amp;
-          families in our community.
-        </p>
-        <p className="pb0-navy-para">
-          If you're looking for some ideas or encouragement, check out this <strong>TEDx talk</strong> by The
-          Alliance's very own, <strong>Heidi White</strong>.
-        </p>
-      </div>
     </PublicLayout>
   );
 }

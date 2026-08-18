@@ -319,6 +319,83 @@ h3 {
   transform: translateY(-2px);
   outline: none;
 }
+/* ---- Public footer (PublicLayout) ---- */
+.pb-footer {
+  background: var(--color-navy);
+  color: #ffffff;
+  padding: 26px 20px;
+  margin-top: 48px;
+}
+.pb-footer-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 32px;
+}
+.pb-footer-org {
+  margin: 0 0 4px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-size: 14px;
+}
+.pb-footer-copyright {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.pb-footer-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 24px;
+}
+.pb-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+}
+.pb-footer-link {
+  color: #ffffff;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+}
+.pb-footer-link:hover {
+  text-decoration: underline;
+}
+.pb-footer-social {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pb-footer-social-link {
+  display: block;
+  color: #ffffff;
+  opacity: 0.85;
+}
+.pb-footer-social-link:hover {
+  opacity: 1;
+}
+.pb-footer-social-link svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+@media (max-width: 720px) {
+  .pb-footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .pb0-navy {
   --heading-color: #ffffff;
   background: #0b3a5d;
@@ -530,14 +607,10 @@ h3 {
 }
 .site-nav-right {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
-}
-.site-nav-buttons {
-  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 18px;
 }
 .site-nav-btn {
   display: inline-block;
@@ -557,10 +630,13 @@ h3 {
 a.site-nav-btn {
   color: #ffffff;
 }
-.site-nav-links {
-  display: flex;
-  align-items: center;
-  gap: 26px;
+/* The two primary public actions: same shape as .site-nav-btn, teal so they
+   outrank the navy utility buttons (DASHBOARD, ADMIN) beside them. */
+.site-nav-btn-cta {
+  background: var(--color-teal);
+}
+.site-nav-btn-cta:hover {
+  background: rgb(2, 122, 120);
 }
 .site-nav-link {
   color: var(--color-navy);
@@ -568,9 +644,6 @@ a.site-nav-btn {
   font-weight: 700;
   letter-spacing: 0.1em;
   white-space: nowrap;
-}
-.site-nav-dead {
-  cursor: default;
 }
 .site-nav-switcher {
   font-family: inherit;

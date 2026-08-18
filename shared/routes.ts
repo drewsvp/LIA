@@ -38,6 +38,7 @@ export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   { id: "PB-04", path: "/volunteer/:id", title: "Volunteer request detail", area: "public" },
   { id: "PB-05", path: "/subscribe", title: "Subscribe to the digest", area: "public" },
   { id: "PB-05", path: "/unsubscribe/:token", title: "Unsubscribe", area: "public" },
+  { id: "PB-06", path: "/about", title: "About", area: "public" },
 
   // Staff admin
   { id: "ADMIN-01", path: "/admin/organizations", title: "Organizations", area: "admin" },

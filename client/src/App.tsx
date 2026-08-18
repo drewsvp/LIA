@@ -10,6 +10,7 @@ import { ItemsBrowsePage } from "./pages/public/ItemsBrowsePage";
 import { ItemDetailPage } from "./pages/public/ItemDetailPage";
 import { VolunteerBrowsePage } from "./pages/public/VolunteerBrowsePage";
 import { VolunteerDetailPage } from "./pages/public/VolunteerDetailPage";
+import { AboutPage } from "./pages/public/AboutPage";
 import { DigestPage } from "./pages/public/DigestPage";
 import { HomePage } from "./pages/public/HomePage";
 import { LoginPage } from "./pages/member/LoginPage";
@@ -57,6 +58,7 @@ const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
   "PB-03": () => <VolunteerBrowsePage />,
   "PB-04": () => <VolunteerDetailPage />,
   "PB-05": () => <DigestPage />,
+  "PB-06": () => <AboutPage />,
 };
 
 /** Built admin surfaces, by surface ID; the rest render placeholders inside the shell. */
