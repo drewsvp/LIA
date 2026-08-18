@@ -16,6 +16,7 @@ STAFF_NOTIFY_SECONDARY = "christina@defendingthecause.org"
 
 [userenv.production]
 APP_BASE_URL = "https://alliance-lia.replit.app"
+QUICK_LOGIN_ENABLED = "true"
 
 [workflows]
 runButton = "Project"
