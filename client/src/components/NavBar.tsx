@@ -162,6 +162,9 @@ export function NavBar(): ReactElement {
   // login has no way to see who they are or sign out.
   const showUserMenu = session?.authenticated === true;
   const firstName = session?.user?.firstName ?? "";
+  // Admin link: visible to any staff session (approver or admin); both roles
+  // can reach /admin/organizations (the first non-staff-admin-only surface).
+  const showAdmin = session?.staffRole != null;
 
   return (
     <header className="site-nav">
@@ -183,6 +186,11 @@ export function NavBar(): ReactElement {
                 DASHBOARD
               </Link>
             ) : null}
+            {showAdmin ? (
+              <Link href="/admin/organizations" className="site-nav-btn">
+                ADMIN
+              </Link>
+            ) : null}
             <span className="site-nav-btn site-nav-dead">GIVE</span>
             <span className="site-nav-btn site-nav-dead">MEET NEEDS</span>
             {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
@@ -196,11 +204,16 @@ export function NavBar(): ReactElement {
           </nav>
         </div>
 
-        {/* Mobile: DASHBOARD stays outside the hamburger (§10) */}
+        {/* Mobile: DASHBOARD and ADMIN stay outside the hamburger (§10) */}
         <div className="site-nav-mobile-controls">
           {showDashboard ? (
             <Link href="/dashboard" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
               DASHBOARD
+            </Link>
+          ) : null}
+          {showAdmin ? (
+            <Link href="/admin/organizations" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
+              ADMIN
             </Link>
           ) : null}
           <button
@@ -226,6 +239,15 @@ export function NavBar(): ReactElement {
           ))}
           <span className="site-nav-panel-item site-nav-dead">GIVE</span>
           <span className="site-nav-panel-item site-nav-dead">MEET NEEDS</span>
+          {showAdmin ? (
+            <Link
+              href="/admin/organizations"
+              className="site-nav-panel-item"
+              onClick={() => setMenuOpen(false)}
+            >
+              ADMIN
+            </Link>
+          ) : null}
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />
           {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
         </div>
