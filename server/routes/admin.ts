@@ -38,7 +38,8 @@ function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 import * as dal from "../dal";
-import type { DbContext } from "../db/client";
+import { withDbContext, type DbContext } from "../db/client";
+import type { MembershipRole } from "../../shared/types";
 import { dispatchQueuedEmails, type PendingDispatch } from "../email/send";
 import { storeImage } from "../storage/object-storage";
 import {
@@ -80,6 +81,15 @@ const ORG_STATUSES = new Set(["pending", "approved", "disabled"]);
 const REQUEST_STATUSES = new Set(["pending", "active", "archived"]);
 /** ADMIN-01/ADMIN-02 §8 failure copy, verbatim. */
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
+
+/** ADMIN-09: the full membership-role enum and its display names. */
+const ROLE_VALUES: ReadonlySet<string> = new Set(["owner", "member", "staff_admin", "staff_approver"]);
+const ROLE_LABELS: Record<MembershipRole, string> = {
+  owner: "an owner",
+  member: "a member",
+  staff_admin: "a staff admin",
+  staff_approver: "a staff approver",
+};
 
 /** ADMIN-02 §5: staff request image, same limits as the MP-05 logo. */
 const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -1429,6 +1439,92 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       console.error(`[admin] membership reinstate failed for ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // ADMIN-09 — role management (staff admin only)
+  // --------------------------------------------------------------------------
+
+  // ---- Every membership across every org, with person and org context.
+  app.get("/api/admin/roles", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const memberships = await dal.memberships.listForRoleAdmin(staffCtx(req));
+      res.json({ memberships });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Change one membership's role. Staff roles live only in the
+  // platform_owner org, owner/member only in member orgs, and the last
+  // active staff_admin can never be demoted — all checked under the row lock.
+  app.post("/api/admin/roles/:id", requireStaffAdmin, async (req: Request, res: Response) => {
+    const id = req.params.id ?? "";
+    if (!UUID_RE.test(id)) {
+      sendNotFound(res);
+      return;
+    }
+    const role = typeof req.body?.role === "string" ? req.body.role : "";
+    if (!ROLE_VALUES.has(role)) {
+      res.status(400).json({ message: "Unknown role." });
+      return;
+    }
+    const newRole = role as MembershipRole;
+    const userId = staffContext(req).userId;
+    try {
+      const result = await withDbContext({ kind: "staff", userId }, async (c) => {
+        const row = await dal.memberships.getRoleAdminRowInTx(c, id);
+        if (!row) return { kind: "not_found" as const };
+        if (row.role === newRole) return { kind: "noop" as const, row };
+        const isStaffRole = newRole === "staff_admin" || newRole === "staff_approver";
+        if (isStaffRole && row.orgKind !== "platform_owner") {
+          return { kind: "wrong_org" as const, message: "Staff roles can only be held in the platform owner organization." };
+        }
+        if (!isStaffRole && row.orgKind === "platform_owner") {
+          return { kind: "wrong_org" as const, message: "Platform owner memberships can only hold staff roles." };
+        }
+        if (
+          row.orgKind === "platform_owner" &&
+          row.role === "staff_admin" &&
+          row.status === "active" &&
+          (await dal.memberships.countActiveStaffAdminsLockedInTx(c)) <= 1
+        ) {
+          return { kind: "last_admin" as const };
+        }
+        const membership = await dal.memberships.changeRoleInTx(c, id, row.role, newRole, userId);
+        return { kind: "changed" as const, row, membership };
+      });
+
+      switch (result.kind) {
+        case "not_found":
+          sendNotFound(res);
+          return;
+        case "noop": {
+          const name = `${result.row.firstName} ${result.row.lastName}`.trim();
+          res.json({ membership: result.row, message: `${name} already has that role. Nothing changed.`, noop: true });
+          return;
+        }
+        case "wrong_org":
+          res.status(409).json({ message: result.message });
+          return;
+        case "last_admin":
+          res.status(409).json({
+            message: "This is the last active staff admin, so this role cannot be changed. Nothing was changed.",
+          });
+          return;
+        case "changed": {
+          const name = `${result.row.firstName} ${result.row.lastName}`.trim();
+          res.json({
+            membership: result.membership,
+            message: `${name} is now ${ROLE_LABELS[newRole]} at ${result.row.orgName}. The change applies the next time their session is resolved.`,
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      console.error(`[admin] role change failed for membership ${id}:`, err);
       res.status(500).json({ message: SAVE_FAILURE });
     }
   });

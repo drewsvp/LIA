@@ -277,6 +277,108 @@ export async function removeById(ctx: DbContext, membershipId: string): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// ADMIN-09 — role management
+// ---------------------------------------------------------------------------
+
+export type RoleAdminRow = OrgMembership & {
+  firstName: string;
+  lastName: string;
+  email: string;
+  orgName: string;
+  orgKind: "member_org" | "platform_owner";
+  orgStatus: "pending" | "approved" | "disabled";
+};
+
+/**
+ * Every membership across every organization — including platform_owner
+ * staff rows, which the ADMIN-03 queue deliberately excludes. This is the
+ * only surface that manages staff roles, so it must see them.
+ */
+export async function listForRoleAdmin(ctx: DbContext): Promise<RoleAdminRow[]> {
+  return withDbContext(ctx, (c) =>
+    q<RoleAdminRow>(
+      c,
+      `select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email,
+              o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus"
+         from org_memberships m
+         join organizations o on o.id = m.org_id
+         join users u on u.id = m.user_id
+         join people p on p.id = u.person_id
+        order by p.last_name asc, p.first_name asc, o.name asc`,
+    ),
+  );
+}
+
+/** One membership joined to org kind — what the role-change route validates against. */
+export async function getRoleAdminRowInTx(c: PoolClient, membershipId: string): Promise<RoleAdminRow | null> {
+  const rows = await q<RoleAdminRow>(
+    c,
+    `select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email,
+            o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus"
+       from org_memberships m
+       join organizations o on o.id = m.org_id
+       join users u on u.id = m.user_id
+       join people p on p.id = u.person_id
+      where m.id = $1
+      for update of m`,
+    [membershipId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Active staff_admin memberships in the platform_owner org, counted AFTER
+ * taking a lock on the platform_owner organization row itself. Every
+ * staff-role demotion serializes on that one lock, so two concurrent
+ * demotions cannot both observe two admins and leave zero — the second
+ * transaction waits, re-counts, and is refused.
+ */
+export async function countActiveStaffAdminsLockedInTx(c: PoolClient): Promise<number> {
+  await q(c, `select id from organizations where kind = 'platform_owner' for update`);
+  const rows = await q<{ count: string }>(
+    c,
+    `select count(*)::text as count
+       from org_memberships m join organizations o on o.id = m.org_id
+      where o.kind = 'platform_owner' and m.role = 'staff_admin' and m.status = 'active'`,
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+/**
+ * Change a membership's role. The caller has already validated the target
+ * role against the org kind and the last-staff-admin rule under the same
+ * transaction's row lock. The approval event records old -> new role in the
+ * status fields ("role:<name>") so the ADMIN-07 trail shows the transition.
+ */
+export async function changeRoleInTx(
+  c: PoolClient,
+  membershipId: string,
+  fromRole: MembershipRole,
+  toRole: MembershipRole,
+  actorUserId: string,
+): Promise<OrgMembership> {
+  const rows = await q<OrgMembership>(
+    c,
+    `update org_memberships set role = $2 where id = $1
+     returning id, org_id as "orgId", user_id as "userId", role, status,
+               invited_by as "invitedBy", approved_at as "approvedAt", approved_by as "approvedBy",
+               created_at as "createdAt", updated_at as "updatedAt"`,
+    [membershipId, toRole],
+  );
+  const membership = rows[0];
+  if (!membership) throw new Error(`memberships.changeRoleInTx: update failed: ${membershipId}`);
+  await insertInTx(c, {
+    entityType: "org_membership",
+    entityId: membershipId,
+    fromStatus: `role:${fromRole}`,
+    toStatus: `role:${toRole}`,
+    actorUserId,
+    note: "Role changed via ADMIN-09",
+  });
+  return membership;
+}
+
+// ---------------------------------------------------------------------------
 // ADMIN-03 — member approval queue
 // ---------------------------------------------------------------------------
 
