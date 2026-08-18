@@ -6,6 +6,7 @@ import http from "node:http";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cookieParser from "cookie-parser";
 import { registerRoutes, checkQuickLoginSeed } from "./routes/index";
+import { appBaseUrl, authTrustedOrigins } from "./auth/auth";
 import { startExpiryScheduler } from "./jobs/expiry";
 import { startEmailSweep } from "./jobs/email-sweep";
 import { startDigestScheduler } from "./jobs/digest";
@@ -78,6 +79,20 @@ async function start(): Promise<void> {
   }
   server.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
     console.log(`serving on port ${port}`);
+    // Log auth origin config so misconfiguration is visible in server logs
+    // rather than silent 403s on sign-out / magic-link from the wrong domain.
+    const baseUrl = appBaseUrl();
+    const trusted = authTrustedOrigins();
+    const isDeployment = process.env.REPLIT_DEPLOYMENT === "1";
+    console.log(`[auth] base URL: ${baseUrl}`);
+    console.log(`[auth] trusted origins: ${trusted.join(", ")}`);
+    if (isDeployment && (baseUrl.includes("localhost") || baseUrl.includes("replit.dev"))) {
+      console.warn(
+        "[auth] ⚠  Production deployment resolved to a non-production base URL.\n" +
+          "         Set APP_BASE_URL to the published origin (e.g. https://myapp.replit.app)\n" +
+          "         or ensure REPLIT_DOMAINS is populated in the deployment environment.",
+      );
+    }
   });
   startExpiryScheduler();
   startEmailSweep();

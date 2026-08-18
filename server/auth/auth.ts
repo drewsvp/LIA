@@ -19,16 +19,68 @@ import { finalizeHtml } from "../email/render";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
 
 /**
- * Absolute base URL for auth links and redirects. APP_BASE_URL wins when set
- * (required in production); in the Replit workspace the current dev domain is
- * the correct default.
+ * Absolute base URL for auth links and redirects.
+ *
+ * Resolution order:
+ *  1. APP_BASE_URL env var (explicit override — required for custom domains).
+ *  2. REPLIT_DOMAINS (first entry) when running as a Replit deployment
+ *     (REPLIT_DEPLOYMENT=1).  This is the published app's canonical origin.
+ *  3. REPLIT_DEV_DOMAIN — the workspace dev-tunnel URL.
+ *  4. http://localhost:5000 — last-resort local fallback.
  */
 export function appBaseUrl(): string {
   const explicit = process.env.APP_BASE_URL;
   if (explicit && explicit.trim() !== "") return explicit.trim().replace(/\/+$/, "");
+
+  // Replit deployment: REPLIT_DOMAINS holds the production hostname(s).
+  const isDeployment = process.env.REPLIT_DEPLOYMENT === "1";
+  const replitDomains = process.env.REPLIT_DOMAINS;
+  if (isDeployment && replitDomains && replitDomains.trim() !== "") {
+    const first = replitDomains.split(",")[0]?.trim();
+    if (first) return `https://${first}`;
+  }
+
   const devDomain = process.env.REPLIT_DEV_DOMAIN;
   if (devDomain && devDomain.trim() !== "") return `https://${devDomain.trim()}`;
   return "http://localhost:5000";
+}
+
+/**
+ * Origins that Better Auth will accept for cross-origin auth requests
+ * (sign-out, magic-link, etc.).  Always includes the resolved base URL.
+ * Additional comma-separated origins can be injected via TRUSTED_ORIGINS.
+ */
+export function authTrustedOrigins(): string[] {
+  const origins = new Set<string>();
+  origins.add(appBaseUrl());
+
+  // All Replit-managed domains for this deployment (including custom domains)
+  // are in REPLIT_DOMAINS as a comma-separated list.  Trust every entry so
+  // that auth requests from any served domain (e.g. a custom domain alongside
+  // the default *.replit.app domain) are accepted.
+  const replitDomains = process.env.REPLIT_DOMAINS;
+  if (replitDomains) {
+    for (const d of replitDomains.split(",")) {
+      const trimmed = d.trim();
+      if (trimmed) origins.add(`https://${trimmed}`);
+    }
+  }
+
+  // In the workspace, also trust the dev-tunnel origin so that local testing
+  // works alongside a configured APP_BASE_URL or production domain.
+  const devDomain = process.env.REPLIT_DEV_DOMAIN;
+  if (devDomain && devDomain.trim() !== "") origins.add(`https://${devDomain.trim()}`);
+
+  // Extra origins from env (e.g. staging domains, custom domains not in REPLIT_DOMAINS).
+  const extra = process.env.TRUSTED_ORIGINS;
+  if (extra) {
+    for (const o of extra.split(",")) {
+      const trimmed = o.trim().replace(/\/+$/, "");
+      if (trimmed) origins.add(trimmed);
+    }
+  }
+
+  return [...origins];
 }
 
 function sessionSecret(): string {
@@ -41,6 +93,7 @@ export const auth = betterAuth({
   database: pool,
   secret: sessionSecret(),
   baseURL: appBaseUrl(),
+  trustedOrigins: authTrustedOrigins(),
   emailAndPassword: { enabled: false },
   plugins: [
     magicLink({
