@@ -635,6 +635,87 @@ a.site-nav-btn {
   }
 }
 
+/* ---- MP-02 nav bar user menu ---- */
+.site-nav-user {
+  position: relative;
+}
+.site-nav-user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: var(--radius-card);
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.site-nav-user-trigger:hover,
+.site-nav-user-trigger:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+}
+.site-nav-user-avatar {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.site-nav-user-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.site-nav-user-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 160px;
+  background: #ffffff;
+  border: 1px solid #dddddd;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(16, 42, 67, 0.16);
+  padding: 6px;
+  z-index: 100;
+}
+.site-nav-user-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: #102a43;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.site-nav-user-menu-item:hover:not(:disabled),
+.site-nav-user-menu-item:focus-visible {
+  background: rgba(0, 0, 0, 0.06);
+}
+.site-nav-user-menu-item:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.site-nav-user-menu-error {
+  margin: 4px 10px 6px;
+  font-size: 12px;
+  color: #b3261e;
+}
+/* In mobile panel, the user menu trigger adapts to the dark-on-light context */
+.site-nav-panel .site-nav-user-trigger {
+  color: var(--color-navy);
+  border-color: var(--color-navy);
+}
+.site-nav-panel .site-nav-user-trigger:hover,
+.site-nav-panel .site-nav-user-trigger:focus-visible {
+  background: rgba(0, 0, 0, 0.06);
+}
+
 /* ---- MP-02 routing states ---- */
 .mp2-message-page {
   max-width: 560px;
