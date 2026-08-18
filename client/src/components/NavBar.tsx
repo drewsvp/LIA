@@ -68,8 +68,11 @@ function NavUserMenu({ firstName }: { firstName: string }): ReactElement {
       // Timeout so a dead/restarting server yields a stated error instead of
       // an infinite "Logging out…" spinner.
       await apiRequest("POST", "/api/auth/sign-out", {}, AbortSignal.timeout(10_000));
-      queryClient.clear();
-      navigate("/login");
+      // Full page load, not SPA navigation: it guarantees every trace of the
+      // old session (query cache, component state) is gone. clear() while
+      // queries are mounted proved unreliable — components kept rendering
+      // the removed session data.
+      window.location.assign("/login");
     } catch {
       setError("Log out failed. Please try again.");
       setBusy(false);

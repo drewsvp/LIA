@@ -117,12 +117,11 @@ export function LoginPage(): ReactElement | null {
         redirectTo?: string;
       } | null;
       if (res.ok) {
-        // The session cookie just changed identity: drop every cached query
-        // (session, dashboard data) so the app refetches as the NEW user.
-        // Without this, the UI keeps showing the previous user until a hard
-        // refresh.
-        queryClient.clear();
-        setLocation(body?.redirectTo ?? "/dashboard", { replace: true });
+        // The session cookie just changed identity. Full page load, not SPA
+        // navigation: it guarantees the app boots fresh as the NEW user.
+        // Cache-clearing while queries were mounted proved unreliable —
+        // components kept rendering the previous user's data.
+        window.location.assign(body?.redirectTo ?? "/dashboard");
         return;
       }
       setQuickError(
