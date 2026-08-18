@@ -24,7 +24,9 @@ import {
   AlreadyDeliveredError,
   EmailRowNotFoundError,
   ResendBlockedError,
+  RESENDABLE_TEMPLATE_KEYS,
 } from "../services/email-resend";
+import { MAY_HAVE_SENT_MARKER } from "../email/send";
 import { ENTITY_TYPE_NAMES } from "../../shared/transitions";
 
 /** ADMIN-05 §5: lowercase, hyphenated. Shared by add (validation) and promote (generation). */
@@ -1245,6 +1247,8 @@ export function registerAdminRoutes(app: Express): void {
           toEmail: r.toEmail,
           status: r.status,
           error: r.error,
+          failureCategory: r.failureCategory,
+          resendOfId: r.resendOfId,
           entityType: r.entityType,
           entityId: r.entityId,
           entity: r.entityType && r.entityId ? (entities[`${r.entityType}:${r.entityId}`] ?? null) : null,
@@ -1268,13 +1272,64 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      const entities =
+      const [entities, resendAttempt] = await Promise.all([
         row.entityType && row.entityId
-          ? await dal.emailResendData.resolveEntityRefs(ctx, [{ type: row.entityType, id: row.entityId }])
-          : {};
+          ? dal.emailResendData.resolveEntityRefs(ctx, [{ type: row.entityType, id: row.entityId }])
+          : Promise.resolve({} as Record<string, { name: string; path: string | null }>),
+        dal.emailLog.findResendAttempt(ctx, id),
+      ]);
+
+      // Compute resend eligibility without hitting the DB for the rebuilder check.
+      type ResendEligibility = { allowed: true } | { allowed: false; reason: string };
+      let resendEligibility: ResendEligibility;
+      if (row.status !== "failed") {
+        resendEligibility = { allowed: false, reason: "Only failed emails can be resent." };
+      } else if (row.providerMessageId) {
+        resendEligibility = {
+          allowed: false,
+          reason:
+            "The provider already accepted this email (a provider message id is recorded), so resending would deliver a duplicate.",
+        };
+      } else if (row.error && row.error.includes(MAY_HAVE_SENT_MARKER)) {
+        resendEligibility = {
+          allowed: false,
+          reason:
+            "This send was interrupted and the provider may already have delivered it. Verify in the provider dashboard before resending to avoid a duplicate.",
+        };
+      } else if (row.failureCategory === "sweep" && row.error && row.error.includes("verify with the provider")) {
+        resendEligibility = {
+          allowed: false,
+          reason:
+            "This email was stranded mid-send and the provider outcome is unknown. Verify in the provider dashboard before resending.",
+        };
+      } else if (row.templateKey === "auth_magic_link") {
+        resendEligibility = {
+          allowed: false,
+          reason: "Login link emails cannot be resent. The member can request a new link from the sign-in page.",
+        };
+      } else if (!RESENDABLE_TEMPLATE_KEYS.has(row.templateKey)) {
+        resendEligibility = {
+          allowed: false,
+          reason: `No resend procedure exists for the "${row.templateKey}" template.`,
+        };
+      } else {
+        resendEligibility = { allowed: true };
+      }
+
       res.json({
         ...row,
         entity: row.entityType && row.entityId ? (entities[`${row.entityType}:${row.entityId}`] ?? null) : null,
+        resendEligibility,
+        resendAttempt: resendAttempt
+          ? {
+              id: resendAttempt.id,
+              createdAt: resendAttempt.createdAt,
+              status: resendAttempt.status,
+              toEmail: resendAttempt.toEmail,
+              error: resendAttempt.error,
+              sentAt: resendAttempt.sentAt,
+            }
+          : null,
       });
     } catch (err) {
       next(err);

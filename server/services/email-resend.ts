@@ -131,6 +131,22 @@ function requestKindOf(row: EmailLogEntry): "item" | "volunteer" {
   return row.entityType === "volunteer_request" ? "volunteer" : "item";
 }
 
+/** Template keys for which a resend procedure exists; used for eligibility checks. */
+export const RESENDABLE_TEMPLATE_KEYS: ReadonlySet<string> = new Set<string>([
+  "staff_new_org",
+  "staff_new_item_request",
+  "staff_new_volunteer_request",
+  "staff_new_user",
+  "org_approved",
+  "org_request_received",
+  "org_request_approved",
+  "org_member_approved",
+  "org_new_item_donation",
+  "donor_item_confirmation",
+  "org_new_volunteer",
+  "donor_volunteer_confirmation",
+]);
+
 const REBUILDERS: Record<string, (ctx: DbContext, row: EmailLogEntry) => Promise<Rebuilt>> = {
   async staff_new_org(ctx, row) {
     const org = await orgCtx(ctx, row);
@@ -434,6 +450,7 @@ export async function resendEmail(ctx: DbContext, emailLogId: string): Promise<R
     toPersonId: rebuilt.toPersonId ?? undefined,
     replyTo: rebuilt.replyTo,
     vars: rebuilt.vars,
+    resendOfId: emailLogId,
   } as QueueInput);
 
   if (queued.outcome === "duplicate") {

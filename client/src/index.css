@@ -2513,6 +2513,132 @@ a.site-nav-btn {
   color: var(--adm-danger, #b3261e);
 }
 
+/* --- email log failure diagnostics (Task 75) --- */
+.adm-row-failed td {
+  background: #fff8f8;
+}
+.adm-row-failed:hover td {
+  background: #fdeeed;
+}
+.adm-category-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #fde8e6;
+  color: #8b1c16;
+  border: 1px solid #f0c0bc;
+}
+.adm-category-badge[data-category="config"] { background: #fff3e0; color: #7c4700; border-color: #f5c97a; }
+.adm-category-badge[data-category="render"] { background: #fce8ff; color: #6a0072; border-color: #dda8e6; }
+.adm-category-badge[data-category="provider_timeout"] { background: #fff8e6; color: #7a5000; border-color: #f5dd8a; }
+.adm-category-badge[data-category="provider"] { background: #fde8e6; color: #8b1c16; border-color: #f0c0bc; }
+.adm-category-badge[data-category="sweep"] { background: #e8f0fe; color: #1a3a7a; border-color: #b0c8f5; }
+.adm-failure-block {
+  background: #fff8f8;
+  border: 1px solid #f0c0bc;
+  border-left: 3px solid var(--adm-danger, #b3261e);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.adm-failure-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.adm-failure-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #3a1010;
+}
+.adm-failure-explanation {
+  font-size: 0.82rem;
+  color: #555;
+  margin: 0 0 6px;
+  line-height: 1.45;
+}
+.adm-failure-detail {
+  font-size: 0.8rem;
+}
+.adm-failure-detail summary {
+  cursor: pointer;
+  color: #666;
+  margin-bottom: 4px;
+}
+.adm-resend-block {
+  margin-bottom: 12px;
+}
+.adm-btn-resend {
+  background: var(--adm-primary, #1a3a7a);
+  color: #fff;
+  border: none;
+  padding: 8px 18px;
+  font: inherit;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.adm-btn-resend:hover:not(:disabled) {
+  background: #142d5e;
+}
+.adm-btn-resend:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.adm-resend-note {
+  margin: 5px 0 0;
+  font-size: 0.78rem;
+  color: #666;
+}
+.adm-resend-blocked {
+  background: #f6f4f0;
+  border: 1px solid #c8c4bc;
+  padding: 8px 10px;
+}
+.adm-resend-blocked-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+}
+.adm-resend-blocked-reason {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: #444;
+}
+.adm-resend-attempt {
+  background: #f0f4fc;
+  border: 1px solid #b0c8f5;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.adm-resend-origin {
+  margin-bottom: 8px;
+}
+.adm-link-btn {
+  background: none;
+  border: none;
+  color: var(--adm-primary, #1a3a7a);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+.adm-link-btn:hover {
+  color: #142d5e;
+}
+.adm-subheading-sm {
+  font-size: 0.88rem;
+  margin: 0 0 6px;
+}
+.adm-result-fail {
+  color: var(--adm-danger, #b3261e);
+}
+
 /* ADMIN-07 activity trail */
 .adm-act-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .adm-act-table th, .adm-act-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; vertical-align: top; }

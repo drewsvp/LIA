@@ -7,11 +7,13 @@
  */
 import type { PoolClient } from "pg";
 import { isUniqueViolation, q, withDbContext, type DbContext } from "../db/client";
-import type { EmailLogEntry, EmailStatus } from "../../shared/types";
+import type { EmailFailureCategory, EmailLogEntry, EmailStatus } from "../../shared/types";
 
 const COLS = `id, template_key as "templateKey", to_email as "toEmail", to_person_id as "toPersonId",
   entity_type as "entityType", entity_id as "entityId", payload, status,
-  provider_message_id as "providerMessageId", error, sent_at as "sentAt", created_at as "createdAt"`;
+  provider_message_id as "providerMessageId", error,
+  failure_category as "failureCategory", resend_of_id as "resendOfId",
+  sent_at as "sentAt", created_at as "createdAt"`;
 
 export type InsertQueuedEmailInput = {
   templateKey: string;
@@ -20,6 +22,8 @@ export type InsertQueuedEmailInput = {
   entityType?: string | null;
   entityId?: string | null;
   payload?: Record<string, unknown>;
+  /** When this row is a resend attempt, the id of the original failed row. */
+  resendOfId?: string | null;
 };
 
 export type InsertQueuedResult =
@@ -35,8 +39,8 @@ export async function insertQueued(ctx: DbContext, input: InsertQueuedEmailInput
     const rows = await withDbContext(ctx, (c) =>
       q<EmailLogEntry>(
         c,
-        `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status)
-         values ($1, $2, $3, $4, $5, $6::jsonb, 'queued') returning ${COLS}`,
+        `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status, resend_of_id)
+         values ($1, $2, $3, $4, $5, $6::jsonb, 'queued', $7) returning ${COLS}`,
         [
           input.templateKey,
           input.toEmail,
@@ -44,6 +48,7 @@ export async function insertQueued(ctx: DbContext, input: InsertQueuedEmailInput
           input.entityType ?? null,
           input.entityId ?? null,
           JSON.stringify(input.payload ?? {}),
+          input.resendOfId ?? null,
         ],
       ),
     );
@@ -65,8 +70,8 @@ export async function insertQueued(ctx: DbContext, input: InsertQueuedEmailInput
 export async function insertQueuedInTx(c: PoolClient, input: InsertQueuedEmailInput): Promise<EmailLogEntry> {
   const rows = await q<EmailLogEntry>(
     c,
-    `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status)
-     values ($1, $2, $3, $4, $5, $6::jsonb, 'queued') returning ${COLS}`,
+    `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status, resend_of_id)
+     values ($1, $2, $3, $4, $5, $6::jsonb, 'queued', $7) returning ${COLS}`,
     [
       input.templateKey,
       input.toEmail,
@@ -74,6 +79,7 @@ export async function insertQueuedInTx(c: PoolClient, input: InsertQueuedEmailIn
       input.entityType ?? null,
       input.entityId ?? null,
       JSON.stringify(input.payload ?? {}),
+      input.resendOfId ?? null,
     ],
   );
   const entry = rows[0];
@@ -105,8 +111,8 @@ export async function insertSkippedInTx(c: PoolClient, input: InsertQueuedEmailI
 function insertSkippedQuery(c: PoolClient, input: InsertQueuedEmailInput): Promise<EmailLogEntry[]> {
   return q<EmailLogEntry>(
     c,
-    `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status, error)
-     values ($1, $2, $3, $4, $5, $6::jsonb, 'skipped', $7) returning ${COLS}`,
+    `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status, error, resend_of_id)
+     values ($1, $2, $3, $4, $5, $6::jsonb, 'skipped', $7, $8) returning ${COLS}`,
     [
       input.templateKey,
       input.toEmail,
@@ -115,6 +121,7 @@ function insertSkippedQuery(c: PoolClient, input: InsertQueuedEmailInput): Promi
       input.entityId ?? null,
       JSON.stringify(input.payload ?? {}),
       SKIPPED_DISABLED_REASON,
+      input.resendOfId ?? null,
     ],
   );
 }
@@ -144,11 +151,16 @@ export async function existsForRecipientInTx(
  * Tx-composable failure mark (ADMIN-01: a welcome email blocked by variable
  * resolution still leaves its failed row inside the approval transaction).
  */
-export async function markFailedInTx(c: PoolClient, emailLogId: string, error: string): Promise<EmailLogEntry> {
+export async function markFailedInTx(
+  c: PoolClient,
+  emailLogId: string,
+  error: string,
+  category?: EmailFailureCategory | null,
+): Promise<EmailLogEntry> {
   const rows = await q<EmailLogEntry>(
     c,
-    `update email_log set status = 'failed', error = $2 where id = $1 returning ${COLS}`,
-    [emailLogId, error],
+    `update email_log set status = 'failed', error = $2, failure_category = coalesce($3, failure_category) where id = $1 returning ${COLS}`,
+    [emailLogId, error, category ?? null],
   );
   const entry = rows[0];
   if (!entry) throw new Error(`emailLog.markFailedInTx: entry not found: ${emailLogId}`);
@@ -256,12 +268,17 @@ export async function markSent(ctx: DbContext, emailLogId: string, providerMessa
 }
 
 /** Mark failed with the provider or configuration error. */
-export async function markFailed(ctx: DbContext, emailLogId: string, error: string): Promise<EmailLogEntry> {
+export async function markFailed(
+  ctx: DbContext,
+  emailLogId: string,
+  error: string,
+  category?: EmailFailureCategory | null,
+): Promise<EmailLogEntry> {
   const rows = await withDbContext(ctx, (c) =>
     q<EmailLogEntry>(
       c,
-      `update email_log set status = 'failed', error = $2 where id = $1 returning ${COLS}`,
-      [emailLogId, error],
+      `update email_log set status = 'failed', error = $2, failure_category = coalesce($3, failure_category) where id = $1 returning ${COLS}`,
+      [emailLogId, error, category ?? null],
     ),
   );
   const entry = rows[0];
@@ -282,12 +299,14 @@ export async function markFailedIfStatus(
   emailLogId: string,
   error: string,
   expectedStatus: "queued" | "sending",
+  category?: EmailFailureCategory | null,
 ): Promise<EmailLogEntry | null> {
   const rows = await withDbContext(ctx, (c) =>
     q<EmailLogEntry>(
       c,
-      `update email_log set status = 'failed', error = $2 where id = $1 and status = $3 returning ${COLS}`,
-      [emailLogId, error, expectedStatus],
+      `update email_log set status = 'failed', error = $2, failure_category = coalesce($4, failure_category)
+        where id = $1 and status = $3 returning ${COLS}`,
+      [emailLogId, error, expectedStatus, category ?? null],
     ),
   );
   return rows[0] ?? null;
@@ -387,6 +406,20 @@ export async function findDelivered(
         order by created_at desc limit 1`,
       [input.templateKey, input.entityType, input.entityId, input.toEmail],
     ),
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * The resend attempt that was dispatched to recover a given failed row.
+ * A failed row may have at most one resend attempt at any time (the resend
+ * service re-checks the once-only index before inserting).
+ */
+export async function findResendAttempt(ctx: DbContext, emailLogId: string): Promise<EmailLogEntry | null> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<EmailLogEntry>(c, `select ${COLS} from email_log where resend_of_id = $1 order by created_at desc limit 1`, [
+      emailLogId,
+    ]),
   );
   return rows[0] ?? null;
 }

@@ -299,6 +299,9 @@ export type ApprovalEvent = {
   createdAt: string;
 };
 
+/** Machine-readable bucket for why a send failed. Null on pre-migration rows and non-failed rows. */
+export type EmailFailureCategory = "config" | "render" | "provider_timeout" | "provider" | "sweep";
+
 export type EmailLogEntry = {
   id: string;
   templateKey: string;
@@ -310,6 +313,10 @@ export type EmailLogEntry = {
   status: EmailStatus;
   providerMessageId: string | null;
   error: string | null;
+  /** Structured failure bucket set at failure time; null on success rows and pre-migration failures. */
+  failureCategory: EmailFailureCategory | null;
+  /** When this row is a resend attempt, the id of the original failed row. */
+  resendOfId: string | null;
   sentAt: string | null;
   createdAt: string;
 };

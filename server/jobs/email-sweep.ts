@@ -101,7 +101,7 @@ export async function sweepStrandedEmails(): Promise<SweepSummary> {
         const message = `dispatch interrupted after the provider claim (process stopped mid-send); ${MAY_HAVE_SENT_MARKER}. Not retried automatically to avoid a double send — verify with the provider before resending.`;
         // Guarded transition: only while still 'sending'. A slow in-flight
         // dispatch may have recorded 'sent' since selection — never overwrite.
-        const marked = await emailLog.markFailedIfStatus(SYSTEM, entry.id, message, "sending");
+        const marked = await emailLog.markFailedIfStatus(SYSTEM, entry.id, message, "sending", "sweep");
         if (!marked) {
           console.warn(`[email-sweep] skip (${entry.id} → ${entry.toEmail}): resolved concurrently since selection`);
           continue;
@@ -116,7 +116,7 @@ export async function sweepStrandedEmails(): Promise<SweepSummary> {
       if ("error" in rebuilt) {
         const message = `stranded at 'queued' (dispatch never ran, likely a process stop after commit); ${rebuilt.error}`;
         // Guarded: only while still 'queued' — a concurrent dispatch may have claimed/resolved it.
-        const marked = await emailLog.markFailedIfStatus(SYSTEM, entry.id, message, "queued");
+        const marked = await emailLog.markFailedIfStatus(SYSTEM, entry.id, message, "queued", "sweep");
         if (!marked) {
           console.warn(`[email-sweep] skip (${entry.id} → ${entry.toEmail}): resolved concurrently since selection`);
           continue;

@@ -201,7 +201,7 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
             entityId: updated.id,
             payload: { vars },
           });
-          await dal.emailLog.markFailedInTx(c, row.id, err.message);
+          await dal.emailLog.markFailedInTx(c, row.id, err.message, "render");
           console.error(`[admin] request ${updated.id} approved but org_request_approved blocked: ${err.message}`);
           emails.push({ outcome: "blocked", toEmail: person.email, reason: err.message });
         }

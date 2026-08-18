@@ -151,7 +151,7 @@ export async function approveOrganization(staffUserId: string, orgId: string): P
               entityId: organization.id,
               payload: { vars },
             });
-            await dal.emailLog.markFailedInTx(c, row.id, err.message);
+            await dal.emailLog.markFailedInTx(c, row.id, err.message, "render");
             console.error(`[admin] org ${organization.id} approved but org_approved blocked: ${err.message}`);
             email = { outcome: "blocked", toEmail: person.email, reason: err.message };
           }

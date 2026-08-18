@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 import { EMAIL_TEMPLATE_NAMES, templateDisplayName } from "@shared/email-templates";
+import type { EmailFailureCategory } from "@shared/types";
 
 type LogRow = {
   id: string;
@@ -21,9 +22,22 @@ type LogRow = {
   toEmail: string;
   status: "queued" | "sending" | "sent" | "failed" | "skipped";
   error: string | null;
+  failureCategory: EmailFailureCategory | null;
+  resendOfId: string | null;
   entityType: string | null;
   entityId: string | null;
   entity: { name: string; path: string | null } | null;
+};
+
+type ResendEligibility = { allowed: true } | { allowed: false; reason: string };
+
+type ResendAttempt = {
+  id: string;
+  createdAt: string;
+  status: "queued" | "sending" | "sent" | "failed" | "skipped";
+  toEmail: string;
+  error: string | null;
+  sentAt: string | null;
 };
 
 type ListResponse = { rows: LogRow[]; failureCount: number; anyExist: boolean };
@@ -32,9 +46,37 @@ type DetailResponse = LogRow & {
   payload: Record<string, unknown>;
   providerMessageId: string | null;
   toPersonId: string | null;
+  resendEligibility: ResendEligibility;
+  resendAttempt: ResendAttempt | null;
 };
 
 const STUCK_MS = 15 * 60 * 1000;
+
+/** Human-readable label for a failure category. */
+const CATEGORY_LABELS: Record<EmailFailureCategory, string> = {
+  config: "Configuration error",
+  render: "Template error",
+  provider_timeout: "Provider timeout",
+  provider: "Provider error",
+  sweep: "Stranded send",
+};
+
+/**
+ * Plain-language explanation of what each category means for an admin reading
+ * a failed email row.
+ */
+const CATEGORY_EXPLANATIONS: Record<EmailFailureCategory, string> = {
+  config:
+    "A required server configuration was missing when this email was attempted — typically an environment variable such as EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME, or POSTMARK_SERVER_TOKEN. Fix the configuration and resend.",
+  render:
+    "The email template could not be rendered because a required variable was missing, empty, or the template itself threw an error. This usually means the underlying data changed between when the action was taken and when the email was dispatched.",
+  provider_timeout:
+    "The request to the email provider timed out before a response arrived. The provider may or may not have delivered this email — verify in the Postmark dashboard before resending to avoid a duplicate.",
+  provider:
+    "The email provider returned an error or the network connection failed during the send attempt. Check the error detail below and the Postmark dashboard for more context.",
+  sweep:
+    "The application restarted or the process stopped while this email was mid-send. If the row was in 'sending' state, the provider may have already delivered it — verify before resending.",
+};
 
 function laDate(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 86_400_000).toLocaleDateString("en-CA", {
@@ -70,10 +112,36 @@ function initialFilters(): { template: string; status: string; recipient: string
   };
 }
 
+/** Inline badge for a failure category — compact, coloured label for the list. */
+function CategoryBadge({ category }: { category: EmailFailureCategory }): ReactElement {
+  return (
+    <span className="adm-category-badge" data-category={category} title={CATEGORY_EXPLANATIONS[category]}>
+      {CATEGORY_LABELS[category]}
+    </span>
+  );
+}
+
+/** Status cell text with stuck indicator. */
+function StatusCell({ row }: { row: LogRow }): ReactElement {
+  return (
+    <>
+      {row.status}
+      {isStuck(row) && <span className="adm-stuck"> Queued but not dispatched.</span>}
+      {row.status === "failed" && row.failureCategory && (
+        <>
+          {" "}
+          <CategoryBadge category={row.failureCategory} />
+        </>
+      )}
+    </>
+  );
+}
+
 export function EmailLogPage(): ReactElement {
   const [filters, setFilters] = useState(initialFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resendMsg, setResendMsg] = useState<string | null>(null);
+  const [resendOk, setResendOk] = useState<boolean | null>(null);
   const [resending, setResending] = useState(false);
 
   const listKey = useMemo(() => {
@@ -109,18 +177,22 @@ export function EmailLogPage(): ReactElement {
     if (!confirmed) return;
     setResending(true);
     setResendMsg(null);
+    setResendOk(null);
     try {
       const res = await fetch(`/api/admin/email/${row.id}/resend`, {
         method: "POST",
         credentials: "include",
       });
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
-      setResendMsg(body?.message ?? "That did not save. Nothing was changed.");
+      const msg = body?.message ?? "That did not save. Nothing was changed.";
+      setResendMsg(msg);
+      setResendOk(res.ok && msg.startsWith("Sent"));
       await queryClient.invalidateQueries({ queryKey: [listKey] });
       if (detailKey) await queryClient.invalidateQueries({ queryKey: [detailKey] });
       await queryClient.invalidateQueries({ queryKey: ["/api/admin/nav-counts"] });
     } catch {
       setResendMsg("That did not save. Nothing was changed.");
+      setResendOk(false);
     } finally {
       setResending(false);
     }
@@ -184,7 +256,7 @@ export function EmailLogPage(): ReactElement {
       </div>
 
       {resendMsg && (
-        <p className="adm-result" role="status">
+        <p className={`adm-result${resendOk === false ? " adm-result-fail" : ""}`} role="status">
           {resendMsg}
         </p>
       )}
@@ -210,10 +282,16 @@ export function EmailLogPage(): ReactElement {
                 {rows.map((row) => (
                   <tr
                     key={row.id}
-                    className={row.id === selectedId ? "adm-row-selected" : undefined}
+                    className={[
+                      row.id === selectedId ? "adm-row-selected" : "",
+                      row.status === "failed" ? "adm-row-failed" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ") || undefined}
                     onClick={() => {
                       setSelectedId(row.id);
                       setResendMsg(null);
+                      setResendOk(null);
                     }}
                   >
                     <td>{fmtTimestamp(row.createdAt)}</td>
@@ -235,8 +313,7 @@ export function EmailLogPage(): ReactElement {
                       )}
                     </td>
                     <td>
-                      {row.status}
-                      {isStuck(row) && <span className="adm-stuck">Queued but not dispatched.</span>}
+                      <StatusCell row={row} />
                     </td>
                   </tr>
                 ))}
@@ -248,13 +325,120 @@ export function EmailLogPage(): ReactElement {
         {detail && (
           <aside className="adm-email-detail">
             <h2 className="adm-subheading">{templateDisplayName(detail.templateKey)}</h2>
+
+            {/* Failure diagnosis block */}
+            {detail.status === "failed" && (
+              <div className="adm-failure-block">
+                <div className="adm-failure-header">
+                  {detail.failureCategory ? (
+                    <>
+                      <CategoryBadge category={detail.failureCategory} />
+                      <span className="adm-failure-title">{CATEGORY_LABELS[detail.failureCategory]}</span>
+                    </>
+                  ) : (
+                    <span className="adm-failure-title">Send failed</span>
+                  )}
+                </div>
+                {detail.failureCategory && (
+                  <p className="adm-failure-explanation">{CATEGORY_EXPLANATIONS[detail.failureCategory]}</p>
+                )}
+                {detail.error && (
+                  <details className="adm-failure-detail">
+                    <summary>Error detail</summary>
+                    <pre className="adm-error-text">{detail.error}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* Resend action */}
+            {detail.status === "failed" && (
+              <div className="adm-resend-block">
+                {detail.resendEligibility.allowed ? (
+                  <>
+                    <button
+                      type="button"
+                      className="adm-btn adm-btn-resend"
+                      disabled={resending}
+                      onClick={() => void resend(detail)}
+                    >
+                      {resending ? "Resending…" : "Resend this email"}
+                    </button>
+                    <p className="adm-resend-note">
+                      The email will be re-built from current data and sent as a new attempt. The original failed row
+                      stays unchanged.
+                    </p>
+                  </>
+                ) : (
+                  <div className="adm-resend-blocked">
+                    <span className="adm-resend-blocked-label">Resend blocked</span>
+                    <p className="adm-resend-blocked-reason">{detail.resendEligibility.reason}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Linked resend attempt */}
+            {detail.resendAttempt && (
+              <div className="adm-resend-attempt">
+                <h3 className="adm-subheading adm-subheading-sm">Resend attempt</h3>
+                <dl className="adm-detail-list">
+                  <dt>Time</dt>
+                  <dd>{fmtTimestamp(detail.resendAttempt.createdAt)}</dd>
+                  <dt>Status</dt>
+                  <dd className={detail.resendAttempt.status === "failed" ? "adm-error-text" : undefined}>
+                    {detail.resendAttempt.status}
+                    {detail.resendAttempt.status === "sent" && detail.resendAttempt.sentAt && (
+                      <> · sent {fmtTimestamp(detail.resendAttempt.sentAt)}</>
+                    )}
+                  </dd>
+                  {detail.resendAttempt.error && (
+                    <>
+                      <dt>Error</dt>
+                      <dd className="adm-error-text">{detail.resendAttempt.error}</dd>
+                    </>
+                  )}
+                  <dt>Row</dt>
+                  <dd>
+                    <button
+                      type="button"
+                      className="adm-link-btn"
+                      onClick={() => {
+                        setSelectedId(detail.resendAttempt!.id);
+                        setResendMsg(null);
+                        setResendOk(null);
+                      }}
+                    >
+                      View resend row →
+                    </button>
+                  </dd>
+                </dl>
+              </div>
+            )}
+
+            {/* Original failed row this is a resend of */}
+            {detail.resendOfId && (
+              <div className="adm-resend-origin">
+                <button
+                  type="button"
+                  className="adm-link-btn"
+                  onClick={() => {
+                    setSelectedId(detail.resendOfId!);
+                    setResendMsg(null);
+                    setResendOk(null);
+                  }}
+                >
+                  ← View original failed row
+                </button>
+              </div>
+            )}
+
             <dl className="adm-detail-list">
               <dt>Recipient</dt>
               <dd>{detail.toEmail}</dd>
               <dt>Status</dt>
               <dd>
-                {detail.status}
-                {isStuck(detail) && <span className="adm-stuck">Queued but not dispatched.</span>}
+                <StatusCell row={detail} />
               </dd>
               <dt>Created</dt>
               <dd>{fmtTimestamp(detail.createdAt)}</dd>
@@ -262,7 +446,8 @@ export function EmailLogPage(): ReactElement {
               <dd>{detail.sentAt ? fmtTimestamp(detail.sentAt) : "—"}</dd>
               <dt>Provider message id</dt>
               <dd>{detail.providerMessageId ?? "—"}</dd>
-              {detail.error && (
+              {/* Error shown in failure block above for failed rows; show here for other statuses */}
+              {detail.status !== "failed" && detail.error && (
                 <>
                   <dt>Error</dt>
                   <dd className="adm-error-text">{detail.error}</dd>
@@ -283,11 +468,7 @@ export function EmailLogPage(): ReactElement {
                 )}
               </dd>
             </dl>
-            {detail.status === "failed" && (
-              <button type="button" className="adm-btn" disabled={resending} onClick={() => void resend(detail)}>
-                {resending ? "Resending…" : "Resend"}
-              </button>
-            )}
+
             <h3 className="adm-subheading">Payload</h3>
             <pre className="adm-payload">{JSON.stringify(detail.payload, null, 2)}</pre>
           </aside>

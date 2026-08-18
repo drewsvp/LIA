@@ -196,7 +196,7 @@ export async function dispatchQueuedEmail(d: PendingDispatch): Promise<DispatchO
     if (!serverToken) throw new EmailConfigError("POSTMARK_SERVER_TOKEN is not set");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await emailLog.markFailed(SYSTEM, d.emailLogId, message);
+    await emailLog.markFailed(SYSTEM, d.emailLogId, message, "config");
     return { emailLogId: d.emailLogId, outcome: "failed", kind: "config", error: message };
   }
 
@@ -248,7 +248,7 @@ export async function dispatchQueuedEmail(d: PendingDispatch): Promise<DispatchO
 
     if (raced === timedOut) {
       const message = `provider call exceeded ${PROVIDER_TIMEOUT_MS / 1000}s with no response; outcome unknown — ${MAY_HAVE_SENT_MARKER}. Verify with the provider before resending.`;
-      await emailLog.markFailedIfStatus(SYSTEM, d.emailLogId, message, "sending");
+      await emailLog.markFailedIfStatus(SYSTEM, d.emailLogId, message, "sending", "provider_timeout");
       console.error(`[email] provider timeout (${d.emailLogId} → ${d.toEmail}): ${message}`);
       // Late-completion handler: if the original call eventually confirms a
       // send, record it loudly — the row flips to sent with the provider id,
@@ -280,7 +280,7 @@ export async function dispatchQueuedEmail(d: PendingDispatch): Promise<DispatchO
     return { emailLogId: d.emailLogId, outcome: "sent", providerMessageId: raced.MessageID };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await emailLog.markFailedIfStatus(SYSTEM, d.emailLogId, message, "sending");
+    await emailLog.markFailedIfStatus(SYSTEM, d.emailLogId, message, "sending", "provider");
     return { emailLogId: d.emailLogId, outcome: "failed", kind: "provider", error: message };
   }
 }
@@ -384,6 +384,8 @@ export type QueueProductEmailInput = {
   toPersonId?: string | null;
   replyTo?: string;
   vars: Record<string, unknown>;
+  /** When this is a resend attempt, the id of the original failed row — links the chain. */
+  resendOfId?: string | null;
 };
 
 export type QueueProductEmailResult =
@@ -458,6 +460,7 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
       entityType,
       entityId: input.entityId,
       payload: { vars: input.vars },
+      resendOfId: input.resendOfId ?? null,
     });
     console.warn(`[email] send skipped (${template.key} → ${input.toEmail}): template disabled by staff (row ${entry.id})`);
     return null;
@@ -515,6 +518,7 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
       entityType,
       entityId: input.entityId,
       payload: { vars: input.vars },
+      resendOfId: input.resendOfId ?? null,
     });
     console.warn(`[email] send skipped (${template.key} → ${input.toEmail}): template disabled by staff (row ${entry.id})`);
     return { outcome: "skipped_disabled", emailLogId: entry.id };
@@ -527,12 +531,13 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
     entityType,
     entityId: input.entityId,
     payload: { vars: input.vars, ...(input.replyTo ? { replyTo: input.replyTo } : {}) },
+    resendOfId: input.resendOfId ?? null,
   });
   if (queued.duplicate) return { outcome: "duplicate" };
   const entry = queued.entry;
 
-  const block = async (reason: string): Promise<QueueProductEmailResult> => {
-    await emailLog.markFailed(ctx, entry.id, reason);
+  const block = async (reason: string, category: "config" | "render" = "render"): Promise<QueueProductEmailResult> => {
+    await emailLog.markFailed(ctx, entry.id, reason, category);
     console.error(`[email] send blocked (${template.key} → ${input.toEmail}): ${reason}`);
     return { outcome: "blocked", emailLogId: entry.id, reason };
   };

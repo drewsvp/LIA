@@ -150,7 +150,7 @@ export async function approveMembership(input: {
           entityId: membership.id,
           payload: { vars },
         });
-        await dal.emailLog.markFailedInTx(c, row.id, err.message);
+        await dal.emailLog.markFailedInTx(c, row.id, err.message, "render");
         console.error(`[admin] membership ${membership.id} approved but org_member_approved blocked: ${err.message}`);
         email = { outcome: "blocked", toEmail: detail.email, reason: err.message };
       }
