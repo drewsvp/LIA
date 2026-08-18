@@ -63,3 +63,8 @@ defaultBucketID = "replit-objstore-78fe5153-2524-4ba6-b9a4-13ff9d3bb310"
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 180000
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["npm", "run", "start"]
+build = ["npm", "run", "build"]
