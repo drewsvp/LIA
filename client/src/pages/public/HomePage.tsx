@@ -25,13 +25,6 @@ export function HomePage(): ReactElement {
       />
 
       <div className="pb0-content">
-        {/* Member login link, right-aligned below the hero (§4) */}
-        <p className="pb0-login-row">
-          <Link href="/login" className="pb0-login-link">
-            Alliance Member Login &gt;
-          </Link>
-        </p>
-
         <p className="pb0-intro">
           Welcome to our <strong>Love in Action Database</strong>! Here, you'll find opportunities to meet the
           needs of our community's most vulnerable kids and families, in addition to the needs of the local

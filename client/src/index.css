@@ -236,19 +236,6 @@ h3 {
   margin: 0 auto;
   padding: 8px 16px 0;
 }
-.pb0-login-row {
-  text-align: right;
-  margin: 14px 0 22px;
-}
-.pb0-login-link {
-  color: #128a84;
-  font-weight: 700;
-  font-size: 14px;
-  text-decoration: none;
-}
-.pb0-login-link:hover {
-  text-decoration: underline;
-}
 .pb0-intro {
   text-align: center;
   color: #0b3a5d;
