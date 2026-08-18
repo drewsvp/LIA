@@ -1,0 +1,58 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "9nHLNaZFCCjTAufmEannW"
+uri = "file://.agents/outputs/og/og-a-clean.png"
+type = "image"
+title = "Open Graph option A"
+description = "Option A — Clean: full-bleed logo on white with a teal baseline rule. Maximum legibility at small thumbnail sizes."
+logical_id = "df748431-c02a-4c82-9adf-2dec6445cd79"
+content_hash = "sha256:95023d54e6dd27da5dd8c9d27e38da550dd9ced79baeab5a52c2035b247b51b0"
+size = 409587
+mtime_ms = 1787094631675
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/df748431-c02a-4c82-9adf-2dec6445cd79/f0b731d0-b8c1-4a3e-84a7-d6547a378b8f"
+storage_version_token = "1787094661684191"
+content_type = "image/png"
+
+[[outputs]]
+id = "mwU3VuR3dochddaS8pCmc"
+uri = "file://.agents/outputs/og/og-b-navy.png"
+type = "image"
+title = "Open Graph option B"
+description = "Option B — Navy frame: logo on a white card over brand navy with a teal top edge. Strongest contrast in a busy feed."
+logical_id = "c876e2dd-bb95-4234-b2f6-6ccfcb13ba71"
+content_hash = "sha256:f29cf3411dad1121d71d13c70be1d05d1bff19ec321d16729e81ea495f517037"
+size = 362153
+mtime_ms = 1787094631911
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/c876e2dd-bb95-4234-b2f6-6ccfcb13ba71/76c5dbb5-39a9-4e92-936a-1375ebf758eb"
+storage_version_token = "1787094662428184"
+content_type = "image/png"
+
+[[outputs]]
+id = "wvZekFa0s4kPMy5dBJWDR"
+uri = "file://.agents/outputs/og/og-c-split.png"
+type = "image"
+title = "Open Graph option C"
+description = "Option C — Split: logo panel on the left, photography on the right, divided by a teal rule. Adds warmth without crowding the mark."
+logical_id = "2a282736-9ce8-4e7b-a884-3b36190fa8fe"
+content_hash = "sha256:cd609fc9e841ed86dd0123e78cdb9a3197767816b97690d4bab51c8d056a9145"
+size = 816023
+mtime_ms = 1787094632859
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/2a282736-9ce8-4e7b-a884-3b36190fa8fe/465a06e5-832e-474f-b0dc-ced704b9eccf"
+storage_version_token = "1787094663015180"
+content_type = "image/png"
+
+[[outputs]]
+id = "TrsIdaJEYo3v1Gg0R75vj"
+uri = "file://.agents/outputs/og/og-d-photo.png"
+type = "image"
+title = "Open Graph option D"
+description = "Option D — Photo wash: the hero photograph behind a light wash with the logo on a white panel. Most editorial of the four."
+logical_id = "2905a9e6-0409-4bfe-9690-0151ab8de5c4"
+content_hash = "sha256:e952b0c33460c463c35658f39c5576a0511aea4124c2ea9b0e6295699634d0d2"
+size = 440105
+mtime_ms = 1787094633719
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/2905a9e6-0409-4bfe-9690-0151ab8de5c4/7ad83aae-720a-4538-8f6d-d61d09293bde"
+storage_version_token = "1787094663665400"
+content_type = "image/png"
