@@ -13,7 +13,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import { useLocation, useSearch } from "wouter";
-import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
 
 const QUICK_LOGIN_ROLES = [
@@ -24,7 +23,6 @@ const QUICK_LOGIN_ROLES = [
 
 export function LoginPage(): ReactElement | null {
   const { session, isLoading } = useSession();
-  const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const search = useSearch();
   const [email, setEmail] = useState("");
