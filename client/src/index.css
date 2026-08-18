@@ -2195,6 +2195,17 @@ a.site-nav-btn {
   font-weight: 700;
   line-height: 20px;
 }
+.adm-badge--ok   { background: #1a7a3c; }
+.adm-badge--warn { background: #885500; }
+
+.adm-subheading {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 1.75rem 0 0.5rem;
+  color: var(--color-navy);
+}
+
+.adm-upcoming-digest { margin-bottom: 2rem; }
 
 .adm-nav-alert {
   display: block;

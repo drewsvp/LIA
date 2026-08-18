@@ -156,6 +156,12 @@ export type NewNeed = {
  * approval_events so reinstatements count and approved_at rewrites don't
  * matter — and that are STILL active on an approved member org (a need
  * archived before the digest goes out is not advertised).
+ *
+ * Needs with an exclusion whose excluded_at is AFTER the window start are
+ * omitted. Using excluded_at (not window_start) as the filter key means the
+ * check is stable regardless of millisecond drift in the now()-7d fallback:
+ * any exclusion created after the watermark counts; any created before it
+ * (a prior window's stale row) does not.
  */
 export async function newActiveNeeds(ctx: DbContext, from: string, to: string): Promise<NewNeed[]> {
   return withDbContext(ctx, (c) =>
@@ -168,6 +174,9 @@ export async function newActiveNeeds(ctx: DbContext, from: string, to: string): 
           and exists (select 1 from approval_events e
                        where e.entity_type = 'item_request' and e.entity_id = r.id
                          and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)
+          and not exists (select 1 from digest_exclusions x
+                           where x.need_type = 'item' and x.need_id = r.id
+                             and x.excluded_at > $1::timestamptz)
        union all
        select r.id, 'volunteer' as type, r.title as name, o.name as "orgName", r.image_url as "imageUrl"
          from volunteer_requests r
@@ -176,8 +185,153 @@ export async function newActiveNeeds(ctx: DbContext, from: string, to: string): 
           and exists (select 1 from approval_events e
                        where e.entity_type = 'volunteer_request' and e.entity_id = r.id
                          and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)
+          and not exists (select 1 from digest_exclusions x
+                           where x.need_type = 'volunteer' and x.need_id = r.id
+                             and x.excluded_at > $1::timestamptz)
         order by name`,
       [from, to],
     ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Upcoming-window preview and exclusion management (task 77)
+// ---------------------------------------------------------------------------
+
+export type UpcomingWindow = {
+  /** ISO timestamptz — the watermark; same value claimOrResume will use. */
+  windowStart: string;
+  /** ISO timestamptz — now() at query time. */
+  windowEnd: string;
+};
+
+/**
+ * The window the next digest run will cover: (windowStart, windowEnd].
+ * windowStart is the durable watermark (max completed window_end, or 7 days
+ * ago for the very first ever run). windowEnd is now().
+ * This is the same arithmetic claimOrResume uses, so the preview and the
+ * job always agree on the window boundaries.
+ */
+export async function upcomingWindow(ctx: DbContext): Promise<UpcomingWindow> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<UpcomingWindow>(
+      c,
+      `select coalesce(
+                (select max(window_end) from digest_runs where status in ('sent','skipped_empty')),
+                now() - interval '7 days'
+              ) as "windowStart",
+              now() as "windowEnd"`,
+      [],
+    ),
+  );
+  const row = rows[0];
+  if (!row) throw new Error("digestRuns.upcomingWindow: no row returned");
+  return row;
+}
+
+export type UpcomingNeed = NewNeed & {
+  /** True when an exclusion row exists for this need in the upcoming window. */
+  excluded: boolean;
+};
+
+/**
+ * All needs in the upcoming digest window, annotated with their exclusion
+ * status. Included and excluded needs are both returned so staff can see
+ * the full picture and toggle either direction.
+ *
+ * The window boundaries are computed in the same transaction as the needs
+ * query so the two agree exactly (no TOCTOU gap between separate calls).
+ */
+export async function upcomingNeeds(ctx: DbContext): Promise<{ window: UpcomingWindow; needs: UpcomingNeed[] }> {
+  return withDbContext(ctx, async (c) => {
+    // Compute window bounds once; reuse the same watermark arithmetic as claimOrResume.
+    const winRows = await q<UpcomingWindow>(
+      c,
+      `select coalesce(
+                (select max(window_end) from digest_runs where status in ('sent','skipped_empty')),
+                now() - interval '7 days'
+              ) as "windowStart",
+              now() as "windowEnd"`,
+      [],
+    );
+    const win = winRows[0];
+    if (!win) throw new Error("digestRuns.upcomingNeeds: window query returned no rows");
+
+    // Same approved-org / approval_events predicate as newActiveNeeds, but
+    // with the exclusion flag computed instead of filtered, so both states show.
+    // The EXISTS check uses excluded_at > windowStart (not exact window_start
+    // equality) so the flag is stable even when windowStart drifts between
+    // calls (no-prior-completed-runs fallback = now()-7d changes each call).
+    const needs = await q<UpcomingNeed>(
+      c,
+      `select r.id, 'item' as type, r.title as name, o.name as "orgName", r.image_url as "imageUrl",
+              (exists (select 1 from digest_exclusions x
+                        where x.need_type = 'item' and x.need_id = r.id
+                          and x.excluded_at > $1::timestamptz)) as excluded
+         from item_requests r
+         join organizations o on o.id = r.org_id
+        where r.status = 'active' and o.kind = 'member_org' and o.status = 'approved'
+          and exists (select 1 from approval_events e
+                       where e.entity_type = 'item_request' and e.entity_id = r.id
+                         and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)
+       union all
+       select r.id, 'volunteer' as type, r.title as name, o.name as "orgName", r.image_url as "imageUrl",
+              (exists (select 1 from digest_exclusions x
+                        where x.need_type = 'volunteer' and x.need_id = r.id
+                          and x.excluded_at > $1::timestamptz)) as excluded
+         from volunteer_requests r
+         join organizations o on o.id = r.org_id
+        where r.status = 'active' and o.kind = 'member_org' and o.status = 'approved'
+          and exists (select 1 from approval_events e
+                       where e.entity_type = 'volunteer_request' and e.entity_id = r.id
+                         and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)
+        order by name`,
+      [win.windowStart, win.windowEnd],
+    );
+    return { window: win, needs };
+  });
+}
+
+/**
+ * Exclude a need from the upcoming digest window.
+ * Idempotent: upserts on (need_type, need_id), refreshing excluded_at so the
+ * filter `excluded_at > window_start` stays correct. window_start is stored
+ * for auditability only — filtering uses excluded_at, not window_start.
+ * The excluded_by user id is recorded for auditability.
+ */
+export async function excludeNeed(
+  ctx: DbContext,
+  needType: "item" | "volunteer",
+  needId: string,
+  windowStart: string,
+  excludedByUserId: string,
+): Promise<void> {
+  await withDbContext(ctx, (c) =>
+    q(
+      c,
+      `insert into digest_exclusions (need_type, need_id, window_start, excluded_by, excluded_at)
+       values ($1, $2, $3::timestamptz, $4::uuid, now())
+       on conflict (need_type, need_id)
+       do update set window_start = excluded.window_start,
+                     excluded_by  = excluded.excluded_by,
+                     excluded_at  = now()`,
+      [needType, needId, windowStart, excludedByUserId],
+    ),
+  );
+}
+
+/**
+ * Re-include a previously excluded need (removes the exclusion row).
+ * Idempotent: a call for a need that is not excluded is a no-op.
+ * Deletes by (need_type, need_id) — no window scoping needed since at most
+ * one exclusion row exists per need at any time.
+ */
+export async function includeNeed(
+  ctx: DbContext,
+  needType: "item" | "volunteer",
+  needId: string,
+): Promise<void> {
+  await withDbContext(ctx, (c) =>
+    q(c, `delete from digest_exclusions where need_type = $1 and need_id = $2`, [needType, needId]),
   );
 }

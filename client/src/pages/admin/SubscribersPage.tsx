@@ -3,6 +3,11 @@
  * The list is visible and manageable from the moment it is imported; the
  * send job is phase two (D46) and the surface says so. Unsubscribe never
  * deletes; export is the one export in the admin and names what it holds.
+ *
+ * Task 77: an "Upcoming Digest" section above the subscriber list lets staff
+ * see every need in the current window and exclude (or re-include) individual
+ * ones before the Thursday send. Exclusions are persisted in digest_exclusions
+ * and respected by the digest job's needs selection.
  */
 import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -36,6 +41,20 @@ type ListResponse = {
   lastRun: DigestRun | null;
 };
 
+type UpcomingNeed = {
+  id: string;
+  type: "item" | "volunteer";
+  name: string;
+  orgName: string;
+  imageUrl: string | null;
+  excluded: boolean;
+};
+
+type UpcomingResponse = {
+  window: { windowStart: string; windowEnd: string };
+  needs: UpcomingNeed[];
+};
+
 function digestRunLine(run: DigestRun | null): string {
   if (run === null) return "The weekly digest goes out Thursday mornings. No digest has been sent yet.";
   if (run.status === "running") return `The digest for ${run.runDate} is being sent right now.`;
@@ -52,7 +71,126 @@ function fmtDay(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 }
 
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-CA", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 type Filters = { status: string; email: string; from: string; to: string };
+
+const UPCOMING_KEY = "/api/admin/digest/upcoming";
+
+function UpcomingDigestSection(): ReactElement {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+
+  const { data, isLoading, isError } = useQuery<UpcomingResponse>({ queryKey: [UPCOMING_KEY] });
+
+  async function toggleExclusion(need: UpcomingNeed): Promise<void> {
+    const key = `${need.type}/${need.id}`;
+    setBusyId(key);
+    setActionMsg(null);
+    try {
+      const url = `/api/admin/digest/upcoming/${need.type}/${need.id}/exclude`;
+      const method = need.excluded ? "DELETE" : "POST";
+      const res = await fetch(url, { method, credentials: "include" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        setActionMsg(body?.message ?? "That did not save. Nothing was changed.");
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: [UPCOMING_KEY] });
+      setActionMsg(
+        need.excluded
+          ? `"${need.name}" will now be included in the digest.`
+          : `"${need.name}" will be excluded from the digest.`,
+      );
+    } catch {
+      setActionMsg("That did not save. Nothing was changed.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const included = data?.needs.filter((n) => !n.excluded) ?? [];
+  const excluded = data?.needs.filter((n) => n.excluded) ?? [];
+
+  return (
+    <section className="adm-upcoming-digest">
+      <h2 className="adm-subheading">Upcoming Digest</h2>
+
+      {isError && (
+        <p className="adm-error-text">Upcoming needs could not be loaded. Refresh to try again.</p>
+      )}
+      {isLoading && !isError && <p>Loading…</p>}
+
+      {data && (
+        <>
+          <p className="adm-sub-note">
+            Window: {fmtDateTime(data.window.windowStart)} – {fmtDateTime(data.window.windowEnd)} (LA time).{" "}
+            {included.length === 0
+              ? "No needs are currently in the upcoming digest."
+              : `${included.length} need${included.length === 1 ? "" : "s"} will be included.`}
+            {excluded.length > 0 && ` ${excluded.length} excluded.`}
+          </p>
+
+          {actionMsg && <p className="adm-action-msg">{actionMsg}</p>}
+
+          {data.needs.length === 0 ? (
+            <p className="adm-empty">No needs became active in this window yet.</p>
+          ) : (
+            <table className="adm-act-table">
+              <thead>
+                <tr>
+                  <th>Need</th>
+                  <th>Organization</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.needs.map((n) => {
+                  const key = `${n.type}/${n.id}`;
+                  return (
+                    <tr key={key} style={n.excluded ? { opacity: 0.55 } : undefined}>
+                      <td>{n.name}</td>
+                      <td>{n.orgName}</td>
+                      <td>{n.type === "item" ? "Item need" : "Volunteer need"}</td>
+                      <td>
+                        {n.excluded ? (
+                          <span className="adm-badge adm-badge--warn">Excluded</span>
+                        ) : (
+                          <span className="adm-badge adm-badge--ok">Included</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          onClick={() => void toggleExclusion(n)}
+                          disabled={busyId === key}
+                        >
+                          {n.excluded ? "Re-include" : "Exclude"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
 
 export function SubscribersPage(): ReactElement {
   // Default view: subscribed only, most recently subscribed first (§5).
@@ -137,6 +275,10 @@ export function SubscribersPage(): ReactElement {
           bounced
         </p>
       )}
+
+      <UpcomingDigestSection />
+
+      <h2 className="adm-subheading">Subscriber list</h2>
 
       <div className="adm-filter-row">
         <label className="adm-filter">

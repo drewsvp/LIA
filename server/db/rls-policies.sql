@@ -567,3 +567,13 @@ drop policy if exists digest_runs_system_staff_all on digest_runs;
 create policy digest_runs_system_staff_all on digest_runs
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
+
+-- ---------------------------------------------------------------- digest_exclusions
+
+alter table digest_exclusions enable row level security;
+alter table digest_exclusions force row level security;
+
+drop policy if exists digest_exclusions_system_staff_all on digest_exclusions;
+create policy digest_exclusions_system_staff_all on digest_exclusions
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));

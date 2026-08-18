@@ -1508,6 +1508,73 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  // ---- §ADMIN-08 digest upcoming-needs preview and per-need exclusions.
+  //
+  // GET  /api/admin/digest/upcoming        — upcoming window + all needs with exclusion status
+  // POST /api/admin/digest/upcoming/:type/:id/exclude   — exclude a need (idempotent)
+  // DELETE /api/admin/digest/upcoming/:type/:id/exclude — re-include a need (idempotent)
+  //
+  // All three are requireStaffAdmin: same gate as the rest of ADMIN-08.
+
+  app.get("/api/admin/digest/upcoming", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const result = await dal.digestRuns.upcomingNeeds(staffCtx(req));
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  const NEED_TYPE_SET = new Set(["item", "volunteer"]);
+
+  app.post(
+    "/api/admin/digest/upcoming/:needType/:needId/exclude",
+    requireStaffAdmin,
+    async (req: Request, res: Response, next) => {
+      const needType = req.params.needType ?? "";
+      const needId = req.params.needId ?? "";
+      if (!NEED_TYPE_SET.has(needType) || !UUID_RE.test(needId)) {
+        sendNotFound(res);
+        return;
+      }
+      try {
+        // window_start is computed server-side and stored for auditability.
+        // Filtering uses excluded_at, not window_start, so no drift problem.
+        const win = await dal.digestRuns.upcomingWindow(staffCtx(req));
+        const userId = staffContext(req).userId;
+        await dal.digestRuns.excludeNeed(
+          staffCtx(req),
+          needType as "item" | "volunteer",
+          needId,
+          win.windowStart,
+          userId,
+        );
+        res.json({ excluded: true });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  app.delete(
+    "/api/admin/digest/upcoming/:needType/:needId/exclude",
+    requireStaffAdmin,
+    async (req: Request, res: Response, next) => {
+      const needType = req.params.needType ?? "";
+      const needId = req.params.needId ?? "";
+      if (!NEED_TYPE_SET.has(needType) || !UUID_RE.test(needId)) {
+        sendNotFound(res);
+        return;
+      }
+      try {
+        await dal.digestRuns.includeNeed(staffCtx(req), needType as "item" | "volunteer", needId);
+        res.json({ excluded: false });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
   // ---- §6 Reinstate: removed → PENDING, so the normal approval path and its
   // login email still run. Never straight to active.
   app.post("/api/admin/members/:id/reinstate", requireStaff, async (req: Request, res: Response) => {
