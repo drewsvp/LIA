@@ -306,11 +306,18 @@ h3 {
   font-size: 14px;
   padding: 12px 28px;
   border: none;
+  border-radius: 8px;
   text-decoration: none;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
-.btn-navy:hover {
-  background: #0e4a75;
+.btn-navy:hover,
+.btn-navy:focus-visible {
+  background: #1a5c94;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transform: translateY(-2px);
+  outline: none;
 }
 .pb0-navy {
   --heading-color: #ffffff;
