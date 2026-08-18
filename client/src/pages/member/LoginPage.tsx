@@ -15,6 +15,12 @@ import type { FormEvent, ReactElement } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useSession } from "../../hooks/useSession";
 
+const QUICK_LOGIN_ROLES = [
+  { role: "staff_admin", label: "Staff Admin", name: "Tiffany Loeffler" },
+  { role: "staff_approver", label: "Staff Approver", name: "Riley Chen" },
+  { role: "org_owner", label: "Org Owner", name: "Dana Whitfield" },
+] as const;
+
 export function LoginPage(): ReactElement | null {
   const { session, isLoading } = useSession();
   const [, setLocation] = useLocation();
@@ -23,6 +29,10 @@ export function LoginPage(): ReactElement | null {
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [quickLoading, setQuickLoading] = useState<string | null>(null);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  // null = checking, false = disabled/unavailable, true = enabled
+  const [quickEnabled, setQuickEnabled] = useState<boolean | null>(null);
 
   const linkError = new URLSearchParams(search).has("error");
 
@@ -33,6 +43,15 @@ export function LoginPage(): ReactElement | null {
       setLocation("/dashboard", { replace: true });
     }
   }, [isLoading, session, setLocation]);
+
+  useEffect(() => {
+    // Ask the server whether quick login is available. The endpoint returns 404
+    // when disabled (not development and QUICK_LOGIN_ENABLED !== true), so the
+    // UI section only appears when the server has opted in.
+    fetch("/api/login/quick/status", { credentials: "include" })
+      .then((r) => setQuickEnabled(r.ok))
+      .catch(() => setQuickEnabled(false));
+  }, []);
 
   if (isLoading || session?.authenticated) return null;
 
@@ -64,6 +83,37 @@ export function LoginPage(): ReactElement | null {
       setFormError("Something went wrong sending your login link. Please try again.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleQuickLogin(role: string): Promise<void> {
+    if (quickLoading !== null) return;
+    setQuickError(null);
+    setQuickLoading(role);
+    try {
+      const res = await fetch("/api/login/quick", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        message?: string;
+        redirectTo?: string;
+      } | null;
+      if (res.ok) {
+        setLocation(body?.redirectTo ?? "/dashboard", { replace: true });
+        return;
+      }
+      setQuickError(
+        typeof body?.message === "string" && body.message !== ""
+          ? body.message
+          : "Quick login failed. Please try again.",
+      );
+    } catch {
+      setQuickError("Quick login failed. Please try again.");
+    } finally {
+      setQuickLoading(null);
     }
   }
 
@@ -104,6 +154,30 @@ export function LoginPage(): ReactElement | null {
           </button>
         </form>
       )}
+
+      {quickEnabled ? (
+        <section className="mp1-quick-section" aria-label="Quick login — test accounts">
+          <p className="mp1-quick-heading">Quick Login — test accounts</p>
+          <div className="mp1-quick-buttons">
+            {QUICK_LOGIN_ROLES.map(({ role, label, name }) => (
+              <button
+                key={role}
+                className="mp1-quick-btn"
+                type="button"
+                disabled={quickLoading !== null}
+                onClick={() => void handleQuickLogin(role)}
+              >
+                {quickLoading === role ? "Signing in…" : `${label} — ${name}`}
+              </button>
+            ))}
+          </div>
+          {quickError ? (
+            <p className="mp1-quick-error" role="alert">
+              {quickError}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
     </main>
   );
 }

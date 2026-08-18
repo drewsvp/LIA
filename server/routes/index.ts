@@ -10,13 +10,15 @@
  * the SPA shell; each currently renders a placeholder component. Unknown /api
  * paths and non-staff /api/admin requests return the identical 404 body.
  */
+import { randomBytes } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "../auth/auth";
 import { resolveSessionInfo, ACTIVE_ORG_COOKIE } from "../auth/session";
 import { NOT_FOUND_BODY, requireStaff } from "../auth/guards";
 import { magicLinkEmailLimiter, magicLinkIpLimiter } from "../auth/rate-limit";
-import { PUBLIC } from "../db/client";
+import { PUBLIC, SYSTEM, pool } from "../db/client";
+import * as usersDal from "../dal/users";
 import * as dal from "../dal";
 import * as storage from "../storage/object-storage";
 import { LEGACY_ROUTES } from "../../shared/routes";
@@ -62,6 +64,104 @@ export function registerRoutes(app: Express): void {
         // Send failures (config, provider) are recorded in email_log and here.
         console.error("magic-link request failed:", err);
       });
+  });
+
+  // ---- Quick Login (seeded test accounts only — hardcoded allowlist).
+  //
+  // Disabled by default. Enabled when NODE_ENV=development OR the deployer has
+  // explicitly set QUICK_LOGIN_ENABLED=true. When disabled every request to
+  // these routes returns the standard unknown-API 404 so the surface is
+  // invisible to anyone who has not opted in.
+  //
+  // Token generation bypasses the email-send path entirely: a one-off
+  // verification row is written directly to the DB (same schema Better Auth
+  // uses) and immediately consumed via magicLinkVerify. No email is dispatched.
+  const QUICK_LOGIN_ACCOUNTS: Record<string, { email: string; label: string }> = {
+    staff_admin: { email: "tiffany@defendingthecause.org", label: "Staff Admin (Tiffany)" },
+    staff_approver: { email: "approver@thealliance.example.org", label: "Staff Approver (Riley)" },
+    org_owner: { email: "dana@heartsandhands.example.org", label: "Org Owner (Dana)" },
+  };
+
+  function isQuickLoginEnabled(): boolean {
+    return process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true";
+  }
+
+  // Status endpoint — lets the client know whether to show the quick-login UI.
+  app.get("/api/login/quick/status", (_req: Request, res: Response) => {
+    if (!isQuickLoginEnabled()) {
+      res.status(404).json(NOT_FOUND_BODY);
+      return;
+    }
+    res.json({ enabled: true });
+  });
+
+  app.post("/api/login/quick", async (req: Request, res: Response) => {
+    // Environment gate: return identical 404 to an unknown route when disabled.
+    if (!isQuickLoginEnabled()) {
+      res.status(404).json(NOT_FOUND_BODY);
+      return;
+    }
+
+    const role: unknown = (req.body as Record<string, unknown> | undefined)?.role;
+    if (typeof role !== "string" || !(role in QUICK_LOGIN_ACCOUNTS)) {
+      res.status(400).json({ message: "Unknown test role." });
+      return;
+    }
+    // Same IP-based rate limit as magic link.
+    if (!magicLinkIpLimiter.consume(req.ip ?? "unknown")) {
+      res.status(429).json({ message: "Too many attempts. Try again later." });
+      return;
+    }
+    const account = QUICK_LOGIN_ACCOUNTS[role]!;
+
+    // Confirm the test user is present and active (seed not yet run → helpful error).
+    const user = await usersDal.findByEmail(SYSTEM, account.email);
+    if (!user || user.status !== "active") {
+      res.status(404).json({
+        message: `Test account not found (${account.label}). Run the seed script first.`,
+      });
+      return;
+    }
+
+    // Step 1: write a verification row directly — same schema Better Auth uses,
+    // but WITHOUT calling signInMagicLink so no email is ever dispatched.
+    const token = randomBytes(24).toString("base64url"); // 32 URL-safe chars
+    await pool.query(
+      `INSERT INTO verification (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
+       VALUES (gen_random_uuid(), $1, $2, NOW() + INTERVAL '2 minutes', NOW(), NOW())`,
+      [token, JSON.stringify({ email: account.email })],
+    );
+
+    // Step 2: verify the token via Better Auth's own handler so the session is
+    // created through its normal code path (hooks, subject linking, etc.).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const verifyRes: globalThis.Response = await (auth.api as any).magicLinkVerify({
+      query: { token, callbackURL: "/dashboard" },
+      headers: new Headers(),
+      asResponse: true,
+    });
+
+    const setCookies: string[] =
+      typeof (verifyRes.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
+        ? (verifyRes.headers as { getSetCookie: () => string[] }).getSetCookie()
+        : [];
+
+    // Guard: treat a missing session cookie as a hard failure rather than
+    // silently returning an unauthenticated 200.
+    const hasSessionCookie = setCookies.some(
+      (c) =>
+        c.startsWith("__Secure-better-auth.session_token") ||
+        c.startsWith("better-auth.session_token"),
+    );
+    if (!hasSessionCookie) {
+      res.status(500).json({ message: "Login setup failed — session not established. Please try again." });
+      return;
+    }
+
+    for (const c of setCookies) {
+      res.append("Set-Cookie", c);
+    }
+    res.status(200).json({ ok: true, redirectTo: "/dashboard" });
   });
 
   // ---- Session snapshot for the client (MP-02 routing, admin gate).
