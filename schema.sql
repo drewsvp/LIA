@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict fBPqRnA8kJdeeOCFTIh6jFnVWEg1Di4vxIqQROeuxLjd3jGkk1ok0Q52s62KsSq
+\restrict pgdgSBb2RuOWdNag4zh8XqOeflgrPUrSqrR2sU3UQErL1shVkynMZXGtpvfuSWA
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -722,9 +722,13 @@ CREATE TABLE public.item_requests (
     created_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    image_generated boolean DEFAULT false NOT NULL,
+    image_gen_status text,
+    image_gen_error text,
     CONSTRAINT item_requests_archived_reason_check CHECK ((archived_reason = ANY (ARRAY['manual'::text, 'expired'::text, 'fulfilled'::text]))),
     CONSTRAINT item_requests_deadline_date_required CHECK (((deadline_type <> 'date_specific'::text) OR (deadline_date IS NOT NULL))),
     CONSTRAINT item_requests_deadline_type_check CHECK ((deadline_type = ANY (ARRAY['date_specific'::text, 'until_fulfilled'::text, 'ongoing'::text]))),
+    CONSTRAINT item_requests_image_gen_status_check CHECK ((image_gen_status = ANY (ARRAY['pending'::text, 'succeeded'::text, 'failed'::text]))),
     CONSTRAINT item_requests_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'pending'::text, 'active'::text, 'archived'::text])))
 );
 
@@ -2309,5 +2313,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict fBPqRnA8kJdeeOCFTIh6jFnVWEg1Di4vxIqQROeuxLjd3jGkk1ok0Q52s62KsSq
+\unrestrict pgdgSBb2RuOWdNag4zh8XqOeflgrPUrSqrR2sU3UQErL1shVkynMZXGtpvfuSWA
 

@@ -16,6 +16,9 @@ export type MembershipRole = "owner" | "member" | "staff_admin" | "staff_approve
 export type MembershipStatus = "pending" | "active" | "removed";
 export type RequestStatus = "draft" | "pending" | "active" | "archived";
 export type DeadlineType = "date_specific" | "until_fulfilled" | "ongoing";
+
+/** Latest auto-image attempt for an item request. Null = never attempted. */
+export type ImageGenStatus = "pending" | "succeeded" | "failed";
 export type ArchivedReason = "manual" | "expired" | "fulfilled";
 export type ItemCondition = "new" | "gently_used" | "any";
 export type ApprovalEntityType =
@@ -145,6 +148,10 @@ export type ItemRequest = {
   title: string;
   description: string | null;
   imageUrl: string | null;
+  /** True when imageUrl was auto-sourced (stock/AI), not uploaded by a person. */
+  imageGenerated: boolean;
+  imageGenStatus: ImageGenStatus | null;
+  imageGenError: string | null;
   dropoffLocation: string | null;
   peopleHelped: number | null;
   deadlineType: DeadlineType;

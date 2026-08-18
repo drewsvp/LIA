@@ -16,6 +16,7 @@ import { storeImage } from "../storage/object-storage";
 import { updateOrganizationSettings } from "../services/org-settings";
 import { submitMemberInvite, DuplicateMembershipError } from "../services/member-invite";
 import { submitItemRequest, NoItemsError } from "../services/item-submit";
+import { sourceNeedImageInBackground } from "../services/need-image";
 import { saveRequestEdits, IllegalStatusMoveError } from "../services/item-request-edit";
 import { submitVolunteerRequest, NoRolesError } from "../services/volunteer-submit";
 import { saveVolunteerRequestEdits, RoleOverInterestError } from "../services/volunteer-request-edit";
@@ -1015,6 +1016,9 @@ export function registerMemberRoutes(app: Express): void {
         if (actorEmail === "") throw new Error("item-submit: session carries no user email");
         try {
           const result = await submitItemRequest({ request, actorUserId: userId, actorEmail });
+          // Auto-source a listing image in the background when no photo was
+          // provided — the submission never waits on or fails because of it.
+          sourceNeedImageInBackground(request);
           await dispatchQueuedEmails(result.dispatches);
           res.json({ ok: true });
         } catch (err) {

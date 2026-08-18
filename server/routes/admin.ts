@@ -41,7 +41,8 @@ import * as dal from "../dal";
 import { withDbContext, type DbContext } from "../db/client";
 import type { MembershipRole } from "../../shared/types";
 import { dispatchQueuedEmails, type PendingDispatch } from "../email/send";
-import { storeImage } from "../storage/object-storage";
+import { storeImage, deleteImage } from "../storage/object-storage";
+import { sourceNeedImage, NeedImageError } from "../services/need-image";
 import {
   approveOrganization,
   disableOrganization,
@@ -589,7 +590,14 @@ export function registerAdminRoutes(app: Express): void {
       const stored = await storeImage({ data: req.file.buffer, filename: req.file.originalname });
       const updated: AdminRequest =
         kind === "item"
-          ? await dal.itemRequests.update(ctx, request.orgId, id, { imageUrl: stored.url })
+          ? // An upload supersedes any auto-sourced image for good: clear the
+            // generated flag and status so automation never touches it again.
+            await dal.itemRequests.update(ctx, request.orgId, id, {
+              imageUrl: stored.url,
+              imageGenerated: false,
+              imageGenStatus: null,
+              imageGenError: null,
+            })
           : await dal.volunteerRequests.update(ctx, request.orgId, id, { imageUrl: stored.url });
       res.json({ request: updated, message: "Image saved." });
     } catch (err) {
@@ -597,6 +605,78 @@ export function registerAdminRoutes(app: Express): void {
       res.status(500).json({ message: SAVE_FAILURE });
     }
   }
+
+  // ---- Auto-sourced images (item requests only). Regenerate finds a stock
+  // photo (or AI-generates one) on demand; it never replaces an uploaded
+  // photo. Runs synchronously so staff see the result or the exact error.
+  app.post("/api/admin/requests/item/:id/generate-image", requireStaff, async (req: Request, res: Response) => {
+    const id = req.params.id ?? "";
+    if (!UUID_RE.test(id)) {
+      sendNotFound(res);
+      return;
+    }
+    const ctx = staffCtx(req);
+    try {
+      const request = await dal.itemRequests.getById(ctx, id);
+      if (!request) {
+        sendNotFound(res);
+        return;
+      }
+      if (request.status === "archived") {
+        res.status(409).json({ message: "An archived request cannot have its image changed." });
+        return;
+      }
+      if (request.imageUrl !== null && !request.imageGenerated) {
+        res.status(409).json({ message: "This request has an uploaded photo. Remove or replace it instead." });
+        return;
+      }
+      const result = await sourceNeedImage(id, { overwriteGenerated: true });
+      res.json({
+        request: result.request,
+        message: result.source === "stock" ? "Stock photo found and saved." : "AI image generated and saved.",
+      });
+    } catch (err) {
+      if (err instanceof NeedImageError) {
+        res.status(502).json({ message: `Image could not be sourced: ${err.message}` });
+        return;
+      }
+      console.error(`[admin] generate image failed for item request ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
+    }
+  });
+
+  app.post("/api/admin/requests/item/:id/remove-generated-image", requireStaff, async (req: Request, res: Response) => {
+    const id = req.params.id ?? "";
+    if (!UUID_RE.test(id)) {
+      sendNotFound(res);
+      return;
+    }
+    const ctx = staffCtx(req);
+    try {
+      const request = await dal.itemRequests.getById(ctx, id);
+      if (!request) {
+        sendNotFound(res);
+        return;
+      }
+      if (!request.imageGenerated || request.imageUrl === null) {
+        res.status(409).json({ message: "This request has no auto-sourced image to remove." });
+        return;
+      }
+      const previousUrl = request.imageUrl;
+      const updated = await dal.itemRequests.clearGeneratedImage(ctx, id);
+      if (updated === null) {
+        res.status(409).json({ message: "This request has no auto-sourced image to remove." });
+        return;
+      }
+      await deleteImage(previousUrl).catch((err) => {
+        console.error(`[admin] orphaned storage object ${previousUrl} after remove:`, err);
+      });
+      res.json({ request: updated, message: "Auto-sourced image removed." });
+    } catch (err) {
+      console.error(`[admin] remove generated image failed for item request ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
+    }
+  });
 
   // --------------------------------------------------------------------------
   // ADMIN-03 — member approval queue (docs/specs/ADMIN-03.md)

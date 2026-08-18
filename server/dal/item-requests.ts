@@ -10,6 +10,7 @@ import { q, withDbContext, type DbContext } from "../db/client";
 import type {
   ArchivedReason,
   DeadlineType,
+  ImageGenStatus,
   ItemRequest,
   PublicItemRequest,
   PublicOrganization,
@@ -18,7 +19,9 @@ import type {
 import { insertInTx } from "./approval-events";
 
 const COLS = `r.id, r.legacy_wix_id as "legacyWixId", r.org_id as "orgId", r.title, r.description,
-  r.image_url as "imageUrl", r.dropoff_location as "dropoffLocation", r.people_helped as "peopleHelped",
+  r.image_url as "imageUrl", r.image_generated as "imageGenerated", r.image_gen_status as "imageGenStatus",
+  r.image_gen_error as "imageGenError",
+  r.dropoff_location as "dropoffLocation", r.people_helped as "peopleHelped",
   r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
   r.contact_person_id as "contactPersonId", r.status, r.submitted_at as "submittedAt",
   r.approved_at as "approvedAt", r.approved_by as "approvedBy", r.archived_at as "archivedAt",
@@ -50,6 +53,9 @@ export type UpdateItemRequestPatch = Partial<{
   deadlineDate: string | null;
   expiresOn: string | null;
   contactPersonId: string | null;
+  imageGenerated: boolean;
+  imageGenStatus: ImageGenStatus | null;
+  imageGenError: string | null;
 }>;
 
 const PATCH_COLUMNS: Record<keyof UpdateItemRequestPatch, string> = {
@@ -62,7 +68,79 @@ const PATCH_COLUMNS: Record<keyof UpdateItemRequestPatch, string> = {
   deadlineDate: "deadline_date",
   expiresOn: "expires_on",
   contactPersonId: "contact_person_id",
+  imageGenerated: "image_generated",
+  imageGenStatus: "image_gen_status",
+  imageGenError: "image_gen_error",
 };
+
+// ---------------------------------------------------------------------------
+// Auto-sourced images. The uploaded-photo-wins rule is enforced HERE, in SQL:
+// an auto write only lands where image_url is still null (or where the
+// current image is itself auto-sourced, for staff regenerate). Callers get
+// null back when an uploaded photo won and must discard their stored object.
+// ---------------------------------------------------------------------------
+
+/** Mark an attempt in flight. Returns false when the request no longer qualifies. */
+export async function markImageGenPending(ctx: DbContext, requestId: string): Promise<boolean> {
+  return withDbContext(ctx, async (c) => {
+    const rows = await q<{ id: string }>(
+      c,
+      `update item_requests set image_gen_status = 'pending', image_gen_error = null
+       where id = $1 returning id`,
+      [requestId],
+    );
+    return rows.length > 0;
+  });
+}
+
+/**
+ * Record a stored auto-sourced image. `overwriteGenerated` (staff regenerate)
+ * may replace a previous auto image; it never replaces an uploaded photo.
+ */
+export async function recordGeneratedImage(
+  ctx: DbContext,
+  requestId: string,
+  imageUrl: string,
+  opts: { overwriteGenerated: boolean },
+): Promise<ItemRequest | null> {
+  return withDbContext(ctx, async (c) => {
+    const guard = opts.overwriteGenerated ? "(r.image_url is null or r.image_generated)" : "r.image_url is null";
+    const rows = await q<ItemRequest>(
+      c,
+      `update item_requests r
+       set image_url = $2, image_generated = true, image_gen_status = 'succeeded', image_gen_error = null
+       where r.id = $1 and ${guard}
+       returning ${COLS.replaceAll("r.", "")}`,
+      [requestId, imageUrl],
+    );
+    return rows[0] ?? null;
+  });
+}
+
+/** Record a failed attempt — visible on the admin surface, never silent. */
+export async function recordImageGenFailure(ctx: DbContext, requestId: string, message: string): Promise<void> {
+  await withDbContext(ctx, (c) =>
+    q(c, `update item_requests set image_gen_status = 'failed', image_gen_error = $2 where id = $1`, [
+      requestId,
+      message.slice(0, 500),
+    ]),
+  );
+}
+
+/** Remove an auto-sourced image. No-op (returns null) when the image was uploaded. */
+export async function clearGeneratedImage(ctx: DbContext, requestId: string): Promise<ItemRequest | null> {
+  return withDbContext(ctx, async (c) => {
+    const rows = await q<ItemRequest>(
+      c,
+      `update item_requests r
+       set image_url = null, image_generated = false, image_gen_status = null, image_gen_error = null
+       where r.id = $1 and r.image_generated
+       returning ${COLS.replaceAll("r.", "")}`,
+      [requestId],
+    );
+    return rows[0] ?? null;
+  });
+}
 
 /**
  * Legal lifecycle edges. draft -> pending (submit), pending -> draft (return
