@@ -5,18 +5,20 @@
  */
 import {
   shell,
-  para,
   sectionHeading,
   kv,
   kvOpt,
   kvLink,
   rolesList,
   button,
-  escapeHtml,
   textKv,
   textKvOpt,
   textRolesList,
   textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
 } from "../render";
 import type { ProductTemplate } from "./types";
 
@@ -34,19 +36,44 @@ export type OrgNewVolunteerVars = {
   supportersUrl: string;
 };
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "A Volunteer has Expressed Interest in Serving",
+  heading: "A New Volunteer Has Expressed Interest!",
+  paragraphs: [
+    "Hi {organizationName},",
+    "Congratulations, someone is interested in volunteering with your organization! Their details and which role(s) they are interested in are included below. Please reach out to this person in the <strong>next 1–3 business days</strong> to confirm the requirements for this volunteer opportunity and provide any additional details they need for participating.",
+    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+  ],
+};
+
 export const orgNewVolunteer: ProductTemplate<OrgNewVolunteerVars> = {
   key: "org_new_volunteer",
   entityType: "volunteer_signup",
   required: ["organizationName", "requestName", "requestUrl", "roles", "donorName", "donorEmail", "supportersUrl"],
-  render(vars) {
-    const subject = "A Volunteer has Expressed Interest in Serving";
+  trigger: "A volunteer signs up on a public request",
+  recipients: "The request's contact person, plus the staff notification addresses",
+  recipientsConfigurable: false,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    organizationName: "Hope Community Center",
+    requestName: "Saturday Food Pantry Support",
+    requestDescription: "Volunteers to help sort and distribute groceries.",
+    requestDetails: "Shifts run 9am–12pm; please wear closed-toe shoes.",
+    requestUrl: "https://example.org/requests/food-pantry-support",
+    roles: ["Greeter", "Sorter"],
+    donorName: "Maria Alvarez",
+    donorEmail: "maria.alvarez@example.org",
+    donorPhone: "(213) 555-0164",
+    donorNotes: "Available on alternating Saturdays.",
+    supportersUrl: "https://example.org/admin/supporters",
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "A New Volunteer Has Expressed Interest!",
+      fillText(copy.heading, vars),
       [
-        para(`Hi ${escapeHtml(vars.organizationName)},`),
-        para(
-          "Congratulations, someone is interested in volunteering with your organization! Their details and which role(s) they are interested in are included below. Please reach out to this person in the <strong>next 1–3 business days</strong> to confirm the requirements for this volunteer opportunity and provide any additional details they need for participating.",
-        ),
+        copyPara(copy.paragraphs[0] ?? "", vars),
+        copyPara(copy.paragraphs[1] ?? "", vars),
         sectionHeading("Request Details"),
         kv("Name", vars.requestName),
         kvOpt("Description", vars.requestDescription),
@@ -59,16 +86,16 @@ export const orgNewVolunteer: ProductTemplate<OrgNewVolunteerVars> = {
         kv("Email", vars.donorEmail),
         kvOpt("Phone", vars.donorPhone),
         kvOpt("Notes", vars.donorNotes),
-        para("Thank you,<br /><strong>The Alliance Love in Action Team</strong>"),
+        copyPara(copy.paragraphs[2] ?? "", vars),
         button("View Volunteers", vars.supportersUrl),
       ]
         .filter(Boolean)
         .join("\n"),
     );
     const text = textBody(
-      "A New Volunteer Has Expressed Interest!",
-      `Hi ${vars.organizationName},`,
-      "Congratulations, someone is interested in volunteering with your organization! Their details and which role(s) they are interested in are included below. Please reach out to this person in the next 1–3 business days to confirm the requirements for this volunteer opportunity and provide any additional details they need for participating.",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
+      copyText(copy.paragraphs[1] ?? "", vars),
       [
         "Request Details",
         textKv("Name", vars.requestName),
@@ -84,7 +111,7 @@ export const orgNewVolunteer: ProductTemplate<OrgNewVolunteerVars> = {
         ...textKvOpt("Phone", vars.donorPhone),
         ...textKvOpt("Notes", vars.donorNotes),
       ],
-      ["Thank you,", "The Alliance Love in Action Team"],
+      copyText(copy.paragraphs[2] ?? "", vars),
       textKv("View Volunteers", vars.supportersUrl),
     );
     return { subject, html, text };

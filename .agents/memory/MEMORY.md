@@ -13,4 +13,5 @@
 - [App Storage bucket](app-storage-bucket.md) — sidecar default-bucket stays empty until manually created in the App Storage tool; no CLI/API path; Client() fails loudly.
 - [Actor id mapping](actor-id-mapping.md) — Better Auth user.id is TEXT; approval_events/approved_by are uuid; pass the orgContext-mapped uuid in fixture scripts, never "user".id.
 - [SPA identity switch](spa-identity-switch.md) — logout/quick-login must end in a full page reload; queryClient.clear() with mounted queries leaves stale session UI.
+- [Email copy overrides](email-copy-overrides.md) — only free-text copy is editable, all-or-nothing override with defaultCopy fallback; disabled templates write visible skipped log rows, never silent drops.
 - [Policy migrations vs bootstrap](policy-migration-bootstrap.md) — migrations run before apply-rls on fresh DBs: policy drops need 'if exists'; rls-policies.sql must mirror policy changes.

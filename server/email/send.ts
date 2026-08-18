@@ -22,8 +22,10 @@ import { ServerClient } from "postmark";
 import type { PoolClient } from "pg";
 import { SYSTEM, type DbContext } from "../db/client";
 import * as emailLog from "../dal/email-log";
+import * as dal from "../dal";
 import { PRODUCT_TEMPLATES, type ProductTemplateKey } from "./templates";
 import { finalizeHtml } from "./render";
+import { effectiveCopy } from "./overrides";
 import type { ProductEntityType } from "./templates/types";
 export class EmailConfigError extends Error {
   constructor(message: string) {
@@ -313,7 +315,9 @@ export type QueueProductEmailInput = {
 export type QueueProductEmailResult =
   | { outcome: "queued"; dispatch: PendingDispatch }
   | { outcome: "duplicate" }
-  | { outcome: "blocked"; emailLogId: string; reason: string };
+  | { outcome: "blocked"; emailLogId: string; reason: string }
+  /** Template disabled by a staff admin (ADMIN-10): a visible skipped row, never a silent drop. */
+  | { outcome: "skipped_disabled"; emailLogId: string };
 
 /** A required variable is unresolved when null/empty (string, array, or list object). */
 function unresolvedVariables(required: readonly string[], vars: Record<string, unknown>): string[] {
@@ -365,15 +369,31 @@ function leftoverPlaceholders(vars: Record<string, unknown>, rendered: { subject
  * (dispatchQueuedEmails). No duplicate handling: the caller binds to an
  * entity it created in this same transaction.
  */
-export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEmailInput): Promise<PendingDispatch> {
+export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEmailInput): Promise<PendingDispatch | null> {
   const template = PRODUCT_TEMPLATES[input.key];
   const entityType = input.entityType ?? template.entityType;
+
+  // ADMIN-10 override: disabled templates write a visible skipped row and
+  // send nothing; a copy override replaces the hardcoded copy for this render.
+  const override = await dal.emailTemplateOverrides.getOverrideInTx(c, input.key);
+  if (override && !override.enabled) {
+    const entry = await emailLog.insertSkippedInTx(c, {
+      templateKey: template.key,
+      toEmail: input.toEmail,
+      toPersonId: input.toPersonId ?? null,
+      entityType,
+      entityId: input.entityId,
+      payload: { vars: input.vars },
+    });
+    console.warn(`[email] send skipped (${template.key} → ${input.toEmail}): template disabled by staff (row ${entry.id})`);
+    return null;
+  }
 
   const missing = unresolvedVariables(template.required, input.vars);
   if (missing.length > 0) {
     throw new EmailConfigError(`${template.key}: unresolved variable(s): ${missing.join(", ")}`);
   }
-  const rendered = template.render(input.vars as never);
+  const rendered = template.render(input.vars as never, effectiveCopy(input.key, override));
   const leftovers = leftoverPlaceholders(input.vars, rendered);
   if (leftovers.length > 0) {
     throw new EmailConfigError(`${template.key}: literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
@@ -400,9 +420,29 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
   };
 }
 
+/** Collect a queueProductEmailInTx result, dropping the null of a skipped (disabled) send. */
+export function pushDispatch(list: PendingDispatch[], d: PendingDispatch | null): void {
+  if (d) list.push(d);
+}
+
 export async function queueProductEmail(ctx: DbContext, input: QueueProductEmailInput): Promise<QueueProductEmailResult> {
   const template = PRODUCT_TEMPLATES[input.key];
   const entityType = input.entityType ?? template.entityType;
+
+  // ADMIN-10 override: disabled templates write a visible skipped row.
+  const override = await dal.emailTemplateOverrides.getOverride(ctx, input.key);
+  if (override && !override.enabled) {
+    const entry = await emailLog.insertSkipped(ctx, {
+      templateKey: template.key,
+      toEmail: input.toEmail,
+      toPersonId: input.toPersonId ?? null,
+      entityType,
+      entityId: input.entityId,
+      payload: { vars: input.vars },
+    });
+    console.warn(`[email] send skipped (${template.key} → ${input.toEmail}): template disabled by staff (row ${entry.id})`);
+    return { outcome: "skipped_disabled", emailLogId: entry.id };
+  }
 
   const queued = await emailLog.insertQueued(ctx, {
     templateKey: template.key,
@@ -428,7 +468,7 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
 
   let rendered: { subject: string; html: string; text: string };
   try {
-    rendered = template.render(input.vars as never);
+    rendered = template.render(input.vars as never, effectiveCopy(input.key, override));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return block(`template render failed: ${message}`);

@@ -25,6 +25,7 @@ import { LEGACY_ROUTES } from "../../shared/routes";
 import { registerPublicRoutes } from "./public";
 import { registerMemberRoutes } from "./member";
 import { registerAdminRoutes } from "./admin";
+import { registerEmailTemplateAdminRoutes } from "./admin-email-templates";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -247,6 +248,9 @@ export function registerRoutes(app: Express): void {
 
   // ---- Staff admin API (ADMIN surfaces) behind requireStaff.
   registerAdminRoutes(app);
+
+  // ---- ADMIN-10 Automated emails (staff-admin only).
+  registerEmailTemplateAdminRoutes(app);
 
   // ---- Public read/write API for the PB surfaces.
   registerPublicRoutes(app);

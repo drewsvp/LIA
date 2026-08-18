@@ -1,5 +1,5 @@
 -- rls-policies.sql
--- Row-level security for the 17 application tables (Handbook §6: permission
+-- Row-level security for the 18 application tables (Handbook §6: permission
 -- checks enforced with row-level security in addition to the server-side
 -- guards). This file is AUTH INFRASTRUCTURE, applied idempotently at setup by
 -- `npm run db:apply-rls`. It is not a numbered schema migration and it does
@@ -533,6 +533,16 @@ alter table email_log force row level security;
 
 drop policy if exists email_log_system_staff_all on email_log;
 create policy email_log_system_staff_all on email_log
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+-- ---------------------------------------------------------------- email_template_overrides
+
+alter table email_template_overrides enable row level security;
+alter table email_template_overrides force row level security;
+
+drop policy if exists email_template_overrides_system_staff_all on email_template_overrides;
+create policy email_template_overrides_system_staff_all on email_template_overrides
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 

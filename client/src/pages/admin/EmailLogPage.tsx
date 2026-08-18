@@ -19,7 +19,7 @@ type LogRow = {
   sentAt: string | null;
   templateKey: string;
   toEmail: string;
-  status: "queued" | "sending" | "sent" | "failed";
+  status: "queued" | "sending" | "sent" | "failed" | "skipped";
   error: string | null;
   entityType: string | null;
   entityId: string | null;
@@ -63,7 +63,7 @@ function initialFilters(): { template: string; status: string; recipient: string
   const status = params.get("status") ?? "";
   return {
     template: params.get("template") ?? "",
-    status: ["queued", "sending", "sent", "failed"].includes(status) ? status : "",
+    status: ["queued", "sending", "sent", "failed", "skipped"].includes(status) ? status : "",
     recipient: params.get("recipient") ?? "",
     from: params.get("from") ?? laDate(7),
     to: params.get("to") ?? "",
@@ -161,6 +161,7 @@ export function EmailLogPage(): ReactElement {
             <option value="sending">Sending</option>
             <option value="sent">Sent</option>
             <option value="failed">Failed</option>
+            <option value="skipped">Skipped (disabled)</option>
           </select>
         </label>
         <label className="adm-filter">

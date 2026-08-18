@@ -5,16 +5,18 @@
  */
 import {
   shell,
-  para,
   sectionHeading,
   kv,
   kvOpt,
   kvLink,
   button,
-  escapeHtml,
   textKv,
   textKvOpt,
   textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
 } from "../render";
 import type { ProductTemplate } from "./types";
 import { childrenHtml, childrenText, type RequestChildren } from "./org-request-received";
@@ -31,6 +33,17 @@ export type OrgRequestApprovedVars = {
   itemsOrRoles: RequestChildren;
 };
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "Your Love in Action Request was Approved!",
+  heading: "Your Request Has Been Approved!",
+  paragraphs: [
+    "Hi {organizationName},",
+    "Your request was approved and published to the Love in Action Database!",
+    "For your convenience, here is the URL to your published need and a photo so you can share this request with your community and post it on your social media sites.",
+    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+  ],
+};
+
 export const orgRequestApproved: ProductTemplate<OrgRequestApprovedVars> = {
   key: "org_request_approved",
   // entityType is set per queue call: "item_request" or "volunteer_request".
@@ -44,16 +57,35 @@ export const orgRequestApproved: ProductTemplate<OrgRequestApprovedVars> = {
     "itemOrVolunteer",
     "itemsOrRoles",
   ],
-  render(vars) {
-    const subject = "Your Love in Action Request was Approved!";
+  trigger: "Staff approves an item or volunteer request",
+  recipients: "The request's contact person",
+  recipientsConfigurable: false,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    organizationName: "Hope Community Center",
+    viewRequestUrl: "https://example.org/needs/10432",
+    requestName: "Winter Warmth Drive",
+    requestDescription: "Collecting warm clothing for families this winter.",
+    requestContactName: "Maria Alvarez",
+    requestContactEmail: "maria@hopecommunity.example.org",
+    requestContactPhone: "(213) 555-0143",
+    itemOrVolunteer: "Item",
+    itemsOrRoles: {
+      kind: "item",
+      rows: [
+        { name: "Blankets", quantity: 3 },
+        { name: "Socks", quantity: 10 },
+      ],
+    },
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "Your Request Has Been Approved!",
+      fillText(copy.heading, vars),
       [
-        para(`Hi ${escapeHtml(vars.organizationName)},`),
-        para("Your request was approved and published to the Love in Action Database!"),
-        para(
-          "For your convenience, here is the URL to your published need and a photo so you can share this request with your community and post it on your social media sites.",
-        ),
+        copyPara(copy.paragraphs[0] ?? "", vars),
+        copyPara(copy.paragraphs[1] ?? "", vars),
+        copyPara(copy.paragraphs[2] ?? "", vars),
         kvLink("URL", vars.viewRequestUrl),
         sectionHeading("Request Details"),
         kv("Name", vars.requestName),
@@ -64,17 +96,17 @@ export const orgRequestApproved: ProductTemplate<OrgRequestApprovedVars> = {
         kvOpt("Contact's Phone", vars.requestContactPhone),
         sectionHeading(`${vars.itemOrVolunteer}s Details`),
         childrenHtml(vars.itemsOrRoles),
-        para("Thank you,<br /><strong>The Alliance Love in Action Team</strong>"),
+        copyPara(copy.paragraphs[3] ?? "", vars),
         button("View Your Request", vars.viewRequestUrl),
       ]
         .filter(Boolean)
         .join("\n"),
     );
     const text = textBody(
-      "Your Request Has Been Approved!",
-      `Hi ${vars.organizationName},`,
-      "Your request was approved and published to the Love in Action Database!",
-      "For your convenience, here is the URL to your published need and a photo so you can share this request with your community and post it on your social media sites.",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
+      copyText(copy.paragraphs[1] ?? "", vars),
+      copyText(copy.paragraphs[2] ?? "", vars),
       textKv("URL", vars.viewRequestUrl),
       [
         "Request Details",
@@ -88,7 +120,7 @@ export const orgRequestApproved: ProductTemplate<OrgRequestApprovedVars> = {
         ...textKvOpt("Contact's Phone", vars.requestContactPhone),
       ],
       [`${vars.itemOrVolunteer}s Details`, ...childrenText(vars.itemsOrRoles)],
-      ["Thank you,", "The Alliance Love in Action Team"],
+      copyText(copy.paragraphs[3] ?? "", vars),
       textKv("View Your Request", vars.viewRequestUrl),
     );
     return { subject, html, text };

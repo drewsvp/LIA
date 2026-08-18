@@ -18,7 +18,8 @@ import * as organizations from "../dal/organizations";
 import * as people from "../dal/people";
 import * as volunteerRoles from "../dal/volunteer-roles";
 import * as volunteerRequests from "../dal/volunteer-requests";
-import { queueProductEmailInTx, absoluteUrl, type PendingDispatch } from "../email/send";
+import { queueProductEmailInTx, pushDispatch, absoluteUrl, type PendingDispatch } from "../email/send";
+import { staffRecipientsInTx } from "../email/overrides";
 import { SURFACE_ROUTES } from "../../shared/routes";
 import type { VolunteerRequest, VolunteerRole, Organization, Person } from "../../shared/types";
 
@@ -74,18 +75,17 @@ export async function queueVolunteerSubmissionEmailsInTx(
   const { request, org, primaryContact, requestContact } = args;
 
   // Staff notification to both addresses (D53 pattern); a missing env is loud.
-  const staffPrimary = (process.env.STAFF_NOTIFY_PRIMARY ?? "").trim();
-  const staffSecondary = (process.env.STAFF_NOTIFY_SECONDARY ?? "").trim();
-  const staffRecipients = [...new Set([staffPrimary, staffSecondary].filter((e) => e !== ""))];
-  if (staffPrimary === "" || staffSecondary === "") {
+  const staffRecipients = await staffRecipientsInTx(c, "staff_new_volunteer_request");
+  if (staffRecipients.length === 0) {
     console.error(
-      `[volunteer-submit] request ${request.id}: STAFF_NOTIFY_PRIMARY/SECONDARY not fully configured — staff_new_volunteer_request copies incomplete`,
+      `[volunteer-submit] request ${request.id}: no staff notification recipients (override empty and STAFF_NOTIFY_PRIMARY/SECONDARY unset) — staff_new_volunteer_request not sent`,
     );
   }
 
   const dispatches: PendingDispatch[] = [];
   for (const toEmail of staffRecipients) {
-    dispatches.push(
+    pushDispatch(
+      dispatches,
       await queueProductEmailInTx(c, {
         key: "staff_new_volunteer_request",
         entityId: request.id,
@@ -100,7 +100,8 @@ export async function queueVolunteerSubmissionEmailsInTx(
       }),
     );
   }
-  dispatches.push(
+  pushDispatch(
+    dispatches,
     await queueProductEmailInTx(c, {
       key: "org_request_received",
       entityType: "volunteer_request",

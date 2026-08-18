@@ -26,6 +26,7 @@ export * as pledges from "./pledges";
 export * as signups from "./signups";
 export * as approvalEvents from "./approval-events";
 export * as emailLog from "./email-log";
+export * as emailTemplateOverrides from "./email-template-overrides";
 export * as emailResendData from "./email-resend-data";
 export * as digestSubscribers from "./digest-subscribers";
 export * as legacyStaff from "./legacy-staff";

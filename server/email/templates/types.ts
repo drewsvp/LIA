@@ -7,8 +7,14 @@
  * `string | null` are optional: the rendering omits their line entirely
  * when null. Structured list variables (items/roles) count as unresolved
  * when the array is empty.
+ *
+ * ADMIN-10 additions: each template carries plain-words trigger/recipient
+ * descriptions for the admin surface, `defaultCopy` (the editable free-text
+ * copy — subject, heading, paragraphs — with {placeholder} tokens), and
+ * `sample` variables for the rendered preview. `render` accepts an optional
+ * copy override; the hardcoded defaultCopy is always the fallback.
  */
-import type { Rendered } from "../render";
+import type { Rendered, TemplateCopy } from "../render";
 
 export type ProductEntityType =
   | "organization"
@@ -23,7 +29,21 @@ export type ProductTemplate<V extends Record<string, unknown>> = {
   entityType: ProductEntityType;
   /** Variables that block the send when they do not resolve. */
   required: readonly (keyof V & string)[];
-  render: (vars: V) => Rendered;
+  /** Plain-words description of what fires this email (admin surface). */
+  trigger: string;
+  /** Plain-words description of who receives it (admin surface). */
+  recipients: string;
+  /**
+   * True only when the recipient list is genuinely configurable — the staff
+   * notification templates. Structural recipients (the requesting org's
+   * contact, the donor) are fixed and shown as such.
+   */
+  recipientsConfigurable: boolean;
+  /** Editable copy defaults; the fallback when no override exists. */
+  defaultCopy: TemplateCopy;
+  /** Sample variables used to render the admin preview. */
+  sample: V;
+  render: (vars: V, copy?: TemplateCopy) => Rendered;
 };
 
 export type ItemLine = { name: string; quantity: number };

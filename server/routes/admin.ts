@@ -191,6 +191,9 @@ export function registerAdminRoutes(app: Express): void {
         case "blocked":
           message = `${name} approved. The welcome email failed to send — it is logged in the Email log and can be resent there.`;
           break;
+        case "skipped_disabled":
+          message = `${name} approved. The welcome email is disabled under Automated emails, so it was skipped (logged in the Email log).`;
+          break;
         case "no_contact":
           message = `${name} approved. No primary contact is on file, so no welcome email was queued.`;
           break;
@@ -357,8 +360,10 @@ export function registerAdminRoutes(app: Express): void {
       } else {
         const queued: { toEmail: string; dispatch: PendingDispatch }[] = [];
         const failedEmails: string[] = [];
+        const skippedEmails: string[] = [];
         for (const email of result.emails) {
           if (email.outcome === "queued") queued.push({ toEmail: email.toEmail, dispatch: email.dispatch });
+          else if (email.outcome === "skipped_disabled") skippedEmails.push(email.toEmail);
           else failedEmails.push(email.toEmail);
         }
         const outcomes = await dispatchQueuedEmails(queued.map((entry) => entry.dispatch));
@@ -368,7 +373,9 @@ export function registerAdminRoutes(app: Express): void {
           if (outcome && outcome.outcome === "sent") sentEmails.push(entry.toEmail);
           else failedEmails.push(entry.toEmail);
         });
-        if (failedEmails.length === 0) {
+        if (failedEmails.length === 0 && sentEmails.length === 0) {
+          message = `${title} is now public.`;
+        } else if (failedEmails.length === 0) {
           // §8 verbatim: two recipients vs. same person (or only one on file).
           message =
             sentEmails.length === 2
@@ -378,6 +385,9 @@ export function registerAdminRoutes(app: Express): void {
           message = `${title} is now public. Approval email queued to ${sentEmails.join(" and ")}. The email to ${failedEmails.join(" and ")} failed to send — it is logged in the Email log and can be resent there.`;
         } else {
           message = `${title} is now public. The approval email failed to send — it is logged in the Email log and can be resent there.`;
+        }
+        if (skippedEmails.length > 0) {
+          message += ` The approval email is disabled under Automated emails, so the copy to ${skippedEmails.join(" and ")} was skipped (logged in the Email log).`;
         }
       }
       res.json({ request: result.request, message });
@@ -675,6 +685,8 @@ export function registerAdminRoutes(app: Express): void {
           ? // §8 verbatim.
             `${result.memberName} approved. Login email queued to ${result.memberEmail}.`
           : `${result.memberName} approved. The login email to ${result.memberEmail} failed to send — it is logged in the Email log and can be resent there.`;
+      } else if (result.email.outcome === "skipped_disabled") {
+        message = `${result.memberName} approved. The login email is disabled under Automated emails, so it was skipped (logged in the Email log).`;
       } else {
         message = `${result.memberName} approved. The login email to ${result.memberEmail} failed to send — it is logged in the Email log and can be resent there.`;
       }
@@ -1110,7 +1122,14 @@ export function registerAdminRoutes(app: Express): void {
       const ctx = staffCtx(req);
       const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
       const status = str(req.query.status);
-      if (status !== undefined && status !== "queued" && status !== "sending" && status !== "sent" && status !== "failed") {
+      if (
+        status !== undefined &&
+        status !== "queued" &&
+        status !== "sending" &&
+        status !== "sent" &&
+        status !== "failed" &&
+        status !== "skipped"
+      ) {
         res.status(400).json({ message: "Unknown status filter." });
         return;
       }

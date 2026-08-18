@@ -132,6 +132,84 @@ ${items}
 }
 
 /* ------------------------------------------------------------------ */
+/* Editable copy (ADMIN-10). Each product template exposes its free-   */
+/* text copy — subject, heading, paragraphs — as strings carrying      */
+/* {placeholder} tokens. Staff-admin overrides replace those strings;  */
+/* the hardcoded defaults remain the fallback.                         */
+/* ------------------------------------------------------------------ */
+
+export type TemplateCopy = {
+  /** Subject line with {placeholder} tokens. */
+  subject: string;
+  /** The H1 heading inside the email shell (plain text, escaped by shell()). */
+  heading: string;
+  /**
+   * Free-text paragraphs in order. Limited inline HTML (<strong>, <br />) is
+   * allowed — copy is staff-admin-authored and therefore trusted; variable
+   * values are always escaped on substitution.
+   */
+  paragraphs: string[];
+};
+
+const PLACEHOLDER_RE = /\{([a-zA-Z][a-zA-Z0-9_]*)\}/g;
+
+/** Unique placeholder names used anywhere in a copy block. */
+export function copyPlaceholders(copy: TemplateCopy): string[] {
+  const found = new Set<string>();
+  for (const s of [copy.subject, copy.heading, ...copy.paragraphs]) {
+    for (const m of s.matchAll(PLACEHOLDER_RE)) {
+      const name = m[1];
+      if (name) found.add(name);
+    }
+  }
+  return [...found];
+}
+
+/**
+ * Substitute {name} tokens with raw values (subject/plain-text use). A
+ * missing or non-scalar value leaves the token literal, which the send
+ * path's leftover-placeholder check catches loudly.
+ */
+export function fillText(tpl: string, vars: Record<string, unknown>): string {
+  return tpl.replace(PLACEHOLDER_RE, (m, name: string) => {
+    const v = vars[name];
+    return v == null || typeof v === "object" ? m : String(v);
+  });
+}
+
+const URL_VALUE_RE = /^https?:\/\//;
+
+/**
+ * HTML substitution: values are escaped; URL values render as styled links.
+ * The copy string itself passes through as trusted (staff-authored) HTML.
+ */
+export function fillHtml(tpl: string, vars: Record<string, unknown>): string {
+  return tpl.replace(PLACEHOLDER_RE, (m, name: string) => {
+    const v = vars[name];
+    if (v == null || typeof v === "object") return m;
+    const s = String(v);
+    return URL_VALUE_RE.test(s) ? link(s) : escapeHtml(s);
+  });
+}
+
+/** One copy paragraph as an HTML <p> block. */
+export function copyPara(tpl: string, vars: Record<string, unknown>): string {
+  return para(fillHtml(tpl, vars));
+}
+
+/** One copy string for the plain-text part: filled, tags dropped, entities decoded. */
+export function copyText(tpl: string, vars: Record<string, unknown>): string {
+  return fillText(tpl, vars)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+}
+
+/* ------------------------------------------------------------------ */
 /* Plain-text counterparts. Written, not stripped from the HTML.       */
 /* ------------------------------------------------------------------ */
 

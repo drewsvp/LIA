@@ -79,6 +79,7 @@ export class MemberOrgNotApprovedError extends Error {
 
 export type MemberEmailOutcome =
   | { outcome: "queued"; toEmail: string; dispatch: PendingDispatch }
+  | { outcome: "skipped_disabled"; toEmail: string }
   | { outcome: "blocked"; toEmail: string; reason: string };
 
 export type ApproveMembershipResult = {
@@ -134,7 +135,9 @@ export async function approveMembership(input: {
           toEmail: detail.email,
           vars,
         });
-        email = { outcome: "queued", toEmail: detail.email, dispatch };
+        email = dispatch
+          ? { outcome: "queued", toEmail: detail.email, dispatch }
+          : { outcome: "skipped_disabled", toEmail: detail.email };
       } catch (err) {
         if (!(err instanceof EmailConfigError)) throw err;
         // Variable resolution blocked the send. The approval stands; the

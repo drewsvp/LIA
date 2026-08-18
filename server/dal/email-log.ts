@@ -82,6 +82,44 @@ export async function insertQueuedInTx(c: PoolClient, input: InsertQueuedEmailIn
 }
 
 /**
+ * A send suppressed because staff disabled the template (ADMIN-10): a
+ * visible "skipped (disabled)" row, never a silent drop. Skipped rows are
+ * excluded from the once-only index, so re-enabling lets the email go out.
+ */
+export const SKIPPED_DISABLED_REASON = "skipped (disabled): template disabled by a staff admin";
+
+export async function insertSkipped(ctx: DbContext, input: InsertQueuedEmailInput): Promise<EmailLogEntry> {
+  const rows = await withDbContext(ctx, (c) => insertSkippedQuery(c, input));
+  const entry = rows[0];
+  if (!entry) throw new Error("emailLog.insertSkipped returned no row");
+  return entry;
+}
+
+export async function insertSkippedInTx(c: PoolClient, input: InsertQueuedEmailInput): Promise<EmailLogEntry> {
+  const rows = await insertSkippedQuery(c, input);
+  const entry = rows[0];
+  if (!entry) throw new Error("emailLog.insertSkippedInTx returned no row");
+  return entry;
+}
+
+function insertSkippedQuery(c: PoolClient, input: InsertQueuedEmailInput): Promise<EmailLogEntry[]> {
+  return q<EmailLogEntry>(
+    c,
+    `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status, error)
+     values ($1, $2, $3, $4, $5, $6::jsonb, 'skipped', $7) returning ${COLS}`,
+    [
+      input.templateKey,
+      input.toEmail,
+      input.toPersonId ?? null,
+      input.entityType ?? null,
+      input.entityId ?? null,
+      JSON.stringify(input.payload ?? {}),
+      SKIPPED_DISABLED_REASON,
+    ],
+  );
+}
+
+/**
  * Tx-composable duplicate probe (ADMIN-01 re-approval after a disable): the
  * once-only index would abort a composed transaction on insert, so callers
  * that legitimately might repeat an entity-bound send check first. Matches
@@ -95,7 +133,7 @@ export async function existsForRecipientInTx(
     c,
     `select id from email_log
       where template_key = $1 and entity_type = $2 and entity_id = $3
-        and lower(to_email) = lower($4) and status <> 'failed'
+        and lower(to_email) = lower($4) and status not in ('failed', 'skipped')
       limit 1`,
     [input.templateKey, input.entityType, input.entityId, input.toEmail],
   );
@@ -345,7 +383,7 @@ export async function findDelivered(
       c,
       `select ${COLS} from email_log
         where template_key = $1 and entity_type = $2 and entity_id = $3
-          and lower(to_email) = lower($4) and status <> 'failed'
+          and lower(to_email) = lower($4) and status not in ('failed', 'skipped')
         order by created_at desc limit 1`,
       [input.templateKey, input.entityType, input.entityId, input.toEmail],
     ),

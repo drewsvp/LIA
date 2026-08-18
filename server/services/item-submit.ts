@@ -19,7 +19,8 @@ import * as organizations from "../dal/organizations";
 import * as people from "../dal/people";
 import * as items from "../dal/items";
 import * as itemRequests from "../dal/item-requests";
-import { queueProductEmailInTx, absoluteUrl, type PendingDispatch } from "../email/send";
+import { queueProductEmailInTx, pushDispatch, absoluteUrl, type PendingDispatch } from "../email/send";
+import { staffRecipientsInTx } from "../email/overrides";
 import { SURFACE_ROUTES } from "../../shared/routes";
 import type { ItemRequest, Item, Organization, Person } from "../../shared/types";
 
@@ -74,19 +75,19 @@ export async function queueItemSubmissionEmailsInTx(
 ): Promise<PendingDispatch[]> {
   const { request, org, primaryContact, requestContact } = args;
 
-  // Staff notification to both addresses (D53 pattern); a missing env is loud.
-  const staffPrimary = (process.env.STAFF_NOTIFY_PRIMARY ?? "").trim();
-  const staffSecondary = (process.env.STAFF_NOTIFY_SECONDARY ?? "").trim();
-  const staffRecipients = [...new Set([staffPrimary, staffSecondary].filter((e) => e !== ""))];
-  if (staffPrimary === "" || staffSecondary === "") {
+  // Staff notification (D53 pattern): the ADMIN-10 recipient override wins
+  // when set, else both STAFF_NOTIFY_* addresses; nothing configured is loud.
+  const staffRecipients = await staffRecipientsInTx(c, "staff_new_item_request");
+  if (staffRecipients.length === 0) {
     console.error(
-      `[item-submit] request ${request.id}: STAFF_NOTIFY_PRIMARY/SECONDARY not fully configured — staff_new_item_request copies incomplete`,
+      `[item-submit] request ${request.id}: no staff notification recipients (override empty and STAFF_NOTIFY_PRIMARY/SECONDARY unset) — staff_new_item_request not sent`,
     );
   }
 
   const dispatches: PendingDispatch[] = [];
   for (const toEmail of staffRecipients) {
-    dispatches.push(
+    pushDispatch(
+      dispatches,
       await queueProductEmailInTx(c, {
         key: "staff_new_item_request",
         entityId: request.id,
@@ -101,7 +102,8 @@ export async function queueItemSubmissionEmailsInTx(
       }),
     );
   }
-  dispatches.push(
+  pushDispatch(
+    dispatches,
     await queueProductEmailInTx(c, {
       key: "org_request_received",
       entityId: request.id,

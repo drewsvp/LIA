@@ -1,5 +1,16 @@
 /** staff_new_volunteer_request — volunteer request submitted at MP-11/MP-12 (TEMPLATES.md §4). */
-import { shell, para, sectionHeading, kv, button, textKv, textBody } from "../render";
+import {
+  shell,
+  sectionHeading,
+  kv,
+  button,
+  textKv,
+  textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
+} from "../render";
 import type { ProductTemplate } from "./types";
 
 export type StaffNewVolunteerRequestVars = {
@@ -8,6 +19,12 @@ export type StaffNewVolunteerRequestVars = {
   organizationPrimaryContact: string;
   organizationPrimaryContactEmail: string;
   adminUrl: string;
+};
+
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "Volunteer Request Pending Approval: {volunteerRequestName}",
+  heading: "Volunteer Request Pending Approval",
+  paragraphs: ["A new volunteer opportunity has been submitted. Here are the details for review & approval:"],
 };
 
 export const staffNewVolunteerRequest: ProductTemplate<StaffNewVolunteerRequestVars> = {
@@ -20,12 +37,23 @@ export const staffNewVolunteerRequest: ProductTemplate<StaffNewVolunteerRequestV
     "organizationPrimaryContactEmail",
     "adminUrl",
   ],
-  render(vars) {
-    const subject = `Volunteer Request Pending Approval: ${vars.volunteerRequestName}`;
+  trigger: "A member submits a new volunteer request",
+  recipients: "The staff notification addresses",
+  recipientsConfigurable: true,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    volunteerRequestName: "Food Pantry Helpers",
+    organizationName: "Hope Community Center",
+    organizationPrimaryContact: "Maria Alvarez",
+    organizationPrimaryContactEmail: "maria@hopecommunity.example.org",
+    adminUrl: "https://example.org/admin/volunteer-requests",
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "Volunteer Request Pending Approval",
+      fillText(copy.heading, vars),
       [
-        para("A new volunteer opportunity has been submitted. Here are the details for review &amp; approval:"),
+        copyPara(copy.paragraphs[0] ?? "", vars),
         sectionHeading("Volunteer Request Details"),
         kv("Volunteer Request", vars.volunteerRequestName),
         kv("Organization", vars.organizationName),
@@ -35,8 +63,8 @@ export const staffNewVolunteerRequest: ProductTemplate<StaffNewVolunteerRequestV
       ].join("\n"),
     );
     const text = textBody(
-      "Volunteer Request Pending Approval",
-      "A new volunteer opportunity has been submitted. Here are the details for review & approval:",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
       [
         "Volunteer Request Details",
         textKv("Volunteer Request", vars.volunteerRequestName),

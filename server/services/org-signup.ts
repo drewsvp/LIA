@@ -17,7 +17,8 @@ import * as users from "../dal/users";
 import * as memberships from "../dal/memberships";
 import * as populations from "../dal/populations";
 import { insertInTx as insertApprovalEventInTx } from "../dal/approval-events";
-import { queueProductEmailInTx, absoluteUrl, type PendingDispatch } from "../email/send";
+import { queueProductEmailInTx, pushDispatch, absoluteUrl, type PendingDispatch } from "../email/send";
+import { staffRecipientsInTx } from "../email/overrides";
 
 /** §7: a colliding organization name is blocked, never suffixed. */
 export class OrgNameTakenError extends Error {
@@ -133,17 +134,16 @@ export async function submitOrganizationSignup(input: OrgSignupInput): Promise<O
 
     // Staff notification rows land in THIS transaction (§3); dispatch after
     // commit. Both staff addresses (D53 pattern); a missing env is loud.
-    const staffPrimary = (process.env.STAFF_NOTIFY_PRIMARY ?? "").trim();
-    const staffSecondary = (process.env.STAFF_NOTIFY_SECONDARY ?? "").trim();
-    const recipients = [...new Set([staffPrimary, staffSecondary].filter((e) => e !== ""))];
-    if (staffPrimary === "" || staffSecondary === "") {
+    const recipients = await staffRecipientsInTx(c, "staff_new_org");
+    if (recipients.length === 0) {
       console.error(
-        `[signup] org ${org.id}: STAFF_NOTIFY_PRIMARY/SECONDARY not fully configured — staff_new_org copies incomplete`,
+        `[signup] org ${org.id}: no staff notification recipients (override empty and STAFF_NOTIFY_PRIMARY/SECONDARY unset) — staff_new_org not sent`,
       );
     }
     const dispatches: PendingDispatch[] = [];
     for (const toEmail of recipients) {
-      dispatches.push(
+      pushDispatch(
+        dispatches,
         await queueProductEmailInTx(c, {
           key: "staff_new_org",
           entityId: org.id,

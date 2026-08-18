@@ -4,7 +4,20 @@
  * The christina@defendingthecause.org line is captured body copy, not a
  * configured recipient — it stays verbatim.
  */
-import { shell, para, sectionHeading, kv, kvOpt, button, escapeHtml, textKv, textKvOpt, textBody } from "../render";
+import {
+  shell,
+  sectionHeading,
+  kv,
+  kvOpt,
+  button,
+  textKv,
+  textKvOpt,
+  textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
+} from "../render";
 import type { ProductTemplate } from "./types";
 
 export type OrgApprovedVars = {
@@ -20,23 +33,47 @@ export type OrgApprovedVars = {
   dashboardUrl: string;
 };
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "Welcome to the Love in Action Database {organizationName}",
+  heading: "Your Organization Has Been Approved!",
+  paragraphs: [
+    "Hi {organizationName},",
+    "You've been approved to start using The Alliance's Love in Action Database! We can't wait to help get your donation needs and volunteer opportunities met by community members.",
+    "Within the next few minutes you will be receiving a second email with instructions on how to log in to your new dashboard.",
+    "Please review the information in your organization's profile below and save this email for your records.",
+    "If you have questions about using any of the features of this database, please email <strong>Christina Moe</strong>, our Love in Action Program Director, at christina@defendingthecause.org.",
+  ],
+};
+
 export const orgApproved: ProductTemplate<OrgApprovedVars> = {
   key: "org_approved",
   entityType: "organization",
   required: ["organizationName", "organizationPrimaryContact", "organizationPrimaryContactEmail", "dashboardUrl"],
-  render(vars) {
-    const subject = `Welcome to the Love in Action Database ${vars.organizationName}`;
+  trigger: "Staff approves an organization",
+  recipients: "The organization's primary contact",
+  recipientsConfigurable: false,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    organizationName: "Hope Community Center",
+    orgAddress: "123 Main St, Los Angeles, CA 90012",
+    orgPhoneNumber: "(213) 555-0142",
+    websiteUrl: "https://hopecommunity.example.org",
+    missionStatement: "Providing food, shelter, and hope to families in need.",
+    primaryPopulationServed: "Families experiencing homelessness",
+    organizationPrimaryContact: "Maria Alvarez",
+    organizationPrimaryContactEmail: "maria@hopecommunity.example.org",
+    organizationPrimaryContactPhone: "(213) 555-0143",
+    dashboardUrl: "https://example.org/dashboard",
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "Your Organization Has Been Approved!",
+      fillText(copy.heading, vars),
       [
-        para(`Hi ${escapeHtml(vars.organizationName)},`),
-        para(
-          "You&#39;ve been approved to start using The Alliance&#39;s Love in Action Database! We can&#39;t wait to help get your donation needs and volunteer opportunities met by community members.",
-        ),
-        para(
-          "Within the next few minutes you will be receiving a second email with instructions on how to log in to your new dashboard.",
-        ),
-        para("Please review the information in your organization&#39;s profile below and save this email for your records."),
+        copyPara(copy.paragraphs[0] ?? "", vars),
+        copyPara(copy.paragraphs[1] ?? "", vars),
+        copyPara(copy.paragraphs[2] ?? "", vars),
+        copyPara(copy.paragraphs[3] ?? "", vars),
         button("Go to Your Dashboard", vars.dashboardUrl),
         sectionHeading("Organization Details"),
         kv("Name", vars.organizationName),
@@ -49,19 +86,17 @@ export const orgApproved: ProductTemplate<OrgApprovedVars> = {
         kv("Primary Contact", vars.organizationPrimaryContact),
         kv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
         kvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
-        para(
-          "If you have questions about using any of the features of this database, please email <strong>Christina Moe</strong>, our Love in Action Program Director, at christina@defendingthecause.org.",
-        ),
+        copyPara(copy.paragraphs[4] ?? "", vars),
       ]
         .filter(Boolean)
         .join("\n"),
     );
     const text = textBody(
-      "Your Organization Has Been Approved!",
-      `Hi ${vars.organizationName},`,
-      "You've been approved to start using The Alliance's Love in Action Database! We can't wait to help get your donation needs and volunteer opportunities met by community members.",
-      "Within the next few minutes you will be receiving a second email with instructions on how to log in to your new dashboard.",
-      "Please review the information in your organization's profile below and save this email for your records.",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
+      copyText(copy.paragraphs[1] ?? "", vars),
+      copyText(copy.paragraphs[2] ?? "", vars),
+      copyText(copy.paragraphs[3] ?? "", vars),
       textKv("Go to Your Dashboard", vars.dashboardUrl),
       [
         "Organization Details",
@@ -77,7 +112,7 @@ export const orgApproved: ProductTemplate<OrgApprovedVars> = {
         textKv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
         ...textKvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
       ],
-      "If you have questions about using any of the features of this database, please email Christina Moe, our Love in Action Program Director, at christina@defendingthecause.org.",
+      copyText(copy.paragraphs[4] ?? "", vars),
     );
     return { subject, html, text };
   },

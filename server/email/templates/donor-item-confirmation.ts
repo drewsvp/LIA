@@ -7,17 +7,19 @@
  */
 import {
   shell,
-  para,
   sectionHeading,
   kv,
   kvOpt,
   kvLink,
   itemsTable,
-  escapeHtml,
   textKv,
   textKvOpt,
   textItemsTable,
   textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
 } from "../render";
 import type { ProductTemplate, ItemLine } from "./types";
 
@@ -36,6 +38,19 @@ export type DonorItemConfirmationVars = {
   items: ItemLine[];
 };
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "Thank you for donating item(s) to {organizationName}",
+  heading: "Thank You for Meeting a Need!",
+  paragraphs: [
+    "Hi {donorName},",
+    "Thank you so much for signing up to meet a need through {organizationName}! Please collect or purchase the item(s) within the <strong>next 2 weeks</strong> and reach out to {requestContactName} at ({requestContactEmail}) to coordinate delivery. You are welcome to mail the item(s) or set up a time to drop off. If you have questions regarding this donation, please feel free to reach out directly to {requestContactName}.",
+    "By participating in The Alliance's <strong>Love in Action Program</strong>, you are making a difference for local kids and families!",
+    "Here are the details of the need you are meeting:",
+    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+    "If you have any questions or you email the contact and do not hear back from them within 1 week, please email <strong>Christina Moe</strong>, our Love in Action Program Director, at christina@defendingthecause.org.",
+  ],
+};
+
 export const donorItemConfirmation: ProductTemplate<DonorItemConfirmationVars> = {
   key: "donor_item_confirmation",
   entityType: "item_pledge",
@@ -49,19 +64,36 @@ export const donorItemConfirmation: ProductTemplate<DonorItemConfirmationVars> =
     "requestUrl",
     "items",
   ],
-  render(vars) {
-    const subject = `Thank you for donating item(s) to ${vars.organizationName}`;
+  trigger: "A donor pledges items on a public request",
+  recipients: "The donor who pledged",
+  recipientsConfigurable: false,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    donorName: "Jordan Lee",
+    organizationName: "Hope Community Center",
+    requestContactName: "Maria Alvarez",
+    requestContactEmail: "maria.alvarez@example.org",
+    requestContactPhone: "(213) 555-0164",
+    requestName: "Winter Warmth Drive",
+    requestDescription: "Warm supplies for families ahead of the cold season.",
+    requestDeadlineType: "Date Specific",
+    requestDeadlineDate: "December 15, 2025",
+    dropoffLocation: "123 Main St, Los Angeles, CA 90012",
+    requestUrl: "https://example.org/requests/winter-warmth-drive",
+    items: [
+      { name: "Blankets", quantity: 3 },
+      { name: "Socks", quantity: 10 },
+    ],
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "Thank You for Meeting a Need!",
+      fillText(copy.heading, vars),
       [
-        para(`Hi ${escapeHtml(vars.donorName)},`),
-        para(
-          `Thank you so much for signing up to meet a need through ${escapeHtml(vars.organizationName)}! Please collect or purchase the item(s) within the <strong>next 2 weeks</strong> and reach out to ${escapeHtml(vars.requestContactName)} at (${escapeHtml(vars.requestContactEmail)}) to coordinate delivery. You are welcome to mail the item(s) or set up a time to drop off. If you have questions regarding this donation, please feel free to reach out directly to ${escapeHtml(vars.requestContactName)}.`,
-        ),
-        para(
-          "By participating in The Alliance&#39;s <strong>Love in Action Program</strong>, you are making a difference for local kids and families!",
-        ),
-        para("Here are the details of the need you are meeting:"),
+        copyPara(copy.paragraphs[0] ?? "", vars),
+        copyPara(copy.paragraphs[1] ?? "", vars),
+        copyPara(copy.paragraphs[2] ?? "", vars),
+        copyPara(copy.paragraphs[3] ?? "", vars),
         sectionHeading("Contact"),
         kv("Name", vars.requestContactName),
         kv("Email", vars.requestContactEmail),
@@ -75,20 +107,18 @@ export const donorItemConfirmation: ProductTemplate<DonorItemConfirmationVars> =
         kvLink("Website Link", vars.requestUrl),
         sectionHeading("Item(s) Donated"),
         itemsTable(vars.items, "Number Donated"),
-        para("Thank you,<br /><strong>The Alliance Love in Action Team</strong>"),
-        para(
-          "If you have any questions or you email the contact and do not hear back from them within 1 week, please email <strong>Christina Moe</strong>, our Love in Action Program Director, at christina@defendingthecause.org.",
-        ),
+        copyPara(copy.paragraphs[4] ?? "", vars),
+        copyPara(copy.paragraphs[5] ?? "", vars),
       ]
         .filter(Boolean)
         .join("\n"),
     );
     const text = textBody(
-      "Thank You for Meeting a Need!",
-      `Hi ${vars.donorName},`,
-      `Thank you so much for signing up to meet a need through ${vars.organizationName}! Please collect or purchase the item(s) within the next 2 weeks and reach out to ${vars.requestContactName} at (${vars.requestContactEmail}) to coordinate delivery. You are welcome to mail the item(s) or set up a time to drop off. If you have questions regarding this donation, please feel free to reach out directly to ${vars.requestContactName}.`,
-      "By participating in The Alliance's Love in Action Program, you are making a difference for local kids and families!",
-      "Here are the details of the need you are meeting:",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
+      copyText(copy.paragraphs[1] ?? "", vars),
+      copyText(copy.paragraphs[2] ?? "", vars),
+      copyText(copy.paragraphs[3] ?? "", vars),
       [
         "Contact",
         textKv("Name", vars.requestContactName),
@@ -105,8 +135,8 @@ export const donorItemConfirmation: ProductTemplate<DonorItemConfirmationVars> =
         textKv("Website Link", vars.requestUrl),
       ],
       ["Item(s) Donated", ...textItemsTable(vars.items, "Number Donated")],
-      ["Thank you,", "The Alliance Love in Action Team"],
-      "If you have any questions or you email the contact and do not hear back from them within 1 week, please email Christina Moe, our Love in Action Program Director, at christina@defendingthecause.org.",
+      copyText(copy.paragraphs[4] ?? "", vars),
+      copyText(copy.paragraphs[5] ?? "", vars),
     );
     return { subject, html, text };
   },

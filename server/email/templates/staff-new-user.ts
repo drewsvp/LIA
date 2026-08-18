@@ -1,5 +1,18 @@
 /** staff_new_user — member invited at MP-06 (TEMPLATES.md §4). */
-import { shell, para, sectionHeading, kv, kvOpt, button, textKv, textKvOpt, textBody } from "../render";
+import {
+  shell,
+  sectionHeading,
+  kv,
+  kvOpt,
+  button,
+  textKv,
+  textKvOpt,
+  textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
+} from "../render";
 import type { ProductTemplate } from "./types";
 
 export type StaffNewUserVars = {
@@ -12,18 +25,37 @@ export type StaffNewUserVars = {
   adminUrl: string;
 };
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "New Member Pending Approval: {memberName}",
+  heading: "New Database User Pending Approval",
+  paragraphs: [
+    "An Alliance Member has requested a new teammate be given access to the Love in Action Database. Here is their information:",
+  ],
+};
+
 export const staffNewUser: ProductTemplate<StaffNewUserVars> = {
   key: "staff_new_user",
   entityType: "org_membership",
   required: ["memberName", "memberEmail", "organizationName", "submitterName", "submitterEmail", "adminUrl"],
-  render(vars) {
-    const subject = `New Member Pending Approval: ${vars.memberName}`;
+  trigger: "A member invites a new teammate",
+  recipients: "The staff notification addresses",
+  recipientsConfigurable: true,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    memberName: "Jordan Lee",
+    memberEmail: "jordan@hopecommunity.example.org",
+    memberPhone: "(213) 555-0177",
+    organizationName: "Hope Community Center",
+    submitterName: "Maria Alvarez",
+    submitterEmail: "maria@hopecommunity.example.org",
+    adminUrl: "https://example.org/admin/members",
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "New Database User Pending Approval",
+      fillText(copy.heading, vars),
       [
-        para(
-          "An Alliance Member has requested a new teammate be given access to the Love in Action Database. Here is their information:",
-        ),
+        copyPara(copy.paragraphs[0] ?? "", vars),
         sectionHeading("Requesting Member Details"),
         kv("Organization", vars.organizationName),
         kv("Requesting Contact", vars.submitterName),
@@ -38,8 +70,8 @@ export const staffNewUser: ProductTemplate<StaffNewUserVars> = {
         .join("\n"),
     );
     const text = textBody(
-      "New Database User Pending Approval",
-      "An Alliance Member has requested a new teammate be given access to the Love in Action Database. Here is their information:",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
       [
         "Requesting Member Details",
         textKv("Organization", vars.organizationName),

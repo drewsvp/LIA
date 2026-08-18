@@ -5,18 +5,20 @@
  */
 import {
   shell,
-  para,
   sectionHeading,
   kv,
   kvOpt,
   itemsTable,
   rolesList,
-  escapeHtml,
   textKv,
   textKvOpt,
   textItemsTable,
   textRolesList,
   textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
 } from "../render";
 import type { ProductTemplate, ItemLine } from "./types";
 
@@ -46,6 +48,15 @@ export function childrenText(children: RequestChildren): string[] {
   return textRolesList(children.rows.map((r) => `${r.name} — ${r.quantity} needed`));
 }
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "{itemOrVolunteer} Request Pending Approval: {requestName}",
+  heading: "Request Pending Approval",
+  paragraphs: [
+    "Hi {organizationName},",
+    "Thank you for submitting the following request through The Alliance's Love in Action Database. Our team will create a custom graphic with your logo and publish your need within 1–2 business days. Once your post goes live, you will receive a confirmation email with the information so you can share this need to your own community and social media platforms.",
+  ],
+};
+
 export const orgRequestReceived: ProductTemplate<OrgRequestReceivedVars> = {
   key: "org_request_received",
   // entityType is set per queue call: "item_request" or "volunteer_request".
@@ -59,15 +70,34 @@ export const orgRequestReceived: ProductTemplate<OrgRequestReceivedVars> = {
     "requestId",
     "itemsOrRoles",
   ],
-  render(vars) {
-    const subject = `${vars.itemOrVolunteer} Request Pending Approval: ${vars.requestName}`;
+  trigger: "A member submits an item or volunteer request",
+  recipients: "The member who submitted the request",
+  recipientsConfigurable: false,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    itemOrVolunteer: "Item",
+    organizationName: "Hope Community Center",
+    requestName: "Winter Warmth Drive",
+    requestDescription: "Collecting warm clothing for families this winter.",
+    requestContactName: "Maria Alvarez",
+    requestContactEmail: "maria@hopecommunity.example.org",
+    requestContactPhone: "(213) 555-0143",
+    requestId: "REQ-10432",
+    itemsOrRoles: {
+      kind: "item",
+      rows: [
+        { name: "Blankets", quantity: 3 },
+        { name: "Socks", quantity: 10 },
+      ],
+    },
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "Request Pending Approval",
+      fillText(copy.heading, vars),
       [
-        para(`Hi ${escapeHtml(vars.organizationName)},`),
-        para(
-          "Thank you for submitting the following request through The Alliance&#39;s Love in Action Database. Our team will create a custom graphic with your logo and publish your need within 1–2 business days. Once your post goes live, you will receive a confirmation email with the information so you can share this need to your own community and social media platforms.",
-        ),
+        copyPara(copy.paragraphs[0] ?? "", vars),
+        copyPara(copy.paragraphs[1] ?? "", vars),
         sectionHeading("Request Details"),
         kv("Name", vars.requestName),
         kvOpt("Description", vars.requestDescription),
@@ -83,9 +113,9 @@ export const orgRequestReceived: ProductTemplate<OrgRequestReceivedVars> = {
         .join("\n"),
     );
     const text = textBody(
-      "Request Pending Approval",
-      `Hi ${vars.organizationName},`,
-      "Thank you for submitting the following request through The Alliance's Love in Action Database. Our team will create a custom graphic with your logo and publish your need within 1–2 business days. Once your post goes live, you will receive a confirmation email with the information so you can share this need to your own community and social media platforms.",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
+      copyText(copy.paragraphs[1] ?? "", vars),
       [
         "Request Details",
         textKv("Name", vars.requestName),

@@ -59,6 +59,7 @@ export class NoOwnerMembershipError extends Error {
 
 export type ApprovalEmailOutcome =
   | { outcome: "queued"; toEmail: string; dispatch: PendingDispatch }
+  | { outcome: "skipped_disabled"; toEmail: string }
   | { outcome: "already_sent"; toEmail: string }
   | { outcome: "blocked"; toEmail: string; reason: string }
   | { outcome: "no_contact" };
@@ -135,7 +136,9 @@ export async function approveOrganization(staffUserId: string, orgId: string): P
               toPersonId: person.id,
               vars,
             });
-            email = { outcome: "queued", toEmail: person.email, dispatch };
+            email = dispatch
+              ? { outcome: "queued", toEmail: person.email, dispatch }
+              : { outcome: "skipped_disabled", toEmail: person.email };
           } catch (err) {
             if (!(err instanceof EmailConfigError)) throw err;
             // Variable resolution blocked the send. The approval stands; the

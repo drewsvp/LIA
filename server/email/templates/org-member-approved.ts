@@ -10,7 +10,16 @@
  * "Dear {memberName}," exactly. Swap the prose verbatim when the capture
  * arrives; docs/build-log.md carries the pending-capture line.
  */
-import { shell, para, button, escapeHtml, link, textKv, textBody } from "../render";
+import {
+  shell,
+  button,
+  textKv,
+  textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
+} from "../render";
 import type { ProductTemplate } from "./types";
 
 export type OrgMemberApprovedVars = {
@@ -20,35 +29,50 @@ export type OrgMemberApprovedVars = {
   dashboardUrl: string;
 };
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "Love in Action Database Login Info for {memberName}",
+  heading: "Lorem Ipsum Dolor Sit Amet",
+  paragraphs: [
+    "Dear {memberName},",
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit {organizationName} sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
+    "Ut enim ad minim veniam, quis nostrud exercitation ullamco {loginUrl} laboris nisi ut aliquip ex ea commodo consequat.",
+    "Duis aute irure dolor in reprehenderit {dashboardUrl} in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
+  ],
+};
+
 export const orgMemberApproved: ProductTemplate<OrgMemberApprovedVars> = {
   key: "org_member_approved",
   entityType: "org_membership",
   required: ["memberName", "organizationName", "loginUrl", "dashboardUrl"],
-  render(vars) {
-    const subject = `Love in Action Database Login Info for ${vars.memberName}`;
+  trigger: "Staff approves a new member",
+  recipients: "The approved member",
+  recipientsConfigurable: false,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    memberName: "Maria Alvarez",
+    organizationName: "Hope Community Center",
+    loginUrl: "https://example.org/login",
+    dashboardUrl: "https://example.org/dashboard",
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "Lorem Ipsum Dolor Sit Amet",
+      fillText(copy.heading, vars),
       [
-        para(`Dear ${escapeHtml(vars.memberName)},`),
-        para(
-          `Lorem ipsum dolor sit amet, consectetur adipiscing elit ${escapeHtml(vars.organizationName)} sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
-        ),
-        para(
-          `Ut enim ad minim veniam, quis nostrud exercitation ullamco ${link(vars.loginUrl)} laboris nisi ut aliquip ex ea commodo consequat.`,
-        ),
+        copyPara(copy.paragraphs[0] ?? "", vars),
+        copyPara(copy.paragraphs[1] ?? "", vars),
+        copyPara(copy.paragraphs[2] ?? "", vars),
         button("Lorem Ipsum", vars.loginUrl),
-        para(
-          `Duis aute irure dolor in reprehenderit ${link(vars.dashboardUrl)} in voluptate velit esse cillum dolore eu fugiat nulla pariatur.`,
-        ),
+        copyPara(copy.paragraphs[3] ?? "", vars),
       ].join("\n"),
     );
     const text = textBody(
-      "LOREM IPSUM DOLOR SIT AMET",
-      `Dear ${vars.memberName},`,
-      `Lorem ipsum dolor sit amet, consectetur adipiscing elit ${vars.organizationName} sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
-      `Ut enim ad minim veniam, quis nostrud exercitation ullamco ${vars.loginUrl} laboris nisi ut aliquip ex ea commodo consequat.`,
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
+      copyText(copy.paragraphs[1] ?? "", vars),
+      copyText(copy.paragraphs[2] ?? "", vars),
       textKv("Lorem Ipsum", vars.loginUrl),
-      `Duis aute irure dolor in reprehenderit ${vars.dashboardUrl} in voluptate velit esse cillum dolore eu fugiat nulla pariatur.`,
+      copyText(copy.paragraphs[3] ?? "", vars),
     );
     return { subject, html, text };
   },

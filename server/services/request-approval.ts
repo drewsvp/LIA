@@ -72,6 +72,7 @@ export class OrgNotApprovedError extends Error {
 
 export type RequestApprovalEmail =
   | { outcome: "queued"; toEmail: string; dispatch: PendingDispatch }
+  | { outcome: "skipped_disabled"; toEmail: string }
   | { outcome: "blocked"; toEmail: string; reason: string };
 
 export type ApproveRequestResult = {
@@ -186,7 +187,8 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
             toPersonId: person.id,
             vars,
           });
-          emails.push({ outcome: "queued", toEmail: person.email, dispatch });
+          if (dispatch) emails.push({ outcome: "queued", toEmail: person.email, dispatch });
+          else emails.push({ outcome: "skipped_disabled", toEmail: person.email });
         } catch (err) {
           if (!(err instanceof EmailConfigError)) throw err;
           // Variable resolution blocked the send. The approval stands; the

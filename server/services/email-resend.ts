@@ -451,6 +451,13 @@ export async function resendEmail(ctx: DbContext, emailLogId: string): Promise<R
     throw new ResendBlockedError("A matching email already exists. Nothing was sent.");
   }
 
+  if (queued.outcome === "skipped_disabled") {
+    return {
+      outcome: "failed",
+      error: "This email's template is disabled by a staff admin — a skipped row was recorded. Re-enable it under Automated emails to send.",
+    };
+  }
+
   if (queued.outcome === "blocked") {
     // Variable resolution failed — the pipeline wrote a NEW failed row with
     // the readable reason (§12), exactly as a first send would.

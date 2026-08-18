@@ -1,5 +1,18 @@
 /** staff_new_org — organization submitted at MP-03 (docs/email/TEMPLATES.md §4). */
-import { shell, para, sectionHeading, kv, kvOpt, button, textKv, textKvOpt, textBody } from "../render";
+import {
+  shell,
+  sectionHeading,
+  kv,
+  kvOpt,
+  button,
+  textKv,
+  textKvOpt,
+  textBody,
+  fillText,
+  copyPara,
+  copyText,
+  type TemplateCopy,
+} from "../render";
 import type { ProductTemplate } from "./types";
 
 export type StaffNewOrgVars = {
@@ -13,16 +26,36 @@ export type StaffNewOrgVars = {
   adminUrl: string;
 };
 
+const DEFAULT_COPY: TemplateCopy = {
+  subject: "Organization Pending Approval: {organizationName}",
+  heading: "New Organization Pending Approval",
+  paragraphs: ["The following organization has requested approval to use the Love in Action Database:"],
+};
+
 export const staffNewOrg: ProductTemplate<StaffNewOrgVars> = {
   key: "staff_new_org",
   entityType: "organization",
   required: ["organizationName", "primaryContactName", "primaryContactEmail", "adminUrl"],
-  render(vars) {
-    const subject = `Organization Pending Approval: ${vars.organizationName}`;
+  trigger: "An organization submits the signup form",
+  recipients: "The staff notification addresses",
+  recipientsConfigurable: true,
+  defaultCopy: DEFAULT_COPY,
+  sample: {
+    organizationName: "Hope Community Center",
+    organizationAddress: "123 Main St, Los Angeles, CA 90012",
+    organizationPhone: "(213) 555-0142",
+    organizationWebsite: "https://hopecommunity.example.org",
+    primaryContactName: "Maria Alvarez",
+    primaryContactEmail: "maria@hopecommunity.example.org",
+    primaryContactPhone: "(213) 555-0143",
+    adminUrl: "https://example.org/admin/organizations",
+  },
+  render(vars, copy = DEFAULT_COPY) {
+    const subject = fillText(copy.subject, vars);
     const html = shell(
-      "New Organization Pending Approval",
+      fillText(copy.heading, vars),
       [
-        para("The following organization has requested approval to use the Love in Action Database:"),
+        copyPara(copy.paragraphs[0] ?? "", vars),
         sectionHeading("Organization Details"),
         kv("Name", vars.organizationName),
         kvOpt("Address", vars.organizationAddress),
@@ -38,8 +71,8 @@ export const staffNewOrg: ProductTemplate<StaffNewOrgVars> = {
         .join("\n"),
     );
     const text = textBody(
-      "New Organization Pending Approval",
-      "The following organization has requested approval to use the Love in Action Database:",
+      copyText(copy.heading, vars),
+      copyText(copy.paragraphs[0] ?? "", vars),
       [
         "Organization Details",
         textKv("Name", vars.organizationName),

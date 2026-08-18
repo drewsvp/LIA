@@ -18,7 +18,8 @@ import * as organizations from "../dal/organizations";
 import * as people from "../dal/people";
 import * as users from "../dal/users";
 import * as memberships from "../dal/memberships";
-import { queueProductEmailInTx, absoluteUrl, type PendingDispatch } from "../email/send";
+import { queueProductEmailInTx, pushDispatch, absoluteUrl, type PendingDispatch } from "../email/send";
+import { staffRecipientsInTx } from "../email/overrides";
 
 /** §12: an active or pending membership already covers this person here. */
 export class DuplicateMembershipError extends Error {
@@ -78,18 +79,17 @@ export async function submitMemberInvite(input: SubmitMemberInviteInput): Promis
         ? await memberships.reinviteInTx(c, existing.id, input.actorUserId)
         : await memberships.createInTx(c, { orgId: input.orgId, userId: user.id, invitedBy: input.actorUserId });
 
-    // Staff notification to both addresses (D53 pattern); a missing env is loud.
-    const staffPrimary = (process.env.STAFF_NOTIFY_PRIMARY ?? "").trim();
-    const staffSecondary = (process.env.STAFF_NOTIFY_SECONDARY ?? "").trim();
-    const recipients = [...new Set([staffPrimary, staffSecondary].filter((e) => e !== ""))];
-    if (staffPrimary === "" || staffSecondary === "") {
+    // Staff notification (D53): ADMIN-10 recipient override wins when set.
+    const recipients = await staffRecipientsInTx(c, "staff_new_user");
+    if (recipients.length === 0) {
       console.error(
-        `[member-invite] membership ${membership.id}: STAFF_NOTIFY_PRIMARY/SECONDARY not fully configured — staff_new_user copies incomplete`,
+        `[member-invite] membership ${membership.id}: no staff notification recipients (override empty and STAFF_NOTIFY_PRIMARY/SECONDARY unset) — staff_new_user not sent`,
       );
     }
     const dispatches: PendingDispatch[] = [];
     for (const toEmail of recipients) {
-      dispatches.push(
+      pushDispatch(
+        dispatches,
         await queueProductEmailInTx(c, {
           key: "staff_new_user",
           entityId: membership.id,

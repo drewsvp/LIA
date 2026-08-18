@@ -61,6 +61,10 @@ async function main() {
     console.error("✗ blocked:", result.reason);
     process.exit(1);
   }
+  if (result.outcome === "skipped_disabled") {
+    console.error("✗ skipped: template disabled by staff admin");
+    process.exit(1);
+  }
 
   // Dispatch
   const outcomes = await dispatchQueuedEmails([result.dispatch]);

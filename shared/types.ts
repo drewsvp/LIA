@@ -24,7 +24,7 @@ export type ApprovalEntityType =
   | "item_request"
   | "volunteer_request"
   | "person";
-export type EmailStatus = "queued" | "sending" | "sent" | "failed";
+export type EmailStatus = "queued" | "sending" | "sent" | "failed" | "skipped";
 export type SubscriberStatus = "subscribed" | "unsubscribed" | "bounced";
 
 // ---------------------------------------------------------------- identity
