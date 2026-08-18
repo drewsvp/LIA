@@ -27,6 +27,8 @@ type TemplateRow = {
   copy: Copy;
   placeholders: string[];
   authInfrastructure: boolean;
+  updatedAt: string | null;
+  updatedByName: string | null;
 };
 
 type ListResponse = { templates: TemplateRow[] };
@@ -34,6 +36,17 @@ type PreviewResponse = { subject: string; html: string; text: string };
 
 const LIST_KEY = "/api/admin/email-templates";
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function lastEditedLabel(row: TemplateRow): string | null {
+  if (!row.updatedAt || row.authInfrastructure) return null;
+  const who = row.updatedByName ?? "a staff member";
+  if (!row.enabled) return `Disabled by ${who} on ${fmtDate(row.updatedAt)}`;
+  return `Last edited by ${who} on ${fmtDate(row.updatedAt)}`;
+}
 
 async function postJson(url: string, body: unknown, method = "POST"): Promise<{ ok: boolean; data: unknown }> {
   const res = await fetch(url, {
@@ -178,6 +191,11 @@ export function EmailTemplatesPage(): ReactElement {
                       {row.name}
                       {row.hasCopyOverride && <span className="adm-muted"> (edited)</span>}
                       {row.authInfrastructure && <span className="adm-muted"> — authentication infrastructure</span>}
+                      {lastEditedLabel(row) && (
+                        <div className="adm-muted" style={{ fontSize: "0.85em", marginTop: 2 }}>
+                          {lastEditedLabel(row)}
+                        </div>
+                      )}
                     </td>
                     <td>{row.trigger}</td>
                     <td>
@@ -220,6 +238,12 @@ export function EmailTemplatesPage(): ReactElement {
                   <span className="adm-muted"> (fixed — determined by the event, not editable)</span>
                 )}
               </dd>
+              {lastEditedLabel(selected) && (
+                <>
+                  <dt>Last change</dt>
+                  <dd>{lastEditedLabel(selected)}</dd>
+                </>
+              )}
             </dl>
 
             {selected.authInfrastructure ? (

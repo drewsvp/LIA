@@ -66,6 +66,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
           copy: effectiveCopy(key as ProductTemplateKey, ov) ?? template.defaultCopy,
           placeholders: copyPlaceholders(template.defaultCopy),
           authInfrastructure: false,
+          updatedAt: ov?.updatedAt ?? null,
+          updatedByName: ov?.updatedByName ?? null,
         };
       });
 
@@ -83,6 +85,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         copy: { subject: "Your sign-in link for Love in Action", heading: "Sign in to Love in Action", paragraphs: [] },
         placeholders: [],
         authInfrastructure: true,
+        updatedAt: null,
+        updatedByName: null,
       });
 
       res.json({ templates });
@@ -141,6 +145,7 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
       const saved = await dal.emailTemplateOverrides.saveOverride(staffCtx(req), key, {
         copy: parsed.copy,
         recipients,
+        updatedByUserId: staffContext(req).userId,
       });
       res.json({ ok: true, override: saved });
     } catch (err) {
@@ -162,7 +167,10 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
       return;
     }
     try {
-      const saved = await dal.emailTemplateOverrides.setEnabled(staffCtx(req), key, enabled);
+      const saved = await dal.emailTemplateOverrides.setEnabled(staffCtx(req), key, {
+        enabled,
+        updatedByUserId: staffContext(req).userId,
+      });
       res.json({ ok: true, enabled: saved.enabled });
     } catch (err) {
       console.error(`[admin] email template enable toggle failed (${key}):`, err);

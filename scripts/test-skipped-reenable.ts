@@ -31,7 +31,7 @@ function check(label: string, ok: boolean, detail?: string): void {
 }
 
 async function cleanup(entityId: string): Promise<void> {
-  await dal.emailTemplateOverrides.setEnabled(SYSTEM, KEY, true);
+  await dal.emailTemplateOverrides.setEnabled(SYSTEM, KEY, { enabled: true, updatedByUserId: null });
   await pool.query("delete from email_log where lower(to_email) = lower($1)", [TO]);
   void entityId;
 }
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   try {
     console.log("\nSkipped rows must not block a re-enabled send:");
 
-    await dal.emailTemplateOverrides.setEnabled(SYSTEM, KEY, false);
+    await dal.emailTemplateOverrides.setEnabled(SYSTEM, KEY, { enabled: false, updatedByUserId: null });
     const first = await queueProductEmail(SYSTEM, {
       key: KEY,
       entityType: ENTITY_TYPE,
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
       check("skipped row visible in email_log", row?.status === "skipped", row?.status);
     }
 
-    await dal.emailTemplateOverrides.setEnabled(SYSTEM, KEY, true);
+    await dal.emailTemplateOverrides.setEnabled(SYSTEM, KEY, { enabled: true, updatedByUserId: null });
     const second = await queueProductEmail(SYSTEM, {
       key: KEY,
       entityType: ENTITY_TYPE,

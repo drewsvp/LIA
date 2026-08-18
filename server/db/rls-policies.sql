@@ -538,6 +538,8 @@ create policy email_log_system_staff_all on email_log
 
 -- ---------------------------------------------------------------- email_template_overrides
 
+alter table email_template_overrides add column if not exists updated_by uuid references users(id);
+
 alter table email_template_overrides enable row level security;
 alter table email_template_overrides force row level security;
 
