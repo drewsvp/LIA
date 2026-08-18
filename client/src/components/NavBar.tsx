@@ -237,7 +237,7 @@ export function NavBar(): ReactElement {
       </div>
 
       {menuOpen ? (
-        <div className="site-nav-panel">
+        <nav className="site-nav-panel" aria-label="Main navigation">
           <Link href="/about" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
             ABOUT
           </Link>
@@ -263,7 +263,7 @@ export function NavBar(): ReactElement {
           ) : null}
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />
           {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
-        </div>
+        </nav>
       ) : null}
     </header>
   );
