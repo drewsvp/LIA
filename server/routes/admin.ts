@@ -1344,12 +1344,15 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: parsed.message });
         return;
       }
-      const [rows, counts] = await Promise.all([
+      const [rows, counts, lastRun] = await Promise.all([
         dal.digestSubscribers.listWithFilters(ctx, parsed.f),
         dal.digestSubscribers.counts(ctx),
+        dal.digestRuns.latest(ctx),
       ]);
       const anyExist = counts.subscribed + counts.unsubscribed + counts.bounced > 0;
-      res.json({ rows, counts, anyExist });
+      // lastRun makes the digest job's last decision visible here — including
+      // the skipped_empty weeks, which send nothing but are never silent.
+      res.json({ rows, counts, anyExist, lastRun });
     } catch (err) {
       next(err);
     }

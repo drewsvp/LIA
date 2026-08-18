@@ -16,6 +16,7 @@ export const EMAIL_TEMPLATE_NAMES: Record<string, string> = {
   org_new_volunteer: "New volunteer, organization notice",
   donor_item_confirmation: "Donation confirmation, donor",
   donor_volunteer_confirmation: "Volunteer confirmation, supporter",
+  digest_new_needs: "Weekly New Needs digest",
   auth_magic_link: "Login link",
 };
 

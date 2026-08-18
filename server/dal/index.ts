@@ -29,6 +29,7 @@ export * as emailLog from "./email-log";
 export * as emailTemplateOverrides from "./email-template-overrides";
 export * as emailResendData from "./email-resend-data";
 export * as digestSubscribers from "./digest-subscribers";
+export * as digestRuns from "./digest-runs";
 export * as legacyStaff from "./legacy-staff";
 export * as validation from "./validation";
 export * as adminCounts from "./admin-counts";

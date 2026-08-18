@@ -21,11 +21,31 @@ type SubRow = {
   legacySource: string | null;
 };
 
+type DigestRun = {
+  runDate: string;
+  status: "running" | "sent" | "skipped_empty";
+  needsCount: number | null;
+  recipientsCount: number | null;
+  note: string | null;
+};
+
 type ListResponse = {
   rows: SubRow[];
   counts: { subscribed: number; unsubscribed: number; bounced: number };
   anyExist: boolean;
+  lastRun: DigestRun | null;
 };
+
+function digestRunLine(run: DigestRun | null): string {
+  if (run === null) return "The weekly digest goes out Thursday mornings. No digest has been sent yet.";
+  if (run.status === "running") return `The digest for ${run.runDate} is being sent right now.`;
+  if (run.status === "skipped_empty") {
+    return `Last digest (${run.runDate}): skipped — no new needs since the previous digest. Nothing was sent.`;
+  }
+  return `Last digest (${run.runDate}): ${run.needsCount ?? 0} need(s) sent to ${run.recipientsCount ?? 0} subscriber(s).${
+    run.note ? ` Note: ${run.note}` : ""
+  }`;
+}
 
 function fmtDay(iso: string | null): string {
   if (iso === null) return "—";
@@ -109,9 +129,7 @@ export function SubscribersPage(): ReactElement {
     <div className="adm-page">
       <h1 className="adm-heading">Subscribers</h1>
 
-      <p className="adm-sub-note">
-        The weekly digest send is not built yet. This list is being collected now so it is ready when it is.
-      </p>
+      <p className="adm-sub-note">{data ? digestRunLine(data.lastRun) : "The weekly digest goes out Thursday mornings."}</p>
 
       {data && (
         <p className="adm-sub-counts">

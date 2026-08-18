@@ -557,3 +557,13 @@ drop policy if exists digest_subscribers_system_staff_all on digest_subscribers;
 create policy digest_subscribers_system_staff_all on digest_subscribers
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
+
+-- ---------------------------------------------------------------- digest_runs
+
+alter table digest_runs enable row level security;
+alter table digest_runs force row level security;
+
+drop policy if exists digest_runs_system_staff_all on digest_runs;
+create policy digest_runs_system_staff_all on digest_runs
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));

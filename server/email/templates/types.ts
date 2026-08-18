@@ -22,7 +22,8 @@ export type ProductEntityType =
   | "volunteer_request"
   | "org_membership"
   | "item_pledge"
-  | "volunteer_signup";
+  | "volunteer_signup"
+  | "digest_run";
 
 export type ProductTemplate<V extends Record<string, unknown>> = {
   key: string;

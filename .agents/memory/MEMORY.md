@@ -15,3 +15,4 @@
 - [SPA identity switch](spa-identity-switch.md) — logout/quick-login must end in a full page reload; queryClient.clear() with mounted queries leaves stale session UI.
 - [Email copy overrides](email-copy-overrides.md) — only free-text copy is editable, all-or-nothing override with defaultCopy fallback; disabled templates write visible skipped log rows, never silent drops.
 - [Policy migrations vs bootstrap](policy-migration-bootstrap.md) — migrations run before apply-rls on fresh DBs: policy drops need 'if exists'; rls-policies.sql must mirror policy changes.
+- [Digest run guard](digest-run-guard.md) — scheduled email jobs need a durable run-date claim + run-bound once-only fan-out, not the in-memory expiry guard; skipped weeks write visible rows.

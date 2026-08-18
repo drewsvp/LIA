@@ -8,6 +8,7 @@ import cookieParser from "cookie-parser";
 import { registerRoutes, checkQuickLoginSeed } from "./routes/index";
 import { startExpiryScheduler } from "./jobs/expiry";
 import { startEmailSweep } from "./jobs/email-sweep";
+import { startDigestScheduler } from "./jobs/digest";
 import { setupVite, serveStatic } from "./vite";
 
 const app = express();
@@ -80,6 +81,7 @@ async function start(): Promise<void> {
   });
   startExpiryScheduler();
   startEmailSweep();
+  startDigestScheduler();
 
   // Startup check: warn if quick login is enabled but seed accounts are missing.
   if (process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true") {
