@@ -152,6 +152,10 @@ export function NavBar(): ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const showDashboard = session?.authenticated === true && session.memberships.length >= 1;
+  // The user menu (identity + log out) must be reachable for EVERY
+  // authenticated session, membership or not — otherwise a member-less
+  // login has no way to see who they are or sign out.
+  const showUserMenu = session?.authenticated === true;
   const firstName = session?.user?.firstName ?? "";
 
   return (
@@ -176,7 +180,7 @@ export function NavBar(): ReactElement {
             ) : null}
             <span className="site-nav-btn site-nav-dead">GIVE</span>
             <span className="site-nav-btn site-nav-dead">MEET NEEDS</span>
-            {showDashboard ? <NavUserMenu firstName={firstName} /> : null}
+            {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
           </div>
           <nav className="site-nav-links" aria-label="Main navigation">
             {MAIN_SITE_LINKS.map((label) => (
@@ -218,7 +222,7 @@ export function NavBar(): ReactElement {
           <span className="site-nav-panel-item site-nav-dead">GIVE</span>
           <span className="site-nav-panel-item site-nav-dead">MEET NEEDS</span>
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />
-          {showDashboard ? <NavUserMenu firstName={firstName} /> : null}
+          {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
         </div>
       ) : null}
     </header>
