@@ -5,9 +5,9 @@
  */
 import type { PoolClient } from "pg";
 import { q, withDbContext, type DbContext } from "../db/client";
-import type { User, UserWithPerson, UserStatus } from "../../shared/types";
+import type { User, UserWithPerson, UserStatus, UserKind } from "../../shared/types";
 
-const COLS = `u.id, u.person_id as "personId", u.auth_subject as "authSubject", u.status,
+const COLS = `u.id, u.person_id as "personId", u.auth_subject as "authSubject", u.status, u.kind,
   u.last_login_at as "lastLoginAt", u.created_at as "createdAt", u.updated_at as "updatedAt"`;
 const PERSON_JOIN_COLS = `${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email`;
 
@@ -15,6 +15,8 @@ export type CreateUserInput = {
   /** Links the user to its person — a user cannot exist without one. */
   personId: string;
   status?: UserStatus;
+  /** 'member' (default) or 'supporter' — supporter accounts have no org membership. */
+  kind?: UserKind;
 };
 
 /** Find by the auth provider's stable subject identifier. */
@@ -65,10 +67,10 @@ export async function create(ctx: DbContext, input: CreateUserInput): Promise<Us
 export async function createInTx(c: PoolClient, input: CreateUserInput): Promise<User> {
   const rows = await q<User>(
     c,
-    `insert into users (person_id, status) values ($1, $2)
-     returning id, person_id as "personId", auth_subject as "authSubject", status,
+    `insert into users (person_id, status, kind) values ($1, $2, $3)
+     returning id, person_id as "personId", auth_subject as "authSubject", status, kind,
                last_login_at as "lastLoginAt", created_at as "createdAt", updated_at as "updatedAt"`,
-    [input.personId, input.status ?? "invited"],
+    [input.personId, input.status ?? "invited", input.kind ?? "member"],
   );
   const user = rows[0];
   if (!user) throw new Error("users.create returned no row");
@@ -87,7 +89,7 @@ export async function linkAuthSubject(ctx: DbContext, userId: string, authSubjec
     q<User>(
       c,
       `update users set auth_subject = $2 where id = $1
-       returning id, person_id as "personId", auth_subject as "authSubject", status,
+       returning id, person_id as "personId", auth_subject as "authSubject", status, kind,
                  last_login_at as "lastLoginAt", created_at as "createdAt", updated_at as "updatedAt"`,
       [userId, authSubject],
     ),
@@ -103,7 +105,7 @@ export async function setLastLoginAt(ctx: DbContext, userId: string): Promise<Us
     q<User>(
       c,
       `update users set last_login_at = now() where id = $1
-       returning id, person_id as "personId", auth_subject as "authSubject", status,
+       returning id, person_id as "personId", auth_subject as "authSubject", status, kind,
                  last_login_at as "lastLoginAt", created_at as "createdAt", updated_at as "updatedAt"`,
       [userId],
     ),

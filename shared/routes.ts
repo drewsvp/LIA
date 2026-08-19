@@ -29,6 +29,8 @@ export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   { id: "MP-11", path: "/dashboard/volunteer/:id/add", title: "Add volunteer roles", area: "member" },
   { id: "MP-12", path: "/dashboard/volunteer/:id/edit", title: "Edit volunteer request", area: "member" },
   { id: "MP-13", path: "/dashboard/supporters", title: "Supporters", area: "member" },
+  // Supporter profile — logged-in donors/volunteers see their own history.
+  { id: "SP-01", path: "/profile", title: "My profile", area: "member" },
 
   // Public
   { id: "PB-00", path: "/", title: "Home", area: "public" },

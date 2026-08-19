@@ -15,6 +15,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { PUBLIC, SYSTEM, queryInContext, isUniqueViolation } from "../db/client";
 import * as dal from "../dal";
+import * as usersDal from "../dal/users";
 import { PledgeError } from "../dal/pledges";
 import { SignupError } from "../dal/signups";
 import { FixedWindowLimiter } from "../auth/rate-limit";
@@ -51,6 +52,66 @@ export function formatDeadlineDate(iso: string | null): string | null {
   const date = new Date(`${iso.slice(0, 10)}T12:00:00Z`);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+// ---------------------------------------------------------------- supporter opt-ins
+
+/**
+ * Post-success opt-ins from the public claim/volunteer forms. Runs AFTER the
+ * pledge/signup is committed; failures here are logged loudly and never
+ * un-succeed the submission. Returns whether a supporter profile now exists
+ * for this email so the response can say "log in with your email".
+ */
+async function processSupporterOptIns(opts: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  createProfile: boolean;
+  subscribeDigest: boolean;
+  logTag: string;
+}): Promise<{ profileReady: boolean }> {
+  let profileReady = false;
+  // The SQL function just upserted the person by email; resolve it for linking.
+  let personId: string | null = null;
+  try {
+    const person = await dal.people.findByEmail(SYSTEM, opts.email);
+    personId = person?.id ?? null;
+  } catch (err) {
+    console.error(`[public] ${opts.logTag}: person lookup for opt-ins failed:`, err);
+  }
+
+  if (opts.subscribeDigest) {
+    try {
+      // Idempotent by lower(email); revives unsubscribed rows and links the
+      // person record when the row has none.
+      await dal.digestSubscribers.create(SYSTEM, {
+        email: opts.email,
+        firstName: opts.firstName,
+        lastName: opts.lastName,
+        personId,
+      });
+    } catch (err) {
+      console.error(`[public] ${opts.logTag}: digest opt-in failed (submission stands):`, err);
+    }
+  }
+
+  if (opts.createProfile) {
+    try {
+      const existing = await usersDal.findByEmail(SYSTEM, opts.email);
+      if (existing) {
+        // Reuse: any non-disabled account can already log in via magic link.
+        profileReady = existing.status !== "disabled";
+      } else if (personId !== null) {
+        await usersDal.create(SYSTEM, { personId, status: "active", kind: "supporter" });
+        profileReady = true;
+      } else {
+        console.error(`[public] ${opts.logTag}: cannot create supporter profile — no person row found`);
+      }
+    } catch (err) {
+      console.error(`[public] ${opts.logTag}: supporter profile creation failed (submission stands):`, err);
+    }
+  }
+  return { profileReady };
 }
 
 // ---------------------------------------------------------------- payloads
@@ -342,9 +403,17 @@ export function registerPublicRoutes(app: Express): void {
       const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
       const phone = typeof body.phone === "string" ? body.phone.trim() : "";
       const rawLines = Array.isArray(body.lines) ? (body.lines as unknown[]) : [];
+      const agree = body.agree === true;
+      const createProfile = body.createProfile === true;
+      const subscribeDigest = body.subscribeDigest === true;
 
       if (firstName === "" || lastName === "" || firstName.length > 120 || lastName.length > 120) {
         res.status(400).json({ message: "Please provide your first and last name." });
+        return;
+      }
+      if (!agree) {
+        // Server-side enforcement of the fulfillment agreement (was client-only).
+        res.status(400).json({ message: "Please agree to fulfill this request within the next 2 weeks." });
         return;
       }
       if (!EMAIL_RE.test(email)) {
@@ -525,8 +594,19 @@ export function registerPublicRoutes(app: Express): void {
         console.error(`[public] pledge ${pledgeId} recorded but email queueing failed:`, err);
       }
 
+      // ---- Opt-ins run after the pledge is committed and never undo it.
+      const { profileReady } = await processSupporterOptIns({
+        email,
+        firstName,
+        lastName,
+        createProfile,
+        subscribeDigest,
+        logTag: `pledge ${pledgeId}`,
+      });
+
       res.status(201).json({
         ok: true,
+        profileCreated: profileReady,
         message: "Thank you for your donation! Check your email for a confirmation with details on how to deliver your items.",
       });
       if (pending.length > 0) void dispatchQueuedEmails(pending);
@@ -624,6 +704,8 @@ export function registerPublicRoutes(app: Express): void {
       const notesRaw = typeof body.notes === "string" ? body.notes.trim() : "";
       const notes = notesRaw === "" ? null : notesRaw;
       const rawRoleIds = Array.isArray(body.roleIds) ? (body.roleIds as unknown[]) : [];
+      const createProfile = body.createProfile === true;
+      const subscribeDigest = body.subscribeDigest === true;
 
       if (firstName === "" || lastName === "" || firstName.length > 120 || lastName.length > 120) {
         res.status(400).json({ message: "Please provide your first and last name." });
@@ -816,8 +898,19 @@ export function registerPublicRoutes(app: Express): void {
         console.error(`[public] signup ${signupId} recorded but email queueing failed:`, err);
       }
 
+      // ---- Opt-ins run after the signup is committed and never undo it.
+      const { profileReady } = await processSupporterOptIns({
+        email,
+        firstName,
+        lastName,
+        createProfile,
+        subscribeDigest,
+        logTag: `signup ${signupId}`,
+      });
+
       res.status(201).json({
         ok: true,
+        profileCreated: profileReady,
         message:
           "Thank you for expressing interest! Check your email for a confirmation — a representative from the requesting organization will reach out to you within 1-3 business days.",
       });

@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict pgdgSBb2RuOWdNag4zh8XqOeflgrPUrSqrR2sU3UQErL1shVkynMZXGtpvfuSWA
+\restrict 4ViColEVaqUcXRqJj07LuZbmQjNFkYzy7YZ47hrms2LVi6Yb5gChaSHbsaGz6hk
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -615,6 +615,60 @@ UNION ALL
 
 
 --
+-- Name: digest_exclusions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.digest_exclusions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    need_type text NOT NULL,
+    need_id uuid NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    excluded_by uuid,
+    excluded_at timestamp with time zone DEFAULT now() NOT NULL,
+    note text,
+    CONSTRAINT digest_exclusions_need_type_check CHECK ((need_type = ANY (ARRAY['item'::text, 'volunteer'::text])))
+);
+
+ALTER TABLE ONLY public.digest_exclusions FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: TABLE digest_exclusions; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.digest_exclusions IS 'Per-need exclusions for a digest run window; scoped to window_start so they expire naturally once the run completes and the watermark advances.';
+
+
+--
+-- Name: digest_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.digest_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    run_date date NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    window_end timestamp with time zone NOT NULL,
+    status text DEFAULT 'running'::text NOT NULL,
+    needs_count integer,
+    recipients_count integer,
+    note text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    needs_payload jsonb,
+    CONSTRAINT digest_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'sent'::text, 'skipped_empty'::text])))
+);
+
+ALTER TABLE ONLY public.digest_runs FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: COLUMN digest_runs.needs_payload; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.digest_runs.needs_payload IS 'Canonical DigestNeed[] snapshot for this run; set once after selection, reused verbatim on resume.';
+
+
+--
 -- Name: digest_subscribers; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -666,7 +720,10 @@ CREATE TABLE public.email_log (
     error text,
     sent_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT email_log_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'failed'::text])))
+    failure_category text,
+    resend_of_id uuid,
+    CONSTRAINT email_log_failure_category_check CHECK ((failure_category = ANY (ARRAY['config'::text, 'render'::text, 'provider_timeout'::text, 'provider'::text, 'sweep'::text]))),
+    CONSTRAINT email_log_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'failed'::text, 'skipped'::text])))
 );
 
 ALTER TABLE ONLY public.email_log FORCE ROW LEVEL SECURITY;
@@ -676,7 +733,27 @@ ALTER TABLE ONLY public.email_log FORCE ROW LEVEL SECURITY;
 -- Name: COLUMN email_log.status; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.email_log.status IS 'queued → sending (dispatch claim, set before the provider call) → sent/failed. A row stranded in sending means the process stopped mid-send: the sweep marks it failed rather than risking a double send.';
+COMMENT ON COLUMN public.email_log.status IS 'queued -> sending (dispatch claim) -> sent | failed. skipped = template disabled by staff; never dispatched.';
+
+
+--
+-- Name: email_template_overrides; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_template_overrides (
+    template_key text NOT NULL,
+    subject text,
+    heading text,
+    paragraphs jsonb,
+    recipients text,
+    enabled boolean DEFAULT true NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by uuid,
+    CONSTRAINT email_template_overrides_copy_all_or_nothing CHECK ((((subject IS NULL) AND (heading IS NULL) AND (paragraphs IS NULL)) OR ((subject IS NOT NULL) AND (heading IS NOT NULL) AND (paragraphs IS NOT NULL)))),
+    CONSTRAINT email_template_overrides_paragraphs_array CHECK (((paragraphs IS NULL) OR (jsonb_typeof(paragraphs) = 'array'::text)))
+);
+
+ALTER TABLE ONLY public.email_template_overrides FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -725,6 +802,7 @@ CREATE TABLE public.item_requests (
     image_generated boolean DEFAULT false NOT NULL,
     image_gen_status text,
     image_gen_error text,
+    image_gen_retries integer DEFAULT 0 NOT NULL,
     CONSTRAINT item_requests_archived_reason_check CHECK ((archived_reason = ANY (ARRAY['manual'::text, 'expired'::text, 'fulfilled'::text]))),
     CONSTRAINT item_requests_deadline_date_required CHECK (((deadline_type <> 'date_specific'::text) OR (deadline_date IS NOT NULL))),
     CONSTRAINT item_requests_deadline_type_check CHECK ((deadline_type = ANY (ARRAY['date_specific'::text, 'until_fulfilled'::text, 'ongoing'::text]))),
@@ -893,6 +971,8 @@ CREATE TABLE public.users (
     last_login_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    kind text DEFAULT 'member'::text NOT NULL,
+    CONSTRAINT users_kind_check CHECK ((kind = ANY (ARRAY['member'::text, 'supporter'::text]))),
     CONSTRAINT users_status_check CHECK ((status = ANY (ARRAY['invited'::text, 'active'::text, 'disabled'::text])))
 );
 
@@ -983,6 +1063,38 @@ ALTER TABLE ONLY public.approval_events
 
 
 --
+-- Name: digest_exclusions digest_exclusions_need_type_need_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digest_exclusions
+    ADD CONSTRAINT digest_exclusions_need_type_need_id_key UNIQUE (need_type, need_id);
+
+
+--
+-- Name: digest_exclusions digest_exclusions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digest_exclusions
+    ADD CONSTRAINT digest_exclusions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: digest_runs digest_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digest_runs
+    ADD CONSTRAINT digest_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: digest_runs digest_runs_run_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digest_runs
+    ADD CONSTRAINT digest_runs_run_date_key UNIQUE (run_date);
+
+
+--
 -- Name: digest_subscribers digest_subscribers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -996,6 +1108,14 @@ ALTER TABLE ONLY public.digest_subscribers
 
 ALTER TABLE ONLY public.email_log
     ADD CONSTRAINT email_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: email_template_overrides email_template_overrides_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_template_overrides
+    ADD CONSTRAINT email_template_overrides_pkey PRIMARY KEY (template_key);
 
 
 --
@@ -1332,7 +1452,14 @@ CREATE INDEX email_log_entity_idx ON public.email_log USING btree (entity_type, 
 -- Name: email_log_once_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX email_log_once_idx ON public.email_log USING btree (template_key, entity_type, entity_id, lower(to_email)) WHERE ((entity_id IS NOT NULL) AND (status <> 'failed'::text));
+CREATE UNIQUE INDEX email_log_once_idx ON public.email_log USING btree (template_key, entity_type, entity_id, lower(to_email)) WHERE ((entity_id IS NOT NULL) AND (status <> ALL (ARRAY['failed'::text, 'skipped'::text])));
+
+
+--
+-- Name: email_log_resend_of_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_log_resend_of_idx ON public.email_log USING btree (resend_of_id) WHERE (resend_of_id IS NOT NULL);
 
 
 --
@@ -1590,6 +1717,14 @@ ALTER TABLE ONLY public.approval_events
 
 
 --
+-- Name: digest_exclusions digest_exclusions_excluded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digest_exclusions
+    ADD CONSTRAINT digest_exclusions_excluded_by_fkey FOREIGN KEY (excluded_by) REFERENCES public.users(id);
+
+
+--
 -- Name: digest_subscribers digest_subscribers_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1598,11 +1733,27 @@ ALTER TABLE ONLY public.digest_subscribers
 
 
 --
+-- Name: email_log email_log_resend_of_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_log
+    ADD CONSTRAINT email_log_resend_of_id_fkey FOREIGN KEY (resend_of_id) REFERENCES public.email_log(id);
+
+
+--
 -- Name: email_log email_log_to_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.email_log
     ADD CONSTRAINT email_log_to_person_id_fkey FOREIGN KEY (to_person_id) REFERENCES public.people(id);
+
+
+--
+-- Name: email_template_overrides email_template_overrides_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_template_overrides
+    ADD CONSTRAINT email_template_overrides_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id);
 
 
 --
@@ -1850,6 +2001,32 @@ CREATE POLICY approval_events_system_staff_all ON public.approval_events USING (
 
 
 --
+-- Name: digest_exclusions; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.digest_exclusions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: digest_exclusions digest_exclusions_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY digest_exclusions_system_staff_all ON public.digest_exclusions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: digest_runs; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.digest_runs ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: digest_runs digest_runs_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY digest_runs_system_staff_all ON public.digest_runs USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: digest_subscribers; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -1873,6 +2050,19 @@ ALTER TABLE public.email_log ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY email_log_system_staff_all ON public.email_log USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: email_template_overrides; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.email_template_overrides ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: email_template_overrides email_template_overrides_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY email_template_overrides_system_staff_all ON public.email_template_overrides USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -2313,5 +2503,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict pgdgSBb2RuOWdNag4zh8XqOeflgrPUrSqrR2sU3UQErL1shVkynMZXGtpvfuSWA
+\unrestrict 4ViColEVaqUcXRqJj07LuZbmQjNFkYzy7YZ47hrms2LVi6Yb5gChaSHbsaGz6hk
 

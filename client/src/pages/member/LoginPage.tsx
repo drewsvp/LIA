@@ -42,7 +42,8 @@ export function LoginPage(): ReactElement | null {
     // Already authenticated: MP-02 resolves the destination. The form is
     // never shown to a signed-in visitor.
     if (!isLoading && session?.authenticated) {
-      setLocation("/dashboard", { replace: true });
+      // Supporters land on their profile; members/staff on the dashboard (MP-02).
+      setLocation(session.isSupporter ? "/profile" : "/dashboard", { replace: true });
     }
   }, [isLoading, session, setLocation]);
 

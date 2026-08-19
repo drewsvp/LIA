@@ -106,6 +106,9 @@ export function DashboardGate({ children }: { children: ReactNode }): ReactEleme
     const error = new URLSearchParams(search).get("error");
     return <Redirect to={error ? `/login?error=${encodeURIComponent(error)}` : "/login"} replace />;
   }
+  // Supporter accounts have no org memberships by design — their home is the
+  // profile page, never the pending-approval message or the dashboard.
+  if (session.isSupporter && session.memberships.length === 0) return <Redirect to="/profile" replace />;
   if (session.memberships.length === 0) return <PendingApproval />;
   if (session.activeOrgId === null) return <OrgChooser memberships={session.memberships} />;
   return <>{children}</>;

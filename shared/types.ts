@@ -10,6 +10,8 @@
 // ---------------------------------------------------------------- statuses
 
 export type UserStatus = "invited" | "active" | "disabled";
+/** 'member' = org member/staff account; 'supporter' = self-service donor/volunteer profile. */
+export type UserKind = "member" | "supporter";
 export type OrganizationKind = "member_org" | "platform_owner";
 export type OrganizationStatus = "pending" | "approved" | "disabled";
 export type MembershipRole = "owner" | "member" | "staff_admin" | "staff_approver";
@@ -51,6 +53,7 @@ export type User = {
   personId: string;
   authSubject: string | null;
   status: UserStatus;
+  kind: UserKind;
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -345,5 +348,7 @@ export type SessionInfo = {
   activeOrgId: string | null;
   /** True when the user holds an active staff membership in the platform owner. */
   isStaff: boolean;
+  /** True when the account is a supporter profile (donor/volunteer, no org portal). */
+  isSupporter: boolean;
   staffRole: Extract<MembershipRole, "staff_admin" | "staff_approver"> | null;
 };

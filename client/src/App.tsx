@@ -25,6 +25,7 @@ import { VolunteersNewPage } from "./pages/member/VolunteersNewPage";
 import { VolunteersAddPage } from "./pages/member/VolunteersAddPage";
 import { VolunteersEditPage } from "./pages/member/VolunteersEditPage";
 import { SupportersPage } from "./pages/member/SupportersPage";
+import { SupporterProfilePage } from "./pages/supporter/ProfilePage";
 import { NavBar } from "./components/NavBar";
 import { DashboardGate } from "./components/member/DashboardGate";
 import { AdminShell } from "./components/admin/AdminShell";
@@ -53,6 +54,7 @@ const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
   "MP-11": () => <VolunteersAddPage />,
   "MP-12": () => <VolunteersEditPage />,
   "MP-13": () => <SupportersPage />,
+  "SP-01": () => <SupporterProfilePage />,
   "PB-00": () => <HomePage />,
   "PB-01": () => <ItemsBrowsePage />,
   "PB-02": () => <ItemDetailPage />,

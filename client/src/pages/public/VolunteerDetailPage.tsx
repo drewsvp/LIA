@@ -86,6 +86,9 @@ export function VolunteerDetailPage(): ReactElement {
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [phase, setPhase] = useState<SubmitPhase>("idle");
+  const [createProfile, setCreateProfile] = useState(false);
+  const [subscribeDigest, setSubscribeDigest] = useState(false);
+  const [profileCreated, setProfileCreated] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [serverMessage, setServerMessage] = useState<string | null>(null);
 
@@ -120,10 +123,14 @@ export function VolunteerDetailPage(): ReactElement {
           email: email.trim(),
           phone: phone.trim(),
           notes: notes.trim() === "" ? null : notes.trim(),
+          createProfile,
+          subscribeDigest,
           roleIds: selectedRoleIds,
         }),
       });
       if (res.status === 201) {
+        const okBody = (await res.json().catch(() => null)) as { profileCreated?: boolean } | null;
+        setProfileCreated(okBody?.profileCreated === true);
         setPhase("success");
         return;
       }
@@ -315,6 +322,12 @@ export function VolunteerDetailPage(): ReactElement {
                   Thank you for expressing interest! Check your email for a confirmation — a representative from{" "}
                   {data.organization.name} will be reaching out to you within 1-3 business days with more details.
                 </p>
+                {profileCreated && (
+                  <p style={{ fontSize: 15, maxWidth: 620, margin: "12px auto 0" }}>
+                    Your Donor Profile is ready — <Link href="/login">log in</Link> anytime with your email address
+                    (we&rsquo;ll send you a login link) to see all of your volunteering.
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -506,6 +519,25 @@ export function VolunteerDetailPage(): ReactElement {
                           accomodations needed.
                         </p>
                       </div>
+                      {/* Doubled sizing to match the claim form: 28px labels, 26px boxes. */}
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 16 }}>
+                        <input
+                          type="checkbox"
+                          checked={createProfile}
+                          onChange={(e) => setCreateProfile(e.target.checked)}
+                          style={{ width: 26, height: 26, flexShrink: 0 }}
+                        />
+                        Create a Donor Profile so I can track all my volunteering.
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 20 }}>
+                        <input
+                          type="checkbox"
+                          checked={subscribeDigest}
+                          onChange={(e) => setSubscribeDigest(e.target.checked)}
+                          style={{ width: 26, height: 26, flexShrink: 0 }}
+                        />
+                        Keep me informed about new needs (weekly email).
+                      </label>
                       <div style={{ textAlign: "center" }}>
                         <button type="submit" className="btn-teal" disabled={phase === "submitting"}>
                           {phase === "submitting" ? "Submitting…" : "Express Interest"}

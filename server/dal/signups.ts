@@ -142,6 +142,38 @@ export async function listByRequest(ctx: DbContext, orgId: string, requestId: st
   );
 }
 
+export type SignupForProfile = {
+  id: string;
+  requestId: string;
+  requestTitle: string;
+  orgName: string;
+  createdAt: string;
+  roles: { roleId: string; roleName: string }[];
+};
+
+/** One person's signups across all requests, newest first (supporter profile). */
+export async function listByPerson(ctx: DbContext, personId: string): Promise<SignupForProfile[]> {
+  return withDbContext(ctx, (c) =>
+    q<SignupForProfile>(
+      c,
+      `select vs.id, vs.volunteer_request_id as "requestId", r.title as "requestTitle",
+              o.name as "orgName", vs.created_at as "createdAt",
+              coalesce(
+                (select json_agg(json_build_object('roleId', sr.volunteer_role_id, 'roleName', vr.name)
+                                 order by vr.sort_order)
+                   from volunteer_signup_roles sr join volunteer_roles vr on vr.id = sr.volunteer_role_id
+                  where sr.volunteer_signup_id = vs.id),
+                '[]'::json) as roles
+         from volunteer_signups vs
+         join volunteer_requests r on r.id = vs.volunteer_request_id
+         join organizations o on o.id = r.org_id
+        where vs.person_id = $1
+        order by vs.created_at desc`,
+      [personId],
+    ),
+  );
+}
+
 /** Flat signup roles for one request — who signed up for which role. */
 export async function resolveRolesForRequest(
   ctx: DbContext,

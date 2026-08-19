@@ -142,6 +142,38 @@ export async function listByRequest(ctx: DbContext, orgId: string, requestId: st
   );
 }
 
+export type PledgeForProfile = {
+  id: string;
+  requestId: string;
+  requestTitle: string;
+  orgName: string;
+  createdAt: string;
+  lines: { itemId: string; itemName: string; quantity: number }[];
+};
+
+/** One person's pledges across all requests, newest first (supporter profile). */
+export async function listByPerson(ctx: DbContext, personId: string): Promise<PledgeForProfile[]> {
+  return withDbContext(ctx, (c) =>
+    q<PledgeForProfile>(
+      c,
+      `select ip.id, ip.item_request_id as "requestId", r.title as "requestTitle",
+              o.name as "orgName", ip.created_at as "createdAt",
+              coalesce(
+                (select json_agg(json_build_object('itemId', l.item_id, 'itemName', i.name, 'quantity', l.quantity)
+                                 order by i.sort_order)
+                   from item_pledge_lines l join items i on i.id = l.item_id
+                  where l.item_pledge_id = ip.id),
+                '[]'::json) as lines
+         from item_pledges ip
+         join item_requests r on r.id = ip.item_request_id
+         join organizations o on o.id = r.org_id
+        where ip.person_id = $1
+        order by ip.created_at desc`,
+      [personId],
+    ),
+  );
+}
+
 /** Flat pledge lines for one request — who pledged how many of which item. */
 export async function resolveLinesForRequest(
   ctx: DbContext,

@@ -21,6 +21,7 @@ const ANONYMOUS: SessionInfo = {
   memberships: [],
   activeOrgId: null,
   isStaff: false,
+  isSupporter: false,
   staffRole: null,
 };
 
@@ -55,6 +56,7 @@ export async function resolveSessionInfo(req: Request): Promise<SessionInfo> {
     memberships,
     activeOrgId,
     isStaff: staffMembership !== undefined,
+    isSupporter: user.kind === "supporter",
     staffRole:
       staffMembership?.role === "staff_admin" || staffMembership?.role === "staff_approver"
         ? staffMembership.role

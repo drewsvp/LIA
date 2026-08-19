@@ -84,8 +84,11 @@ export function ItemDetailPage(): ReactElement {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [agree, setAgree] = useState(true); // confirmed: checked on load (§5)
+  const [agree, setAgree] = useState(false); // starts unchecked — deliberate opt-in
+  const [createProfile, setCreateProfile] = useState(false);
+  const [subscribeDigest, setSubscribeDigest] = useState(false);
   const [phase, setPhase] = useState<SubmitPhase>("idle");
+  const [profileCreated, setProfileCreated] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [serverMessage, setServerMessage] = useState<string | null>(null);
 
@@ -128,10 +131,15 @@ export function ItemDetailPage(): ReactElement {
           lastName: lastName.trim(),
           email: email.trim(),
           phone: phone.trim(),
+          agree,
+          createProfile,
+          subscribeDigest,
           lines: enteredLines,
         }),
       });
       if (res.status === 201) {
+        const okBody = (await res.json().catch(() => null)) as { profileCreated?: boolean } | null;
+        setProfileCreated(okBody?.profileCreated === true);
         setPhase("success");
         return;
       }
@@ -320,6 +328,12 @@ export function ItemDetailPage(): ReactElement {
                   Thank you for your donation! Check your email for a confirmation with details on how to deliver
                   your items.
                 </p>
+                {profileCreated && (
+                  <p style={{ fontSize: 15, maxWidth: 560, margin: "12px auto 0" }}>
+                    Your Donor Profile is ready — <Link href="/login">log in</Link> anytime with your email address
+                    (we&rsquo;ll send you a login link) to see all of your donations.
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -479,9 +493,33 @@ export function ItemDetailPage(): ReactElement {
                         />
                         {fieldErrors.phone != null && <p className="pb2-field-error">{fieldErrors.phone}</p>}
                       </div>
-                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 20 }}>
-                        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+                      {/* Doubled sizing: 28px labels, 26px boxes (2x the previous 14px/13px). */}
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 16 }}>
+                        <input
+                          type="checkbox"
+                          checked={agree}
+                          onChange={(e) => setAgree(e.target.checked)}
+                          style={{ width: 26, height: 26, flexShrink: 0 }}
+                        />
                         I agree to fulfill this request within the next 2 weeks.
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 16 }}>
+                        <input
+                          type="checkbox"
+                          checked={createProfile}
+                          onChange={(e) => setCreateProfile(e.target.checked)}
+                          style={{ width: 26, height: 26, flexShrink: 0 }}
+                        />
+                        Create a Donor Profile so I can track all my donations.
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 20 }}>
+                        <input
+                          type="checkbox"
+                          checked={subscribeDigest}
+                          onChange={(e) => setSubscribeDigest(e.target.checked)}
+                          style={{ width: 26, height: 26, flexShrink: 0 }}
+                        />
+                        Keep me informed about new needs (weekly email).
                       </label>
                       <div style={{ textAlign: "center" }}>
                         <button type="submit" className="btn-teal" disabled={!agree || phase === "submitting"}>

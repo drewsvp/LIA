@@ -64,9 +64,10 @@ export async function create(ctx: DbContext, input: CreateSubscriberInput): Prom
             set status = 'subscribed',
                 unsubscribed_at = null,
                 first_name = coalesce($2, first_name),
-                last_name = coalesce($3, last_name)
+                last_name = coalesce($3, last_name),
+                person_id = coalesce(person_id, $4)
           where id = $1 returning ${COLS}`,
-        [found.id, input.firstName ?? null, input.lastName ?? null],
+        [found.id, input.firstName ?? null, input.lastName ?? null, input.personId ?? null],
       );
       const row = revived[0];
       if (!row) throw new Error("digestSubscribers.create: revive failed");

@@ -226,6 +226,33 @@ export function registerRoutes(app: Express): void {
     }
   });
 
+  // ---- Supporter profile (SP-01): the signed-in user's own donation and
+  // volunteer history, resolved through their linked person record. Any
+  // authenticated user may read their own history; no membership required.
+  app.get("/api/supporter/profile", async (req: Request, res: Response, next) => {
+    try {
+      const session = await resolveSessionInfo(req);
+      if (!session.authenticated || session.user === null) {
+        res.status(401).json({ message: "Authentication required" });
+        return;
+      }
+      const personId = session.user.personId;
+      const [pledges, signups] = await Promise.all([
+        dal.pledges.listByPerson(SYSTEM, personId),
+        dal.signups.listByPerson(SYSTEM, personId),
+      ]);
+      res.json({
+        firstName: session.user.firstName,
+        lastName: session.user.lastName,
+        email: session.user.email,
+        pledges,
+        signups,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ---- Guard demonstration the admin lane replaces with real surfaces.
   app.get("/api/admin/ping", requireStaff, (req: Request, res: Response) => {
     res.json({ ok: true, scope: "staff" });
