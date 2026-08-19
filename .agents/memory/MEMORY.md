@@ -3,6 +3,7 @@
 - [Better Auth on Replit](better-auth-setup.md) — use ^1.6 (firewall blocks 1.4.x, CLI unusable); hand-write auth tables; verification.identifier is the magic-link token for provider-free E2E tests.
 - [TypeScript version pin](typescript-version-pin.md) — "latest" typescript is the 7.x native preview; pin ~5.9, keep tsconfig baseUrl-free; tsx scripts are CJS — async main, no top-level await.
 - [RLS is bypassed at runtime](rls-bypassed-at-runtime.md) — BYPASSRLS defeats policies, not triggers: visibility stays in route/SQL; counter + member-transition rules are trigger-enforced (GUC-gated).
+- [Magic-link POST confirmation](magic-link-post-confirm.md) — GET renders, POST verifies (scanners burn GET links); tokens replay inside their window; never compare verification timestamps in JS.
 - [Authed E2E session recipe](auth-e2e-recipes.md) — mint session jars via magic-link + verification.identifier; jars die when the dev domain rotates; Resend test-mode 500s are expected and non-blocking.
 - [Email template entity defaults](email-template-entity-type.md) — shared templates default entity_type per-template; cross-entity call sites must override per call or logs mislabel silently.
 - [Legacy NULL required fields](legacy-null-required-fields.md) — seeded volunteer requests predate required details; edit saves correctly refuse until a member fills them — never backfill invented content.

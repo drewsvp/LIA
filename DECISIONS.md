@@ -451,6 +451,23 @@ The runtime connection role holds BYPASSRLS: policies exist and RLS is enabled a
 
 **D64. `merge_people()` is created in 0003, not 0001.**
 
+**D66. Magic-link verification is POST-confirmed. A GET on the emailed link consumes nothing.**
+
+Testers were getting "that login link is no longer valid" within a minute of delivery, without having clicked anything. Better Auth's `GET /api/auth/magic-link/verify` consumes the `verification` row on sight, and mail-security scanners and link prefetchers follow every URL in an inbound message before the human sees it. The scanner spent the link; the member got the error.
+
+Verification is now two steps. The GET is intercepted ahead of the Better Auth catch-all and only redirects to MP-01C (`/login/verify`), carrying the token and nothing else — no session, no consumption, no state change of any kind. `POST /api/login/magic-link/verify` does the real work, and scanners do not issue POSTs.
+
+Within its 15-minute window the token is replayable: the row is restored after each successful confirmation, so a double click, a reload, or a second device returns a session rather than an error. Only two things refuse a token — expiry, and supersession by a newer still-valid link for the same email. Requesting a new link remains the way to retire an old one.
+
+Four constraints worth keeping:
+
+- **Every timestamp comparison happens in SQL.** `verification` stores `timestamp without time zone` at microsecond precision; a JS `Date` truncates to milliseconds, which made a token compare as newer than itself and report as superseded on its very first use. The row's stamps are carried as text solely so it can be restored byte-for-byte.
+- **Supersession is decided entirely in SQL, including the email match.** Matching the email in Node over a capped page of candidate rows would let a newer token fall outside the page and quietly revive a link that should have been retired.
+- **Confirmations of the same token are serialized in the process.** Better Auth's consume deletes *every* row sharing the identifier, so the token is genuinely absent between the provider call and the restore. Without the per-token chain, a second click landing in that gap is told a perfectly good link is invalid. Writing a spare row up front does not work — the provider's delete takes it too.
+- **The interceptor drops `callbackURL`.** The POST resolves the destination from the account (supporters to `/profile`, everyone else to `/dashboard`), so no caller-supplied redirect target reaches the browser.
+
+Quick login is unaffected: it calls `auth.api.magicLinkVerify` directly and never travels the HTTP GET path.
+
 **D65. `digest_subscribers` stores first and last name. PB-05 persists both. No people row is created on subscribe.**
 
 Two nullable text columns (0004), stored exactly as entered, never concatenated (§8 rule). A resubscribe updates the stored names to the values just submitted, matching how the email address behaves. D27 stands.

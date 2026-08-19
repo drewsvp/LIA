@@ -46,3 +46,12 @@ export const magicLinkEmailLimiter = new FixedWindowLimiter(3, WINDOW_MS);
 
 /** Max magic-link dispatches per source IP per 15 minutes. */
 export const magicLinkIpLimiter = new FixedWindowLimiter(10, WINDOW_MS);
+
+/**
+ * Max magic-link *confirmations* per source IP per 15 minutes. Separate from
+ * the dispatch budget: confirming is the human clicking "Sign in" on the
+ * confirmation page (D66), which is idempotent and can legitimately repeat
+ * (double click, reload, second device). Spending dispatch budget on it would
+ * lock a real member out of requesting another link.
+ */
+export const magicLinkVerifyIpLimiter = new FixedWindowLimiter(30, WINDOW_MS);

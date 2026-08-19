@@ -16,7 +16,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "../auth/auth";
 import { resolveSessionInfo, ACTIVE_ORG_COOKIE } from "../auth/session";
 import { NOT_FOUND_BODY, requireStaff } from "../auth/guards";
-import { magicLinkEmailLimiter, magicLinkIpLimiter } from "../auth/rate-limit";
+import { magicLinkEmailLimiter, magicLinkIpLimiter, magicLinkVerifyIpLimiter } from "../auth/rate-limit";
 import { PUBLIC, SYSTEM, pool } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as dal from "../dal";
@@ -28,6 +28,220 @@ import { registerAdminRoutes } from "./admin";
 import { registerEmailTemplateAdminRoutes } from "./admin-email-templates";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ---------------------------------------------------------------------------
+// Magic-link confirmation (D66).
+//
+// Better Auth's GET /api/auth/magic-link/verify consumes the verification row
+// on sight, so any mail scanner or link prefetcher that followed the URL
+// invalidated the link before the member clicked it. Verification is split:
+// the GET only renders a confirmation surface, and this POST performs the
+// real work. Within its 15-minute window the token stays replayable — the row
+// is restored after each successful confirmation — so a double click, a
+// reload, or a second device all return a session instead of an error. Only
+// an expired token, or one superseded by a newer link for the same email, is
+// refused.
+// ---------------------------------------------------------------------------
+
+type VerifyFailure = "invalid" | "expired" | "superseded";
+
+const VERIFY_FAILURE_MESSAGE: Record<VerifyFailure, string> = {
+  invalid: "That sign-in link is no longer valid. Request a new one below and it will work right away.",
+  expired: "That sign-in link has expired — links are good for 15 minutes. Request a new one below.",
+  superseded: "A newer sign-in link was sent to your email. Open the most recent one, or request another below.",
+};
+
+type ConfirmResult =
+  | { ok: true; cookies: string[]; redirectTo: string }
+  | { ok: false; reason: VerifyFailure };
+
+/**
+ * Timestamps stay in Postgres's hands. `verification` stores `timestamp
+ * without time zone` at microsecond precision; round-tripping those through a
+ * JS Date truncates to milliseconds (and reinterprets them in the process
+ * timezone), which made a token look *newer than itself* and report as
+ * superseded. Every comparison below is evaluated in SQL, and the two stamps
+ * are carried as text purely so the row can be restored byte-for-byte.
+ */
+type VerificationRow = {
+  id: string;
+  identifier: string;
+  value: string;
+  expired: boolean;
+  expiresAtText: string;
+  createdAtText: string;
+};
+
+/** Email carried in a verification row's JSON value; null when unparseable. */
+function verificationEmail(value: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const email = (parsed as { email?: unknown }).email;
+    return typeof email === "string" && email.trim() !== "" ? email.trim().toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when a newer, still-valid link exists for the same email. Requesting a
+ * fresh link is the documented way to retire an old one, so the previous
+ * token stops working the moment its replacement is issued.
+ *
+ * The whole decision is made in SQL, against the stored row by id: matching
+ * the email in Node over a capped page of candidates would let a newer token
+ * fall outside the page and quietly revive a superseded link. The JSON cast is
+ * guarded by a shape test so a non-JSON row can never abort the query.
+ */
+async function hasNewerToken(email: string, rowId: string): Promise<boolean> {
+  const { rows } = await pool.query<{ superseded: boolean }>(
+    `SELECT EXISTS (
+              SELECT 1
+                FROM verification v
+                JOIN verification t ON t.id = $1
+               WHERE v.id <> t.id
+                 AND v."createdAt" > t."createdAt"
+                 AND v."expiresAt" > NOW()
+                 AND lower(
+                       CASE WHEN v.value IS JSON OBJECT THEN v.value::jsonb ->> 'email' END
+                     ) = $2
+            ) AS "superseded"`,
+    [rowId, email],
+  );
+  return rows[0]?.superseded === true;
+}
+
+/**
+ * Serializes confirmations of the same token.
+ *
+ * Better Auth's consume deletes *every* row sharing the identifier, so the
+ * token is genuinely absent between the provider call and the restore below —
+ * a second confirmation landing in that gap would read nothing and report a
+ * perfectly good link as invalid. Chaining per token closes the gap: the
+ * follower runs after the leader has put the row back, and sees a valid token.
+ *
+ * Entries are dropped once a token's chain drains, so the map tracks only
+ * in-flight work. There is no await between reading the tail and replacing it,
+ * so no two callers can attach to the same tail.
+ */
+const confirmChains = new Map<string, Promise<unknown>>();
+
+function withTokenLock<T>(token: string, fn: () => Promise<T>): Promise<T> {
+  const tail = confirmChains.get(token) ?? Promise.resolve();
+  const run = tail.then(fn, fn);
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  confirmChains.set(token, settled);
+  void settled.then(() => {
+    if (confirmChains.get(token) === settled) confirmChains.delete(token);
+  });
+  return run;
+}
+
+/**
+ * Consume the token through Better Auth's own code path (session hooks and
+ * subject linking included), then restore the verification row so the link
+ * remains usable for the rest of its window.
+ */
+function confirmMagicLink(token: string): Promise<ConfirmResult> {
+  return withTokenLock(token, () => confirmMagicLinkExclusive(token));
+}
+
+async function confirmMagicLinkExclusive(token: string): Promise<ConfirmResult> {
+  const { rows } = await pool.query<VerificationRow>(
+    `SELECT id,
+            identifier,
+            value,
+            ("expiresAt" <= NOW())  AS "expired",
+            "expiresAt"::text       AS "expiresAtText",
+            "createdAt"::text       AS "createdAtText"
+       FROM verification
+      WHERE identifier = $1
+      LIMIT 1`,
+    [token],
+  );
+  const row = rows[0];
+  // No row: either never issued, or expired and already swept. Both read as
+  // "ask for a new one" — neither discloses whether the email is registered.
+  if (!row) return { ok: false, reason: "invalid" };
+
+  if (row.expired) {
+    await pool.query(`DELETE FROM verification WHERE id = $1`, [row.id]);
+    return { ok: false, reason: "expired" };
+  }
+
+  const email = verificationEmail(row.value);
+  if (email === null) return { ok: false, reason: "invalid" };
+
+  // A disabled or deleted account must not be able to trade an old link for a
+  // session, and the magic-link plugin would otherwise create a provider user
+  // for an address the application does not know.
+  const appUser = await usersDal.findByEmail(SYSTEM, email);
+  if (!appUser || appUser.status === "disabled") return { ok: false, reason: "invalid" };
+
+  if (await hasNewerToken(email, row.id)) return { ok: false, reason: "superseded" };
+
+  let verifyRes: globalThis.Response;
+  try {
+    // No callbackURL: the endpoint answers with JSON and the session cookie
+    // rather than a redirect, which is what this POST needs.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    verifyRes = await (auth.api as any).magicLinkVerify({
+      query: { token },
+      headers: new Headers(),
+      asResponse: true,
+    });
+  } catch (err) {
+    console.error("magic-link confirm failed:", err);
+    return { ok: false, reason: "invalid" };
+  }
+
+  // Put the row back, preserving createdAt so supersession keeps comparing
+  // against the original issue time rather than the time of this click. The
+  // per-token chain above guarantees no other confirmation observes the gap.
+  //
+  // A failure here costs replay, not the sign-in: this member is already
+  // authenticated, and the link simply reverts to single use. Losing it
+  // outright needs a crash inside these few milliseconds, and the recovery is
+  // the one the error page already offers — request a new link.
+  await pool
+    .query(
+      `INSERT INTO verification (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4::timestamp, $5::timestamp, NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [row.id, row.identifier, row.value, row.expiresAtText, row.createdAtText],
+    )
+    .catch((err: unknown) => {
+      console.error("magic-link confirm: token restore failed:", err);
+    });
+
+  // Housekeeping: restored rows would otherwise outlive their usefulness.
+  void pool
+    .query(`DELETE FROM verification WHERE "expiresAt" < NOW() - INTERVAL '1 day'`)
+    .catch(() => undefined);
+
+  const setCookies: string[] =
+    typeof (verifyRes.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
+      ? (verifyRes.headers as { getSetCookie: () => string[] }).getSetCookie()
+      : [];
+  const hasSessionCookie = setCookies.some(
+    (c) => c.startsWith("__Secure-better-auth.session_token") || c.startsWith("better-auth.session_token"),
+  );
+  if (!hasSessionCookie) {
+    console.error("magic-link confirm: no session cookie returned by the provider");
+    return { ok: false, reason: "invalid" };
+  }
+
+  // Supporters have no organization dashboard; MP-02 sends them to /profile.
+  return {
+    ok: true,
+    cookies: setCookies,
+    redirectTo: appUser.kind === "supporter" ? "/profile" : "/dashboard",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Quick-login configuration — module-level so startup checks can use it
@@ -61,6 +275,25 @@ export async function checkQuickLoginSeed(): Promise<{ seeded: boolean; missing:
 }
 
 export function registerRoutes(app: Express): void {
+  // ---- Magic-link GET interception (D66). MUST stay above the Better Auth
+  // catch-all: the provider's own GET handler consumes the verification row,
+  // so mail-security scanners and link prefetchers were burning links before
+  // the human ever clicked. This handler has NO side effects — it only hands
+  // the token to the confirmation surface, which finishes sign-in over POST.
+  app.get("/api/auth/magic-link/verify", (req: Request, res: Response) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    if (token === "") {
+      res.redirect(302, "/login?error=invalid");
+      return;
+    }
+    // callbackURL is deliberately dropped: the POST step resolves the
+    // destination from the account itself, so no caller-supplied redirect
+    // target ever reaches the browser.
+    res.redirect(302, `/login/verify?token=${encodeURIComponent(token)}`);
+  });
+
   // ---- Better Auth handler. Mounted before body parsers (it reads its own body).
   app.all("/api/auth/*", toNodeHandler(auth));
 
@@ -96,6 +329,38 @@ export function registerRoutes(app: Express): void {
         // Send failures (config, provider) are recorded in email_log and here.
         console.error("magic-link request failed:", err);
       });
+  });
+
+  // ---- Magic-link confirmation (D66). The state-changing half of the split:
+  // this is what actually consumes the token and establishes the session, and
+  // it is only reachable by POST, which scanners and prefetchers do not issue.
+  app.post("/api/login/magic-link/verify", async (req: Request, res: Response, next) => {
+    try {
+      const token: unknown = (req.body as Record<string, unknown> | undefined)?.token;
+      if (typeof token !== "string" || token.trim() === "") {
+        res.status(400).json({ reason: "invalid", message: VERIFY_FAILURE_MESSAGE.invalid });
+        return;
+      }
+      if (!magicLinkVerifyIpLimiter.consume(req.ip ?? "unknown")) {
+        res.status(429).json({
+          reason: "throttled",
+          message: "Too many sign-in attempts from this device. Please wait a few minutes and try again.",
+        });
+        return;
+      }
+
+      const outcome = await confirmMagicLink(token.trim());
+      if (!outcome.ok) {
+        res.status(400).json({ reason: outcome.reason, message: VERIFY_FAILURE_MESSAGE[outcome.reason] });
+        return;
+      }
+      for (const cookie of outcome.cookies) {
+        res.append("Set-Cookie", cookie);
+      }
+      res.status(200).json({ ok: true, redirectTo: outcome.redirectTo });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // ---- Quick Login (seeded test accounts only — see module-level allowlist).

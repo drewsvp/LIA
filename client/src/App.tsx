@@ -14,6 +14,7 @@ import { AboutPage } from "./pages/public/AboutPage";
 import { DigestPage } from "./pages/public/DigestPage";
 import { HomePage } from "./pages/public/HomePage";
 import { LoginPage } from "./pages/member/LoginPage";
+import { LoginVerifyPage } from "./pages/member/LoginVerifyPage";
 import { SignupPage } from "./pages/member/SignupPage";
 import { DashboardPage } from "./pages/member/DashboardPage";
 import { OrganizationSettingsPage } from "./pages/member/OrganizationSettingsPage";
@@ -43,6 +44,7 @@ import { EmailTemplatesPage as AdminEmailTemplatesPage } from "./pages/admin/Ema
 /** Built surfaces, by surface ID. Everything else renders its placeholder. */
 const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
   "MP-01": () => <LoginPage />,
+  "MP-01C": () => <LoginVerifyPage />,
   "MP-03": () => <SignupPage />,
   "MP-04": () => <DashboardPage />,
   "MP-05": () => <OrganizationSettingsPage />,

@@ -18,6 +18,9 @@ export type SurfaceRoute = {
 export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   // Member portal
   { id: "MP-01", path: "/login", title: "Login", area: "member" },
+  // MP-01C — magic-link confirmation (D66). The emailed link lands here so
+  // that finishing sign-in takes a deliberate POST; scanners cannot spend it.
+  { id: "MP-01C", path: "/login/verify", title: "Confirm sign-in", area: "member" },
   { id: "MP-03", path: "/signup", title: "Organization signup", area: "member" },
   { id: "MP-04", path: "/dashboard", title: "Member dashboard", area: "member" },
   { id: "MP-05", path: "/dashboard/organization", title: "My organization", area: "member" },
