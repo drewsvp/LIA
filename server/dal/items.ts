@@ -33,6 +33,48 @@ export type UpdateItemPatch = Partial<{
   sortOrder: number;
 }>;
 
+/** Complete pre-approval edit row used by the staff correction flow. */
+export type ReplaceItemInput = {
+  /** Omit for a new row. Existing ids must belong to this request. */
+  id?: string;
+  name: string;
+  description: string;
+  condition: ItemCondition;
+  productUrl: string | null;
+  quantityRequested: number;
+};
+
+export class RequestHasItemActivityError extends Error {
+  constructor() {
+    super("item request has donor or fulfillment activity");
+    this.name = "RequestHasItemActivityError";
+  }
+}
+
+export class UnknownItemOnRequestError extends Error {
+  constructor() {
+    super("one or more items do not belong to this request");
+    this.name = "UnknownItemOnRequestError";
+  }
+}
+
+export async function assertNoItemActivityInTx(c: PoolClient, requestId: string): Promise<Item[]> {
+  const existing = await q<Item>(c, `select ${COLS} from items where item_request_id = $1 for update`, [requestId]);
+  if (
+    existing.some((item) => item.quantityClaimed !== 0 || item.quantityReceived !== 0) ||
+    (
+      await q<{ exists: boolean }>(
+        c,
+        `select exists(select 1 from item_pledges where item_request_id = $1) as exists`,
+        [requestId],
+      )
+    )[0]?.exists
+  ) {
+    throw new RequestHasItemActivityError();
+  }
+  return existing;
+}
+
 const PATCH_COLUMNS: Record<keyof UpdateItemPatch, string> = {
   name: "name",
   description: "description",
@@ -120,6 +162,53 @@ export async function update(ctx: DbContext, orgId: string, itemId: string, patc
     return existing;
   }
   return withDbContext(ctx, (c) => updateInTx(c, orgId, itemId, patch));
+}
+
+/**
+ * Replace a request's editable item structure in one locked transaction.
+ * Claim/receipt counters and their pledge history are never editable.
+ */
+export async function replaceForPreApprovalEditInTx(
+  c: PoolClient,
+  requestId: string,
+  rows: ReplaceItemInput[],
+): Promise<Item[]> {
+  const existing = await assertNoItemActivityInTx(c, requestId);
+
+  const existingIds = new Set(existing.map((item) => item.id));
+  const suppliedIds = rows.flatMap((row) => (row.id ? [row.id] : []));
+  if (new Set(suppliedIds).size !== suppliedIds.length || suppliedIds.some((id) => !existingIds.has(id))) {
+    throw new UnknownItemOnRequestError();
+  }
+
+  await q(c, `delete from items where item_request_id = $1 and not (id = any($2::uuid[]))`, [
+    requestId,
+    suppliedIds,
+  ]);
+
+  for (const [sortOrder, row] of rows.entries()) {
+    if (row.id) {
+      await q(
+        c,
+        `update items
+            set name = $3, description = $4, condition = $5, product_url = $6,
+                quantity_requested = $7, sort_order = $8
+          where id = $2 and item_request_id = $1`,
+        [requestId, row.id, row.name, row.description, row.condition, row.productUrl, row.quantityRequested, sortOrder],
+      );
+    } else {
+      await q(
+        c,
+        `insert into items (item_request_id, name, description, condition, product_url, quantity_requested, sort_order)
+         values ($1, $2, $3, $4, $5, $6, $7)`,
+        [requestId, row.name, row.description, row.condition, row.productUrl, row.quantityRequested, sortOrder],
+      );
+    }
+  }
+
+  return q<Item>(c, `select ${COLS} from items where item_request_id = $1 order by sort_order asc, created_at asc`, [
+    requestId,
+  ]);
 }
 
 /** Number of items on a request (MP-07 must add at least one before submit). */

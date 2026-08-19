@@ -118,7 +118,8 @@ export async function sourceNeedImage(
     return { request, source: request.imageGenerated ? "stock" : "ai" };
   }
 
-  await itemRequests.markImageGenPending(SYSTEM, requestId);
+  const marked = await itemRequests.markImageGenPending(SYSTEM, requestId);
+  if (!marked) throw new NeedImageError("This request is no longer eligible for pre-approval image changes.");
   try {
     const requestItems = await items.listByRequest(SYSTEM, requestId);
     const itemNames = requestItems.map((i) => i.name).slice(0, 5);

@@ -24,37 +24,57 @@ This is the highest-volume queue in the system and the one that gates whether a 
 
 ## 3. Data
 
-**Reads:** `item_requests` and `volunteer_requests` at `status = 'pending'`, each joined to `organizations` (name, city) and to the contact person in `people`, plus all `items` or `volunteer_roles` on the request, and `created_by` resolved to a person.
+**Reads:** `item_requests` and `volunteer_requests` at `status IN ('pending','active','archived','draft')` (draft rows surfaced via the Returned tab), each joined to `organizations` (name, city) and to the contact person in `people`, plus all `items` or `volunteer_roles` on the request, and `created_by` resolved to a person. The detail endpoint also returns `latestReturn` (latest return-to-draft note and its timestamp) and `editability` ({editable: boolean, reason: string|null}).
 
-**Writes on approve, in one transaction:** the request's `status` to `active`, `approved_at = now()`, `approved_by` from the session user, an `approval_events` row, and `email_log` rows. Distinct from the image-upload sub-action, which writes `image_url` and nothing else (D11, D48).
+**Writes on approve, in one transaction:** the request's `status` to `active`, `approved_at = now()`, `approved_by` from the session user, an `approval_events` row (D48), and `email_log` rows. Image upload is a separate action that writes `image_url` and nothing else (D11, D48).
 
 **Writes on return to draft:** `status` to `draft`, an `approval_events` row carrying the staff note.
 
 **Writes on archive:** `status` to `archived`, `archived_at`, `archived_reason = 'manual'`, an `approval_events` row.
 
+**Writes on edit (POST /api/admin/requests/:type/:id/edit):** any combination of: `title`, `description`, `details` (volunteer only), `deadline_type`, `deadline_date`, `people_helped`, `dropoff_location` (item) or `event_location` (volunteer), request contact fields, and the full ordered list of items or roles including add/edit/reorder/remove. Status is preserved — edit does not change status.
+
+**Writes on move-to-pending (POST /api/admin/requests/:type/:id/move-to-pending):** `status` to `pending` for a returned draft, allowing it to re-enter the approval queue without re-submission.
+
 **Functions called:** None.
 
-**Never touches:** any quantity column, on either request type. Staff do not adjust claimed or interested counts, here or anywhere.
+**Never touches:** any activity quantity column (claimed, received, interested, confirmed) on either request type. Staff do not adjust claimed or interested counts here or anywhere.
 
 ## 4. Layout regions
 
 Renders inside the shared admin shell, ADMIN-01 section 4.
 
 1. **Type filter.** All, Items, Volunteer. All is the default.
-2. **Status tabs.** Pending, Active, Archived. Pending is the default.
-3. **Queue list.** One row per request: type, title, organization, submitted date, and the count of items or roles.
-4. **Detail panel.** The full request as a member submitted it, plus every item or role with its quantities.
-5. **Action region:** Approve, Return to draft, Archive.
+2. **Status tabs.** Pending, Active, Archived, Returned for changes. Pending is the default. The Returned for changes tab shows requests that staff returned to draft status (status = 'draft' with a return history).
+3. **Queue list.** One row per request: type, title, organization, submitted date (or returned date on the Returned tab), and the count of items or roles.
+4. **Detail panel.** The full request as a member submitted it, plus every item or role with quantities. Also shows the latest return note and date when present.
+5. **Action region:** Approve, Return to draft, Archive, Edit Request, Move to Pending (returned drafts only), Reinstate (archived only).
 
-The detail panel must show the request the way the public will see it, including the image, so the approver is reviewing the actual output rather than a field list. Staff routinely add a themed image before approving; see section 6.
+The detail panel must show the request the way the public will see it, including the image, so the approver is reviewing the actual output rather than a field list. Staff may add a themed image before approving; see section 6.
 
 ## 5. Fields
 
 ### Image upload
 
-Staff routinely add a themed image before approving. **Image upload on the detail panel**, staff-only, writing `image_url` and nothing else (D11). This is the single exception to this surface being read-only.
+Staff may add a themed image before approving. **Image upload on the detail panel**, staff-only, writing `image_url` and nothing else (D11). The upload button is accessible both in view mode and during the edit flow, as long as `editability.editable` is true.
 
-No other field is editable here.
+### Full request edit
+
+When `editability.editable` is true, staff may edit the following fields:
+
+**Request fields:** title, description, details (volunteer only), deadline type, deadline date, people helped.
+
+**Location:** drop-off location (item requests) or event location (volunteer requests).
+
+**Contact:** contact first name, last name, email, phone.
+
+Changing the name or phone for the request's currently attached, same-email contact updates that canonical person record atomically. Entering a different email attaches that existing visible person as-is, or creates a new person if the email is new; it never overwrites a different person's identity from request-form text.
+
+**Children (items or roles):** add new, edit existing (all fields), reorder (move up/move down), remove. Each item has: name, description, condition (new / gently_used / any), product URL, quantity requested. Each role has: name, description, quantity needed.
+
+Client-side validation mirrors the organization editors: title and description are required; every contact field is required and email must be valid; deadline date is required for date-specific requests; volunteer details and event location are required; people helped, if provided, must be a non-negative whole number; every child needs a name, description, and whole-number quantity of at least 1; product URLs, if provided, must be valid HTTP(S) URLs.
+
+Save preserves the request's current status. The edit endpoint does not change status.
 
 ## 6. Actions
 
@@ -68,9 +88,10 @@ No other field is editable here.
 
 **Return to draft**
 - Enabled when: the request is `pending`.
-- Requires: a note. This is the only channel through which staff tell an organization what to fix, so an empty note is not accepted.
+- Requires: a note. This is the only formal channel through which staff record what needs to change; an empty note is not accepted.
 - Does: sets status to `draft`, writes an `approval_events` row with the note.
 - Emails queued: **none (D45).** Christina contacts the organization herself, outside the system. There is no thirteenth template.
+- The note is a historical record only. It does not invoke any AI processing, send any email, or make any other change to the request. Staff must contact the organization directly.
 - On success: the row leaves the pending queue and the result states that no email was sent and the organization must be contacted directly.
 
 **Archive**
@@ -84,6 +105,16 @@ No other field is editable here.
 - Does: sets status back to `active`, clears `archived_at` and `archived_reason`, writes an `approval_events` row. Does not write `approved_at` (D48). Approval stamps the pending-to-active transition only; reinstating an archived request is not that transition.
 - Emails queued: none. The organization was already told it was approved.
 
+**Edit Request**
+- Enabled when: `editability.editable` is true (available from pending and returned detail views, per server-determined editability).
+- Does: opens the inline edit form. Staff may edit all request, contact, deadline, location, and copy fields, and add/edit/reorder/remove child items or roles with their quantities. Saving calls POST `/api/admin/requests/:type/:id/edit` with the full updated payload. Status is not changed by this action.
+- Cancel discards all unsaved changes.
+
+**Move to Pending** (Returned tab only)
+- Enabled when: the request has `status = 'draft'` (returned draft).
+- Does: calls POST `/api/admin/requests/:type/:id/move-to-pending`, which atomically sets status to `pending` and writes the status transition to approval history. The request enters the pending queue and can be approved normally.
+- Emails queued: none.
+
 ## 7. Conditional behavior
 
 | Trigger | Result |
@@ -93,6 +124,9 @@ No other field is editable here.
 | Item request with `deadline_type = 'date_specific'` | Deadline date shown |
 | Request's organization is not `approved` | Approve is disabled, with a stated reason. Approving a request from an unapproved organization would publish nothing, since public queries filter on organization status |
 | Primary contact and creator are the same person | Result message says so, and one email is queued |
+| `editability.editable` is false | Edit button not shown; image upload not shown; `editability.reason` displayed as a note |
+| Request has a latest return note | Return note and date shown at top of detail panel, with a disclaimer that it is history only |
+| Returned tab selected | Column header shows "Returned" date; rows sorted by return date; Move to Pending action available |
 
 ## 8. Copy
 
@@ -100,11 +134,12 @@ No other field is editable here.
 |---|---|
 | Page heading | Requests |
 | Pending empty state | No requests are waiting for approval. |
+| Returned for changes empty state | No returned drafts. |
 | Approve confirmation | Approve {title}? This publishes the request and emails {recipients}. |
 | Approve result, two recipients | {title} is now public. Approval email queued to {contact email} and {creator email}. |
 | Approve result, same person | {title} is now public. Approval email queued to {email}. |
-| Return to draft prompt | What needs to change? This note is saved to the request history. The organization is not emailed, so contact them directly. |
-| Return to draft result | {title} returned to draft. No email was sent. |
+| Return to draft prompt | What needs to change? This note is saved to the request history as a record only — it does not trigger any AI processing, send any email, or make any other change to the request. The organization is not emailed; staff must contact the organization directly. |
+| Return to draft result | {title} returned to draft. The note was saved as history only; no changes were made and no email was sent. Contact the organization directly. |
 | Archive confirmation | Archive {title}? It will stop appearing publicly. No email is sent. |
 | Archive result | {title} archived. |
 | Reinstate result | {title} is public again. |
@@ -134,13 +169,14 @@ Per ADMIN-01 section 4. `approved_by` comes from the session user.
 | Request already approved by another staff member | No-op success, row refreshes. Approval is idempotent |
 | Email dispatch fails after approval | The approval stands, the request is public, the failure is logged and visible at ADMIN-06. The result message says the email failed rather than claiming it sent |
 | Return to draft with an empty note | Blocked |
+| Edit save fails | Nothing written, stated error |
+| Client validation fails on edit | Error shown inline, save not attempted |
 
 **There is no email template for a returned request (D45).** Christina contacts the organization herself, outside the system. Minor fixes she makes herself without contacting anyone; anything more substantive, she emails the organization's contact directly before approving. The return-to-draft prompt in section 8 is the reminder that she still owns that outreach. A returned request can sit indefinitely if she does not follow through; that is accepted operational practice, not a missing template.
 
 ## 13. Out of scope
 
-- Editing any request field other than the image.
-- Adjusting any quantity.
+- Adjusting activity quantity columns (claimed, received, interested, confirmed).
 - Approving organizations or members. Separate queues.
 - Deleting a request.
 - Bulk approval.
@@ -148,19 +184,28 @@ Per ADMIN-01 section 4. `approved_by` comes from the session user.
 ## 14. Acceptance
 
 - Both request types appear in one queue and the type filter narrows correctly.
+- The Returned tab shows returned drafts (status = 'draft' with return history), with a column showing the return date.
 - The detail panel shows every item or role with its quantities.
+- The detail panel shows the latest return note and date when one exists, with a disclaimer that the note is history only and does not trigger AI, email, or any other action.
 - Approving sets status, `approved_at = now()`, and approver, writes exactly one approval event, and queues the approval email.
 - When the primary contact and creator are the same person, exactly one email is queued.
 - Approving twice sends one email.
 - An approved request appears immediately on the correct public browse surface.
 - Approve is disabled for a request whose organization is not approved.
 - Return to draft requires a note and stores it on the approval event.
-- Return to draft queues no email (D45). The prompt reminds the operator to contact the organization directly.
+- Return to draft queues no email (D45). The prompt reminds the operator to contact the organization directly and states that the note triggers no AI processing.
 - Archive sets `archived_reason = 'manual'`.
 - Reinstating an archived request returns it to public view.
-- The staff image upload writes `image_url` and nothing else.
-- No path on this surface writes a quantity column.
+- Staff image upload writes `image_url` and nothing else.
+- No path on this surface writes a quantity column (claimed, received, interested, confirmed).
 - The pending count in the navigation matches the queue.
+- Edit Request is shown when `editability.editable` is true and hidden otherwise.
+- Saving an edit preserves the request status.
+- Editing children supports add, edit (all fields including quantities), reorder, and remove.
+- Client validation matches the member request editors and blocks missing required copy/contact/location fields, invalid deadline/email/URL values, non-whole-number people-helped values, or invalid child rows.
+- Image upload remains accessible while in the edit form (when editable).
+- Returned drafts can be moved back to pending via Move to Pending without re-submission.
+- Dashboard selector option labels visibly include status, so Draft requests are distinguishable from Pending review and Active requests.
 
 ## 15. Open captures
 

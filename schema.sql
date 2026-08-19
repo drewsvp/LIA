@@ -44,16 +44,16 @@ begin
     return new;
   end if;
 
-  if tg_table_name = 'items'
-     and new.quantity_claimed is distinct from old.quantity_claimed then
-    raise exception
-      'items.quantity_claimed is written only by record_item_pledge()';
-  end if;
-
-  if tg_table_name = 'volunteer_roles'
-     and new.quantity_interested is distinct from old.quantity_interested then
-    raise exception
-      'volunteer_roles.quantity_interested is written only by record_volunteer_signup()';
+  if tg_table_name = 'items' then
+    if new.quantity_claimed is distinct from old.quantity_claimed then
+      raise exception
+        'items.quantity_claimed is written only by record_item_pledge()';
+    end if;
+  elsif tg_table_name = 'volunteer_roles' then
+    if new.quantity_interested is distinct from old.quantity_interested then
+      raise exception
+        'volunteer_roles.quantity_interested is written only by record_volunteer_signup()';
+    end if;
   end if;
 
   return new;

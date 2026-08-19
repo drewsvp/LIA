@@ -32,9 +32,18 @@ const DATE_FMT = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
 });
 
-/** Option label, capture-grounded format: `{Title} - {MM/DD/YYYY}` (§5). */
+/** Option label: `{Title} - {MM/DD/YYYY} [{Status}]` — status included so Draft
+ *  requests are visibly distinct from submitted/active ones (§5). */
+function statusLabel(status: string): string {
+  if (status === "draft") return "Draft";
+  if (status === "pending") return "Pending review";
+  if (status === "active") return "Active";
+  if (status === "archived") return "Archived";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 function optionLabel(r: OverviewRequest): string {
-  return `${r.title} - ${DATE_FMT.format(new Date(r.createdAt))}`;
+  return `${r.title} - ${DATE_FMT.format(new Date(r.createdAt))} [${statusLabel(r.status)}]`;
 }
 
 const QUERY_ERROR_COPY = "Your requests could not be loaded. Please refresh the page and try again.";

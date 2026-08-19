@@ -2428,6 +2428,21 @@ a.site-nav-btn {
 .adm-list-label { margin: 10px 0 2px; font-size: 13px; color: #163a5f; }
 .adm-candidate { border: 1px solid #d7dde4; padding: 10px 12px; margin: 8px 0; }
 
+/* ---- ADMIN-02: edit form, child editor cards, return-note banner ---- */
+.adm-edit-form { padding: 0 0 16px; }
+.adm-form-section { margin: 16px 0 8px; padding: 12px 14px; border: 1px solid #d7dde4; background: #fafbfc; }
+.adm-form-section-title { margin: 0 0 10px; font-size: 13px; font-weight: 700; color: #163a5f; text-transform: uppercase; letter-spacing: 0.04em; }
+.adm-select { padding: 6px 8px; border: 1px solid #d7dde4; font-size: 14px; background: #fff; cursor: pointer; min-width: 160px; }
+.adm-child-card { border: 1px solid #d7dde4; padding: 10px 12px; margin: 8px 0; background: #fff; }
+.adm-child-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.adm-child-actions { display: flex; gap: 6px; }
+.adm-btn-sm { padding: 2px 8px; font-size: 12px; }
+.adm-btn-danger { border-color: #b3261e; color: #b3261e; }
+.adm-btn-danger:hover:not(:disabled) { background: #b3261e; color: #fff; }
+.adm-return-note { background: #fff8e1; border: 1px solid #ffe082; padding: 10px 14px; margin: 0 0 14px; }
+.adm-return-note-body { margin: 6px 0 4px; font-size: 14px; }
+.adm-return-note-disclaimer { font-size: 12px; margin: 4px 0 0; }
+
 /* ---- ADMIN-06 Email log ---- */
 .adm-banner-fail {
   display: block;

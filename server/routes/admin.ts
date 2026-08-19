@@ -41,7 +41,7 @@ function slugify(name: string): string {
 }
 import * as dal from "../dal";
 import { withDbContext, type DbContext } from "../db/client";
-import type { MembershipRole } from "../../shared/types";
+import type { DeadlineType, MembershipRole } from "../../shared/types";
 import { dispatchQueuedEmails, type PendingDispatch } from "../email/send";
 import { storeImage, deleteImage } from "../storage/object-storage";
 import { sourceNeedImage, NeedImageError } from "../services/need-image";
@@ -67,6 +67,13 @@ import {
   type AdminRequest,
 } from "../services/request-approval";
 import {
+  moveReturnedRequestToPending,
+  saveStaffRequestEdits,
+  saveStaffRequestImage,
+  StaffRequestEditConflictError,
+  type StaffRequestEditInput,
+} from "../services/staff-request-edit";
+import {
   approveMembership,
   rejectMembership,
   reinstateMembership,
@@ -79,9 +86,10 @@ import {
 } from "../services/member-approval";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ORG_STATUSES = new Set(["pending", "approved", "disabled"]);
-/** ADMIN-02 §4: the queue's three tabs. Draft rows belong to members, not here. */
-const REQUEST_STATUSES = new Set(["pending", "active", "archived"]);
+/** ADMIN-02 §4: ordinary lifecycle tabs plus the history-backed returned view. */
+const REQUEST_STATUSES = new Set(["pending", "returned", "active", "archived"]);
 /** ADMIN-01/ADMIN-02 §8 failure copy, verbatim. */
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
 
@@ -103,6 +111,183 @@ function parseKind(raw: string | undefined): RequestKind | null {
 
 function staffCtx(req: Request): DbContext {
   return { kind: "staff", userId: staffContext(req).userId };
+}
+
+function parseStaffRequestEdit(
+  kind: RequestKind,
+  requestId: string,
+  staffUserId: string,
+  rawBody: unknown,
+): StaffRequestEditInput | null {
+  if (!rawBody || typeof rawBody !== "object") return null;
+  const body = rawBody as Record<string, unknown>;
+  const text = (key: string, max: number): string | null => {
+    const value = body[key];
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed.length <= max ? trimmed : null;
+  };
+  const title = text("title", 200);
+  const description = text("description", 4000);
+  const contactFirstName = text("contactFirstName", 120);
+  const contactLastName = text("contactLastName", 120);
+  const contactEmail = text("contactEmail", 254)?.toLowerCase() ?? null;
+  const contactPhone = text("contactPhone", 40);
+  const deadlineTypeRaw = text("deadlineType", 20);
+  const deadlineDateRaw = text("deadlineDate", 10);
+  const deadlineType: DeadlineType | null =
+    deadlineTypeRaw === "date_specific" || deadlineTypeRaw === "until_fulfilled" || deadlineTypeRaw === "ongoing"
+      ? deadlineTypeRaw
+      : null;
+  const deadlineDate =
+    deadlineType === "date_specific" && deadlineDateRaw !== null && /^\d{4}-\d{2}-\d{2}$/.test(deadlineDateRaw)
+      ? deadlineDateRaw
+      : null;
+  const peopleRaw = body.peopleHelped;
+  const peopleHelped =
+    peopleRaw === null || peopleRaw === ""
+      ? null
+      : typeof peopleRaw === "number" && Number.isInteger(peopleRaw) && peopleRaw >= 0
+        ? peopleRaw
+        : undefined;
+  const childrenRaw = Array.isArray(body.children) && body.children.length <= 200 ? body.children : null;
+  if (
+    !title ||
+    !description ||
+    !contactFirstName ||
+    !contactLastName ||
+    !contactEmail ||
+    !EMAIL_RE.test(contactEmail) ||
+    !contactPhone ||
+    !deadlineType ||
+    peopleHelped === undefined ||
+    (deadlineType === "date_specific" && deadlineDate === null) ||
+    childrenRaw === null
+  ) {
+    return null;
+  }
+
+  const common = {
+    title,
+    description,
+    peopleHelped,
+    deadlineType,
+    deadlineDate,
+    contact: {
+      firstName: contactFirstName,
+      lastName: contactLastName,
+      email: contactEmail,
+      phone: contactPhone,
+    },
+  };
+
+  if (kind === "item") {
+    const dropoffRaw = body.dropoffLocation;
+    const dropoffLocation =
+      dropoffRaw === null || dropoffRaw === undefined
+        ? null
+        : typeof dropoffRaw === "string" && dropoffRaw.trim().length <= 300
+          ? dropoffRaw.trim() || null
+          : undefined;
+    if (dropoffLocation === undefined) return null;
+    const children: StaffRequestEditInput & { kind: "item" } extends { children: infer C } ? C : never = [];
+    for (const raw of childrenRaw) {
+      if (!raw || typeof raw !== "object") return null;
+      const row = raw as Record<string, unknown>;
+      const rowText = (key: string, max: number): string | null => {
+        const value = row[key];
+        if (typeof value !== "string") return null;
+        const trimmed = value.trim();
+        return trimmed.length <= max ? trimmed : null;
+      };
+      const idRaw = row.id;
+      const id = idRaw === null || idRaw === undefined || idRaw === "" ? undefined : idRaw;
+      const name = rowText("name", 200);
+      const childDescription = rowText("description", 2000);
+      const condition = rowText("condition", 20);
+      const productRaw = row.productUrl;
+      const productUrl =
+        productRaw === null || productRaw === undefined
+          ? null
+          : typeof productRaw === "string" && productRaw.trim().length <= 500
+            ? productRaw.trim() || null
+            : undefined;
+      const quantityRequested = row.quantityRequested;
+      if (
+        (id !== undefined && (typeof id !== "string" || !UUID_RE.test(id))) ||
+        !name ||
+        !childDescription ||
+        (condition !== "new" && condition !== "gently_used" && condition !== "any") ||
+        productUrl === undefined ||
+        typeof quantityRequested !== "number" ||
+        !Number.isInteger(quantityRequested) ||
+        quantityRequested < 1
+      ) {
+        return null;
+      }
+      if (productUrl !== null) {
+        try {
+          const url = new URL(productUrl);
+          if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+        } catch {
+          return null;
+        }
+      }
+      children.push({
+        ...(id !== undefined ? { id } : {}),
+        name,
+        description: childDescription,
+        condition,
+        productUrl,
+        quantityRequested,
+      });
+    }
+    return {
+      kind,
+      requestId,
+      staffUserId,
+      fields: { ...common, dropoffLocation },
+      children,
+    };
+  }
+
+  const details = text("details", 4000);
+  const eventLocation = text("eventLocation", 300);
+  if (!details || !eventLocation || (deadlineType !== "ongoing" && deadlineType !== "date_specific")) return null;
+  const children: StaffRequestEditInput & { kind: "volunteer" } extends { children: infer C } ? C : never = [];
+  for (const raw of childrenRaw) {
+    if (!raw || typeof raw !== "object") return null;
+    const row = raw as Record<string, unknown>;
+    const idRaw = row.id;
+    const id = idRaw === null || idRaw === undefined || idRaw === "" ? undefined : idRaw;
+    const name = typeof row.name === "string" && row.name.trim().length <= 200 ? row.name.trim() : "";
+    const childDescription =
+      typeof row.description === "string" && row.description.trim().length <= 2000 ? row.description.trim() : "";
+    const quantityNeeded = row.quantityNeeded;
+    if (
+      (id !== undefined && (typeof id !== "string" || !UUID_RE.test(id))) ||
+      !name ||
+      !childDescription ||
+      typeof quantityNeeded !== "number" ||
+      !Number.isInteger(quantityNeeded) ||
+      quantityNeeded < 1
+    ) {
+      return null;
+    }
+    children.push({
+      ...(id !== undefined ? { id } : {}),
+      name,
+      description: childDescription,
+      quantityNeeded,
+    });
+  }
+  return {
+    kind,
+    requestId,
+    staffUserId,
+    fields: { ...common, details, eventLocation },
+    children,
+  };
 }
 
 export function registerAdminRoutes(app: Express): void {
@@ -272,7 +457,10 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: "Unknown status filter." });
         return;
       }
-      const requests = await dal.adminRequests.listByStatus(staffCtx(req), status as "pending" | "active" | "archived");
+      const requests =
+        status === "returned"
+          ? await dal.adminRequests.listReturnedDrafts(staffCtx(req))
+          : await dal.adminRequests.listByStatus(staffCtx(req), status as "pending" | "active" | "archived");
       res.json({ requests });
     } catch (err) {
       next(err);
@@ -300,8 +488,11 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      const children =
-        kind === "item" ? await dal.items.listByRequest(ctx, id) : await dal.volunteerRoles.listByRequest(ctx, id);
+      const [children, latestReturn, editability] = await Promise.all([
+        kind === "item" ? dal.items.listByRequest(ctx, id) : dal.volunteerRoles.listByRequest(ctx, id),
+        dal.adminRequests.latestReturn(ctx, kind, id),
+        dal.adminRequests.preApprovalEditability(ctx, kind, id),
+      ]);
       const orgContactPerson = organization.primaryContactPersonId
         ? await dal.people.getById(ctx, organization.primaryContactPersonId)
         : null;
@@ -337,9 +528,75 @@ export function registerAdminRoutes(app: Express): void {
             }
           : null,
         children,
+        latestReturn,
+        editability,
       });
     } catch (err) {
       next(err);
+    }
+  });
+
+  // ---- Complete pre-approval correction. Status is deliberately preserved;
+  // return and recovery are explicit, separately recorded actions.
+  app.post("/api/admin/requests/:type/:id/edit", requireStaff, async (req: Request, res: Response) => {
+    const kind = parseKind(req.params.type);
+    const id = req.params.id ?? "";
+    if (!kind || !UUID_RE.test(id)) {
+      sendNotFound(res);
+      return;
+    }
+    const parsed = parseStaffRequestEdit(kind, id, staffContext(req).userId, req.body);
+    if (!parsed) {
+      res.status(400).json({ message: "Check every field and child row, then try again. Nothing was changed." });
+      return;
+    }
+    try {
+      const result = await saveStaffRequestEdits(parsed);
+      res.json({ request: result.request, message: "Request corrections saved. Its review status did not change." });
+    } catch (err) {
+      if (err instanceof RequestNotFoundError) {
+        sendNotFound(res);
+        return;
+      }
+      if (err instanceof StaffRequestEditConflictError) {
+        res.status(409).json({ message: err.reason });
+        return;
+      }
+      if (err instanceof dal.people.ContactNotVisibleError) {
+        res.status(400).json({ message: "That contact cannot be attached to this organization. Nothing was changed." });
+        return;
+      }
+      console.error(`[admin] staff edit failed for ${kind} request ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
+    }
+  });
+
+  // ---- Returned draft -> Pending. No approval stamp and no email.
+  app.post("/api/admin/requests/:type/:id/move-to-pending", requireStaff, async (req: Request, res: Response) => {
+    const kind = parseKind(req.params.type);
+    const id = req.params.id ?? "";
+    if (!kind || !UUID_RE.test(id)) {
+      sendNotFound(res);
+      return;
+    }
+    try {
+      const request = await moveReturnedRequestToPending({
+        kind,
+        requestId: id,
+        staffUserId: staffContext(req).userId,
+      });
+      res.json({ request, message: `${request.title} moved back to Pending. No email was sent.` });
+    } catch (err) {
+      if (err instanceof RequestNotFoundError) {
+        sendNotFound(res);
+        return;
+      }
+      if (err instanceof StaffRequestEditConflictError) {
+        res.status(409).json({ message: err.reason });
+        return;
+      }
+      console.error(`[admin] move-to-pending failed for ${kind} request ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
     }
   });
 
@@ -435,7 +692,7 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ---- §6 Return to draft: note required, event carries it, NO email (D45).
+  // ---- §6 Return to draft: note is history/instruction only, NO AI/edit/email.
   app.post("/api/admin/requests/:type/:id/return-to-draft", requireStaff, async (req: Request, res: Response) => {
     const kind = parseKind(req.params.type);
     const id = req.params.id ?? "";
@@ -446,14 +703,17 @@ export function registerAdminRoutes(app: Express): void {
     const note = typeof req.body?.note === "string" ? req.body.note.trim() : "";
     if (note === "") {
       // §6: the note is the only channel telling the org what to fix.
-      res.status(400).json({ message: "A note is required — it is the only record of what needs to change." });
+       res.status(400).json({ message: "A note is required — it is saved as history but does not make changes or notify the organization." });
       return;
     }
     const userId = staffContext(req).userId;
     try {
       const request = await returnRequestToDraft({ kind, requestId: id, staffUserId: userId, note });
       // §8 verbatim.
-      res.json({ request, message: `${request.title} returned to draft. No email was sent.` });
+      res.json({
+        request,
+        message: `${request.title} returned to draft. The note was saved as history only; no changes were made and no email was sent. Contact the organization directly.`,
+      });
     } catch (err) {
       if (err instanceof RequestNotFoundError) {
         sendNotFound(res);
@@ -581,8 +841,9 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      if (request.status === "archived") {
-        res.status(409).json({ message: "An archived request cannot have its image changed." });
+      const editability = await dal.adminRequests.preApprovalEditability(ctx, kind, id);
+      if (!editability.editable) {
+        res.status(409).json({ message: editability.reason ?? "This request cannot be edited." });
         return;
       }
       if (!req.file) {
@@ -590,19 +851,24 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       const stored = await storeImage({ data: req.file.buffer, filename: req.file.originalname });
-      const updated: AdminRequest =
-        kind === "item"
-          ? // An upload supersedes any auto-sourced image for good: clear the
-            // generated flag and status so automation never touches it again.
-            await dal.itemRequests.update(ctx, request.orgId, id, {
-              imageUrl: stored.url,
-              imageGenerated: false,
-              imageGenStatus: null,
-              imageGenError: null,
-            })
-          : await dal.volunteerRequests.update(ctx, request.orgId, id, { imageUrl: stored.url });
+      let updated: AdminRequest;
+      try {
+        updated = await saveStaffRequestImage({
+          kind,
+          requestId: id,
+          staffUserId: staffContext(req).userId,
+          imageUrl: stored.url,
+        });
+      } catch (err) {
+        await deleteImage(stored.url).catch(() => undefined);
+        throw err;
+      }
       res.json({ request: updated, message: "Image saved." });
     } catch (err) {
+      if (err instanceof StaffRequestEditConflictError) {
+        res.status(409).json({ message: err.reason });
+        return;
+      }
       console.error(`[admin] request image upload failed for ${id}:`, err);
       res.status(500).json({ message: SAVE_FAILURE });
     }
@@ -624,8 +890,16 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      if (request.status === "archived") {
-        res.status(409).json({ message: "An archived request cannot have its image changed." });
+      const [editability, latestReturn] = await Promise.all([
+        dal.adminRequests.preApprovalEditability(ctx, "item", id),
+        request.status === "draft" ? dal.adminRequests.latestReturn(ctx, "item", id) : Promise.resolve(null),
+      ]);
+      if (!editability.editable || (request.status === "draft" && latestReturn === null)) {
+        res.status(409).json({
+          message:
+            editability.reason ??
+            "Only pending requests and drafts previously returned by staff can have their image changed.",
+        });
         return;
       }
       if (request.imageUrl !== null && !request.imageGenerated) {
@@ -662,6 +936,18 @@ export function registerAdminRoutes(app: Express): void {
       }
       if (!request.imageGenerated || request.imageUrl === null) {
         res.status(409).json({ message: "This request has no auto-sourced image to remove." });
+        return;
+      }
+      const [editability, latestReturn] = await Promise.all([
+        dal.adminRequests.preApprovalEditability(ctx, "item", id),
+        request.status === "draft" ? dal.adminRequests.latestReturn(ctx, "item", id) : Promise.resolve(null),
+      ]);
+      if (!editability.editable || (request.status === "draft" && latestReturn === null)) {
+        res.status(409).json({
+          message:
+            editability.reason ??
+            "Only pending requests and drafts previously returned by staff can have their image changed.",
+        });
         return;
       }
       const previousUrl = request.imageUrl;

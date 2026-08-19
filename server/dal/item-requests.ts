@@ -86,7 +86,15 @@ export async function markImageGenPending(ctx: DbContext, requestId: string): Pr
     const rows = await q<{ id: string }>(
       c,
       `update item_requests set image_gen_status = 'pending', image_gen_error = null
-       where id = $1 returning id`,
+       where id = $1
+         and status in ('draft', 'pending')
+         and approved_at is null
+         and not exists(select 1 from item_pledges ip where ip.item_request_id = item_requests.id)
+         and not exists(
+           select 1 from items i where i.item_request_id = item_requests.id
+             and (i.quantity_claimed > 0 or i.quantity_received > 0)
+         )
+       returning id`,
       [requestId],
     );
     return rows.length > 0;
@@ -110,6 +118,13 @@ export async function recordGeneratedImage(
       `update item_requests r
        set image_url = $2, image_generated = true, image_gen_status = 'succeeded', image_gen_error = null
        where r.id = $1 and ${guard}
+         and r.status in ('draft', 'pending')
+         and r.approved_at is null
+         and not exists(select 1 from item_pledges ip where ip.item_request_id = r.id)
+         and not exists(
+           select 1 from items i where i.item_request_id = r.id
+             and (i.quantity_claimed > 0 or i.quantity_received > 0)
+         )
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId, imageUrl],
     );
@@ -120,7 +135,8 @@ export async function recordGeneratedImage(
 /** Record a failed attempt — visible on the admin surface, never silent. */
 export async function recordImageGenFailure(ctx: DbContext, requestId: string, message: string): Promise<void> {
   await withDbContext(ctx, (c) =>
-    q(c, `update item_requests set image_gen_status = 'failed', image_gen_error = $2 where id = $1`, [
+    q(c, `update item_requests set image_gen_status = 'failed', image_gen_error = $2
+          where id = $1 and status in ('draft', 'pending') and approved_at is null`, [
       requestId,
       message.slice(0, 500),
     ]),
@@ -210,6 +226,13 @@ export async function clearGeneratedImage(ctx: DbContext, requestId: string): Pr
       `update item_requests r
        set image_url = null, image_generated = false, image_gen_status = null, image_gen_error = null
        where r.id = $1 and r.image_generated
+         and r.status in ('draft', 'pending')
+         and r.approved_at is null
+         and not exists(select 1 from item_pledges ip where ip.item_request_id = r.id)
+         and not exists(
+           select 1 from items i where i.item_request_id = r.id
+             and (i.quantity_claimed > 0 or i.quantity_received > 0)
+         )
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId],
     );

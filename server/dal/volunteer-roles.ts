@@ -28,6 +28,50 @@ export type UpdateVolunteerRolePatch = Partial<{
   sortOrder: number;
 }>;
 
+/** Complete pre-approval edit row used by the staff correction flow. */
+export type ReplaceVolunteerRoleInput = {
+  /** Omit for a new row. Existing ids must belong to this request. */
+  id?: string;
+  name: string;
+  description: string;
+  quantityNeeded: number;
+};
+
+export class RequestHasVolunteerActivityError extends Error {
+  constructor() {
+    super("volunteer request has signup or confirmation activity");
+    this.name = "RequestHasVolunteerActivityError";
+  }
+}
+
+export class UnknownRoleOnRequestError extends Error {
+  constructor() {
+    super("one or more roles do not belong to this request");
+    this.name = "UnknownRoleOnRequestError";
+  }
+}
+
+export async function assertNoVolunteerActivityInTx(c: PoolClient, requestId: string): Promise<VolunteerRole[]> {
+  const existing = await q<VolunteerRole>(
+    c,
+    `select ${COLS} from volunteer_roles where volunteer_request_id = $1 for update`,
+    [requestId],
+  );
+  if (
+    existing.some((role) => role.quantityInterested !== 0 || role.quantityConfirmed !== 0) ||
+    (
+      await q<{ exists: boolean }>(
+        c,
+        `select exists(select 1 from volunteer_signups where volunteer_request_id = $1) as exists`,
+        [requestId],
+      )
+    )[0]?.exists
+  ) {
+    throw new RequestHasVolunteerActivityError();
+  }
+  return existing;
+}
+
 const PATCH_COLUMNS: Record<keyof UpdateVolunteerRolePatch, string> = {
   name: "name",
   description: "description",
@@ -122,6 +166,53 @@ export async function update(
     return existing;
   }
   return withDbContext(ctx, (c) => updateInTx(c, orgId, roleId, patch));
+}
+
+/**
+ * Replace a request's editable role structure in one locked transaction.
+ * Interest/confirmation counters and their signup history are never editable.
+ */
+export async function replaceForPreApprovalEditInTx(
+  c: PoolClient,
+  requestId: string,
+  rows: ReplaceVolunteerRoleInput[],
+): Promise<VolunteerRole[]> {
+  const existing = await assertNoVolunteerActivityInTx(c, requestId);
+
+  const existingIds = new Set(existing.map((role) => role.id));
+  const suppliedIds = rows.flatMap((row) => (row.id ? [row.id] : []));
+  if (new Set(suppliedIds).size !== suppliedIds.length || suppliedIds.some((id) => !existingIds.has(id))) {
+    throw new UnknownRoleOnRequestError();
+  }
+
+  await q(c, `delete from volunteer_roles where volunteer_request_id = $1 and not (id = any($2::uuid[]))`, [
+    requestId,
+    suppliedIds,
+  ]);
+
+  for (const [sortOrder, row] of rows.entries()) {
+    if (row.id) {
+      await q(
+        c,
+        `update volunteer_roles
+            set name = $3, description = $4, quantity_needed = $5, sort_order = $6
+          where id = $2 and volunteer_request_id = $1`,
+        [requestId, row.id, row.name, row.description, row.quantityNeeded, sortOrder],
+      );
+    } else {
+      await q(
+        c,
+        `insert into volunteer_roles (volunteer_request_id, name, description, quantity_needed, sort_order)
+         values ($1, $2, $3, $4, $5)`,
+        [requestId, row.name, row.description, row.quantityNeeded, sortOrder],
+      );
+    }
+  }
+  return q<VolunteerRole>(
+    c,
+    `select ${COLS} from volunteer_roles where volunteer_request_id = $1 order by sort_order asc, created_at asc`,
+    [requestId],
+  );
 }
 
 /** Number of roles on a request (MP-10 must add at least one before submit). */
