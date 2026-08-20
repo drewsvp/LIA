@@ -1,10 +1,12 @@
 /**
  * MP-02 — Global navigation bar, present on every page.
  *
- * Desktop: logo left; a single right-aligned row holding ABOUT, MEMBER LOGIN
- * (unauthenticated only), then the two primary calls to action PROVIDE AN
- * ITEM and VOLUNTEER, plus the in-portal utilities (DASHBOARD, ADMIN, org
- * switcher, user menu) when the session carries them.
+ * Desktop: logo left; the right side is a two-row stack inside one navigation
+ * landmark, mirroring the main Alliance site's header. The floating top row
+ * holds ABOUT, ALLIANCE HOMEPAGE (external, new tab) and MEMBER LOGIN
+ * (unauthenticated only); the row beneath it holds the two primary calls to
+ * action PROVIDE AN ITEM and VOLUNTEER, plus the in-portal utilities
+ * (DASHBOARD, ADMIN, org switcher, user menu) when the session carries them.
  * Mobile (§10): logo, hamburger, DASHBOARD/ADMIN buttons when authenticated;
  * the remaining items collapse behind the hamburger.
  *
@@ -180,34 +182,49 @@ export function NavBar(): ReactElement {
           />
         </Link>
 
-        {/* Desktop: one right-aligned row */}
-        <nav className="site-nav-right" aria-label="Main navigation">
-          <Link href="/about" className="site-nav-link">
-            ABOUT
-          </Link>
-          {showMemberLogin ? (
-            <Link href="/login" className="site-nav-link">
-              MEMBER LOGIN
+        {/* Desktop: two stacked right-aligned rows */}
+        {/* One navigation landmark wraps BOTH rows — splitting it would drop
+            the top-row destinations out of screen-reader landmark navigation. */}
+        <nav className="site-nav-stack" aria-label="Main navigation">
+          <div className="site-nav-top">
+            <Link href="/about" className="site-nav-btn site-nav-btn-cta">
+              ABOUT
             </Link>
-          ) : null}
-          <Link href="/items" className="site-nav-btn site-nav-btn-cta">
-            PROVIDE AN ITEM
-          </Link>
-          <Link href="/volunteer" className="site-nav-btn site-nav-btn-cta">
-            VOLUNTEER
-          </Link>
-          <OrgSwitcher className="site-nav-switcher" />
-          {showDashboard ? (
-            <Link href="/dashboard" className="site-nav-btn">
-              DASHBOARD
+            <a
+              href="https://www.defendingthecause.org"
+              className="site-nav-btn site-nav-btn-cta"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ALLIANCE HOMEPAGE
+            </a>
+            {showMemberLogin ? (
+              <Link href="/login" className="site-nav-btn site-nav-btn-cta">
+                MEMBER LOGIN
+              </Link>
+            ) : null}
+          </div>
+
+          <div className="site-nav-right">
+            <Link href="/items" className="site-nav-btn site-nav-btn-cta">
+              PROVIDE AN ITEM
             </Link>
-          ) : null}
-          {showAdmin ? (
-            <Link href="/admin/organizations" className="site-nav-btn">
-              ADMIN
+            <Link href="/volunteer" className="site-nav-btn site-nav-btn-cta">
+              VOLUNTEER
             </Link>
-          ) : null}
-          {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
+            <OrgSwitcher className="site-nav-switcher" />
+            {showDashboard ? (
+              <Link href="/dashboard" className="site-nav-btn">
+                DASHBOARD
+              </Link>
+            ) : null}
+            {showAdmin ? (
+              <Link href="/admin/organizations" className="site-nav-btn">
+                ADMIN
+              </Link>
+            ) : null}
+            {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
+          </div>
         </nav>
 
         {/* Mobile: DASHBOARD and ADMIN stay outside the hamburger (§10) */}
@@ -241,6 +258,15 @@ export function NavBar(): ReactElement {
           <Link href="/about" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
             ABOUT
           </Link>
+          <a
+            href="https://www.defendingthecause.org"
+            className="site-nav-panel-item"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMenuOpen(false)}
+          >
+            ALLIANCE HOMEPAGE
+          </a>
           {showMemberLogin ? (
             <Link href="/login" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
               MEMBER LOGIN

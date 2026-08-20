@@ -8,10 +8,10 @@ import { PublicLayout } from "../../components/public/PublicLayout";
  * Navigation only: reads nothing, writes nothing.
  *
  * Page order:
- *   1. Navy band — "Join Us in Changing the World" (moved from PB-00, unchanged)
- *   2. When a Kid Needs a Bed, It Can't Wait
- *   3. Free for Every Member Organization
- *   4. What This Has Actually Done + the two CTA buttons
+ *   1. Navy band — "Join us in Making a Difference" (moved from PB-00)
+ *   2. Meet Real Needs in Real Time
+ *   3. A Powerful Tool for Local Organizations
+ *   4. One Part of a Larger Program + the two CTA buttons
  *   5. Navy band — TEDx talk + responsive 16:9 video embed
  *
  * Copy is supplied verbatim by Tiffany and Christina; nothing here is written
@@ -23,63 +23,59 @@ export function AboutPage(): ReactElement {
     <PublicLayout>
       {/* ── 1. Top navy band — the page headline, left exactly as moved from PB-00 ── */}
       <div className="pb0-navy">
-        <h2 className="pb0-navy-heading">Join Us in Changing the World</h2>
+        <h2 className="pb0-navy-heading">Join us in Making a Difference</h2>
         <p className="pb0-navy-para">
-          Each of us have talents, resources and experience that can be used to make a difference for kids &amp;
-          families in our community.
+          Each of us have resources and experience that can make a difference for at-risk kids &amp; families right
+          here in our community.
         </p>
       </div>
 
       {/* ── 2. Origin story ── */}
       <section className="pb6-section">
-        <h2>When a Kid Needs a Bed, It Can't Wait</h2>
+        <h2>Meet Real Needs in Real Time</h2>
         <p>
-          Love in Action started ten years ago as a simple idea: connect what our community already has to give
-          with what a kid or family actually needs right now. A bed. A car seat. Diapers. The basics that let a
-          placement happen, or let a family stay stable through a hard week.
-        </p>
-        <p>
-          When a child is waiting on a bed so a placement can go through, or a caregiver needs a car seat and
-          there isn't one, the wait isn't just inconvenient. It's traumatic. That's the problem Love in Action
-          was built to shorten.
+          The Love in Action Program began ten years ago with a simple idea: make it easy for caring people to
+          connect with kids and families who need support right now. Whether it's purchasing a new car seat,
+          donating diapers, or volunteering time, every act of generosity can help meet an immediate need and
+          create greater stability for a child or family. This platform connects you directly to real-time
+          opportunities, making it simple to choose how you'll put your love into action.
         </p>
       </section>
 
       {/* ── 3. Free for member organizations ── */}
       <section className="pb6-section">
-        <h2>Free for Every Member Organization</h2>
+        <h2>A Powerful Tool for Local Organizations</h2>
         <p>
-          Love in Action isn't one program run by one nonprofit. It's shared infrastructure for the Alliance's
-          network of more than 100 nonprofit organizations, and every one of them gets an account for free.
-          Nobody pays to post a need or claim a dashboard. A weekly digest carries those needs to donors and
-          volunteers across the region, and churches, companies, and community groups run their own drives and
-          wishlists through it too, turning individual generosity into a coordinated response instead of a
-          scattered one.
+          The Love in Action Database is a resource for our Alliance Members—including nonprofits, agencies and
+          ministries serving local kids and families. Instead of spending hours searching for donations or
+          coordinating resources, Members can post needs, allowing our community to respond. By sharing
+          technology, resources and relationships, we reduce costs and administrative burdens, giving staff more
+          time to focus on what matters most: caring for each child and family. Because every need is vetted by
+          our Members, this platform creates a trusted, collaborative way to mobilize essential items and support
+          throughout our community.
         </p>
       </section>
 
       {/* ── 4. Impact list + calls to action ── */}
       <section className="pb6-section">
-        <h2>What This Has Actually Done</h2>
+        <h2>One Part of a Larger Program</h2>
         <ul>
+          <li>Annual Donation Drives that collect thousands of essential items.</li>
           <li>
-            Over 10,000 people served across the life of the program, with hundreds more met in the months since
-            our most recent relaunch alone.
-          </li>
-          <li>1,000+ items moved through household essentials drives, supporting 350+ kids and families.</li>
-          <li>46 safe spaces furnished, from a single bed to a full apartment.</li>
-          <li>
-            An annual backpack drive that's nearly doubled, from around 900 to as many as 1,800, with partners
-            like Sutter Health and local churches driving the growth.
+            Our Emergency Supply Closet which allows us to distribute critical resources when urgent needs arise.
           </li>
           <li>
-            Through the Ashley Furniture Hope to Dream partnership, roughly 200 beds delivered in a single
-            season, plus 30 more full bed sets since.
+            This fully custom Love in Action Database where unique needs are posted by our Alliance Member
+            network throughout the year.
           </li>
         </ul>
         <p>
-          None of that happens without someone deciding to give an item or an hour instead of scrolling past.
-          Real needs, posted by real organizations, met by real people nearby.
+          This program gives individuals, community groups, churches, and businesses easy ways to turn generosity
+          into real support for kids and families.
+        </p>
+        <p>
+          And it works! In 2025, Love in Action provided 33,394 donated items to meet the needs of 10,553
+          children and families through 72 Alliance Member agencies and nonprofits.
         </p>
         <p style={{ textAlign: "center" }}>
           <Link href="/items" className="btn-teal">
@@ -93,6 +89,7 @@ export function AboutPage(): ReactElement {
 
       {/* ── 5. Bottom navy band — TEDx + video ── */}
       <div className="pb0-navy">
+        <h2 className="pb0-navy-heading">Let's Change Our Community Together</h2>
         <p className="pb0-navy-para">
           If you're looking for some ideas or encouragement, check out this <strong>TEDx talk</strong> by The
           Alliance's very own, <strong>Heidi White</strong>.

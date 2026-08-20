@@ -26,14 +26,9 @@ export function HomePage(): ReactElement {
 
       <div className="pb0-content">
         <p className="pb0-intro">
-          Welcome to our <strong>Love in Action Database</strong>! Here, you'll find opportunities to meet the
-          needs of our community's most vulnerable kids and families, in addition to the needs of the local
-          nonprofits, agencies and support groups that serve them.
-        </p>
-        <p className="pb0-intro">
-          Browse real-time needs using the image buttons below, then sign up to make a difference for local foster
-          children, youth aging out of the system, newly arrived refugees, single moms, struggling families, social
-          workers and more.
+          Welcome to our <strong>Love in Action Database</strong>! Browse real-time item and volunteer needs, then
+          choose an opportunity that speaks to you. Together, we can show love in action to local kids in foster
+          care, refugees, single moms, struggling families, social workers and so many more.
         </p>
 
         {/* Image tiles (§6) */}
@@ -53,9 +48,9 @@ export function HomePage(): ReactElement {
         </div>
 
         {/* Digest callout */}
+        <p className="pb0-callout">Want to hear when new needs or volunteers are posted?</p>
         <p className="pb0-callout">
-          Want to hear when new needs or volunteers are posted? We've got you covered. Click the button below to
-          sign up for our weekly Love in Action email digest!
+          We've got you covered. Click the button below to sign up for our weekly Love in Action email digest!
         </p>
         <p style={{ textAlign: "center", margin: "0 0 48px" }}>
           <Link href="/subscribe" className="btn-navy">
