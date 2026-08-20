@@ -62,6 +62,7 @@ import {
   AlreadyActiveError,
   IllegalStateError,
   NoChildrenError,
+  NoVolunteerCategoriesError,
   OrgNotApprovedError,
   RequestNotFoundError,
   type RequestKind,
@@ -260,6 +261,16 @@ function parseStaffRequestEdit(
 
   const details = requiredText("details", "Volunteer details", 4000);
   const eventLocation = requiredText("eventLocation", "Event location", 300);
+  const categoryIdsRaw = body.categoryIds;
+  if (
+    !Array.isArray(categoryIdsRaw) ||
+    categoryIdsRaw.length > 100 ||
+    categoryIdsRaw.some((id) => typeof id !== "string" || !UUID_RE.test(id)) ||
+    new Set(categoryIdsRaw).size !== categoryIdsRaw.length
+  ) {
+    invalid("Volunteer categories must be a list of unique category identifiers.");
+  }
+  const categoryIds = categoryIdsRaw as string[];
   const children: StaffRequestEditInput & { kind: "volunteer" } extends { children: infer C } ? C : never = [];
   for (const [index, raw] of childrenRaw.entries()) {
     const label = `Role ${index + 1}`;
@@ -293,6 +304,7 @@ function parseStaffRequestEdit(
     requestId,
     staffUserId,
     fields: { ...common, details, eventLocation },
+    categoryIds,
     children,
   };
 }
@@ -495,10 +507,11 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      const [children, latestReturn, editability] = await Promise.all([
+      const [children, latestReturn, editability, categories] = await Promise.all([
         kind === "item" ? dal.items.listByRequest(ctx, id) : dal.volunteerRoles.listByRequest(ctx, id),
         dal.adminRequests.latestReturn(ctx, kind, id),
         dal.adminRequests.preApprovalEditability(ctx, kind, id),
+        kind === "volunteer" ? dal.volunteerRequests.listCategoryOptions(ctx, id) : Promise.resolve([]),
       ]);
       const orgContactPerson = organization.primaryContactPersonId
         ? await dal.people.getById(ctx, organization.primaryContactPersonId)
@@ -535,6 +548,7 @@ export function registerAdminRoutes(app: Express): void {
             }
           : null,
         children,
+        categories,
         latestReturn,
         editability,
       });
@@ -576,6 +590,14 @@ export function registerAdminRoutes(app: Express): void {
       }
       if (err instanceof dal.people.ContactNotVisibleError) {
         res.status(400).json({ message: "That contact cannot be attached to this organization. Nothing was changed." });
+        return;
+      }
+      if (
+        err instanceof dal.volunteerRequests.VolunteerRequestCategoryNotFoundError ||
+        err instanceof dal.volunteerRequests.DuplicateVolunteerRequestCategoryError ||
+        err instanceof dal.volunteerRequests.InactiveVolunteerRequestCategoryError
+      ) {
+        res.status(409).json({ message: `${err.message} Nothing was changed.` });
         return;
       }
       console.error(`[admin] staff edit failed for ${kind} request ${id}:`, err);
@@ -732,6 +754,10 @@ export function registerAdminRoutes(app: Express): void {
               ? "This request has no items and cannot be approved."
               : "This request has no roles and cannot be approved.",
         });
+        return;
+      }
+      if (err instanceof NoVolunteerCategoriesError) {
+        res.status(409).json({ message: err.message });
         return;
       }
       if (err instanceof IllegalStateError) {

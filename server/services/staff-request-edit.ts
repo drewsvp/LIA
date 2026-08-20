@@ -65,6 +65,7 @@ export type StaffVolunteerRequestEditInput = {
   requestId: string;
   staffUserId: string;
   fields: CommonFields & { details: string; eventLocation: string };
+  categoryIds: string[];
   children: Array<{
     id?: string;
     name: string;
@@ -221,6 +222,7 @@ export async function saveStaffRequestEdits(
         contactPersonId: person.id,
       });
       await dal.volunteerRoles.replaceForPreApprovalEditInTx(c, input.requestId, input.children);
+      await dal.volunteerRequests.replaceCategoriesInTx(c, input.requestId, input.categoryIds);
       return { request };
     });
   } catch (err) {
@@ -253,6 +255,14 @@ export async function moveReturnedRequestToPending(input: {
 
       const children = await dal.volunteerRoles.assertNoVolunteerActivityInTx(c, input.requestId);
       if (children.length === 0) throw new StaffRequestEditConflictError("Add at least one role before moving this request to Pending.");
+      try {
+        await dal.volunteerRequests.assertHasActiveCategoriesInTx(c, input.requestId);
+      } catch (err) {
+        if (err instanceof dal.volunteerRequests.NoActiveVolunteerRequestCategoriesError) {
+          throw new StaffRequestEditConflictError(err.message);
+        }
+        throw err;
+      }
       return dal.volunteerRequests.transitionStatusInTx(c, {
         requestId: input.requestId,
         to: "pending",

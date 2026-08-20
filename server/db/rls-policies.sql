@@ -1,5 +1,5 @@
 -- rls-policies.sql
--- Row-level security for the 18 application tables (Handbook §6: permission
+-- Row-level security for the application tables (Handbook §6: permission
 -- checks enforced with row-level security in addition to the server-side
 -- guards). This file is AUTH INFRASTRUCTURE, applied idempotently at setup by
 -- `npm run db:apply-rls`. It is not a numbered schema migration and it does
@@ -487,6 +487,43 @@ create policy volunteer_roles_member_all on volunteer_roles
         select om.org_id from org_memberships om
         where om.user_id = nullif(current_setting('app.user_id', true), '')::uuid
           and om.status = 'active'))
+  );
+
+-- ------------------------------------------------------ volunteer_request_categories
+
+alter table volunteer_request_categories enable row level security;
+alter table volunteer_request_categories force row level security;
+
+drop policy if exists volunteer_request_categories_system_staff_all on volunteer_request_categories;
+create policy volunteer_request_categories_system_staff_all on volunteer_request_categories
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+drop policy if exists volunteer_request_categories_member_all on volunteer_request_categories;
+create policy volunteer_request_categories_member_all on volunteer_request_categories
+  using (
+    current_setting('app.context', true) = 'member'
+    and exists (
+      select 1 from volunteer_requests r
+       where r.id = volunteer_request_categories.volunteer_request_id
+         and r.org_id in (
+           select om.org_id from org_memberships om
+            where om.user_id = nullif(current_setting('app.user_id', true), '')::uuid
+              and om.status = 'active'
+         )
+    )
+  )
+  with check (
+    current_setting('app.context', true) = 'member'
+    and exists (
+      select 1 from volunteer_requests r
+       where r.id = volunteer_request_categories.volunteer_request_id
+         and r.org_id in (
+           select om.org_id from org_memberships om
+            where om.user_id = nullif(current_setting('app.user_id', true), '')::uuid
+              and om.status = 'active'
+         )
+    )
   );
 
 -- ---------------------------------------------------------------- item_pledges

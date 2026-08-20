@@ -16,6 +16,7 @@ let passed = 0;
 let failed = 0;
 const requestIds: string[] = [];
 let contactId: string | null = null;
+let volunteerCategoryId: string | null = null;
 type RequestKind = "item" | "volunteer";
 
 function amazonUrl(asin: string, markerValue: string): string {
@@ -203,6 +204,15 @@ async function main(): Promise<void> {
      values ($1, 'Remove role', 'First', 1, 0), ($1, 'Keep role', 'Second', 2, 1)
      returning id`,
     [volunteerId],
+  );
+  const volunteerCategory = await pool.query<{ id: string }>(
+    `insert into volunteer_categories (name) values ($1) returning id`,
+    [`${marker} category`],
+  );
+  volunteerCategoryId = volunteerCategory.rows[0]!.id;
+  await pool.query(
+    `insert into volunteer_request_categories (volunteer_request_id, category_id) values ($1, $2)`,
+    [volunteerId, volunteerCategoryId],
   );
 
   const unauthorized = await request(member, `/api/admin/requests/item/${itemId}`);
@@ -598,6 +608,7 @@ async function main(): Promise<void> {
     deadlineType: "until_fulfilled",
     deadlineDate: null,
     peopleHelped: 8,
+    categoryIds: [volunteerCategoryId],
     children: [
       {
         id: roleRows.rows[1]!.id,
@@ -900,6 +911,7 @@ async function cleanup(): Promise<void> {
     await pool.query(`delete from volunteer_requests where id = any($1::uuid[])`, [requestIds]);
   }
   if (contactId) await pool.query(`delete from people where id = $1`, [contactId]);
+  if (volunteerCategoryId) await pool.query(`delete from volunteer_categories where id = $1`, [volunteerCategoryId]);
   await pool.end();
 }
 

@@ -60,6 +60,13 @@ type RoleChild = {
   quantityRemaining: number;
 };
 
+type VolunteerCategoryOption = {
+  id: string;
+  name: string;
+  isActive: boolean;
+  selected: boolean;
+};
+
 type Detail = {
   type: RequestKind;
   request: {
@@ -87,6 +94,7 @@ type Detail = {
   creator: { name: string; email: string } | null;
   requestContact: { firstName: string; lastName: string; email: string; phone: string | null } | null;
   children: ItemChild[] | RoleChild[];
+  categories: VolunteerCategoryOption[];
   latestReturn: { note: string; createdAt: string } | null;
   editability: {
     editable: boolean;
@@ -132,6 +140,7 @@ type EditForm = {
   eventLocation: string;
   // volunteer-only
   details: string;
+  categoryIds: string[];
   itemChildren: EditItemChild[];
   roleChildren: EditRoleChild[];
 };
@@ -216,6 +225,7 @@ function buildEditForm(detail: Detail): EditForm {
     dropoffLocation: r.dropoffLocation ?? "",
     eventLocation: r.eventLocation ?? "",
     details: r.details ?? "",
+    categoryIds: detail.categories.filter((category) => category.selected).map((category) => category.id),
     itemChildren,
     roleChildren,
   };
@@ -284,6 +294,7 @@ function buildEditPayload(form: EditForm, kind: RequestKind): Record<string, unk
   } else {
     base.details = form.details.trim();
     base.eventLocation = form.eventLocation.trim();
+    base.categoryIds = form.categoryIds;
     base.children = form.roleChildren.map((c) => ({
       ...(c.id ? { id: c.id } : {}),
       name: c.name.trim(),
@@ -658,6 +669,17 @@ export function RequestsPage() {
     });
   }
 
+  function toggleVolunteerCategory(categoryId: string) {
+    if (!editForm) return;
+    const selected = editForm.categoryIds.includes(categoryId);
+    setEditForm({
+      ...editForm,
+      categoryIds: selected
+        ? editForm.categoryIds.filter((id) => id !== categoryId)
+        : [...editForm.categoryIds, categoryId],
+    });
+  }
+
   const rows = listQuery.data?.requests ?? [];
   const visible = rows.filter((r) => typeFilter === "all" || r.type === typeFilter);
   const detail = detailQuery.data ?? null;
@@ -682,6 +704,8 @@ export function RequestsPage() {
 
   const orgNotApproved = detail !== null && detail.organization.status !== "approved";
   const noChildren = detail !== null && detail.children.length === 0;
+  const hasActiveVolunteerCategory =
+    detail?.type !== "volunteer" || detail.categories.some((category) => category.selected && category.isActive);
   const approveBlockedReason = detail
     ? orgNotApproved
       ? `${detail.organization.name} is not approved yet, so this request cannot be published.`
@@ -689,6 +713,8 @@ export function RequestsPage() {
         ? detail.type === "item"
           ? "This request has no items and cannot be approved."
           : "This request has no roles and cannot be approved."
+        : !hasActiveVolunteerCategory
+          ? "Assign at least one active volunteer category before approving this request."
         : null
     : null;
 
@@ -847,6 +873,34 @@ export function RequestsPage() {
                   </label>
                 </div>
               </div>
+
+              {detail.type === "volunteer" && (
+                <div className="adm-form-section">
+                  <h3 className="adm-form-section-title">Volunteer Categories</h3>
+                  <p className="adm-muted">Choose the categories that describe this opportunity.</p>
+                  <fieldset>
+                    <legend className="sr-only">Volunteer categories</legend>
+                    {detail.categories.map((category) => {
+                      const checked = editForm.categoryIds.includes(category.id);
+                      return (
+                        <label key={category.id} style={{ display: "block", marginBottom: 6 }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!category.isActive && !checked}
+                            onChange={() => toggleVolunteerCategory(category.id)}
+                          />{" "}
+                          {category.name}
+                          {!category.isActive ? " (inactive — remove only)" : ""}
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                  {detail.categories.length === 0 && (
+                    <p className="adm-alert">No active volunteer categories are available. Staff must add one before this request can be approved.</p>
+                  )}
+                </div>
+              )}
 
               <div className="adm-form-section">
                 <h3 className="adm-form-section-title">Deadline</h3>
@@ -1089,6 +1143,19 @@ export function RequestsPage() {
                 )}
                 <dt>People helped</dt>
                 <dd>{request.peopleHelped ?? NOT_PROVIDED}</dd>
+                {detail.type === "volunteer" && (
+                  <>
+                    <dt>Volunteer categories</dt>
+                    <dd>
+                      {detail.categories.filter((category) => category.selected).length > 0
+                        ? detail.categories
+                            .filter((category) => category.selected)
+                            .map((category) => `${category.name}${category.isActive ? "" : " (inactive)"}`)
+                            .join(", ")
+                        : "No categories assigned — assign an active category before approval."}
+                    </dd>
+                  </>
+                )}
                 <dt>Request contact</dt>
                 <dd>
                   {detail.requestContact

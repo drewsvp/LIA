@@ -106,6 +106,9 @@ export async function saveVolunteerRequestEdits(
     if (statusTo !== null && !(MEMBER_EDGES[currentStatus] ?? []).includes(statusTo)) {
       throw new IllegalStatusMoveError(currentStatus, statusTo);
     }
+    if (statusTo === "pending") {
+      await volunteerRequests.assertHasActiveCategoriesInTx(c, request.id);
+    }
 
     // One human, one row (§5): resolve by lower(email), attach as stored,
     // never overwrite an existing person's fields. A resolved person must

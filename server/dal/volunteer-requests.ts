@@ -13,6 +13,7 @@ import type {
   PublicOrganization,
   PublicVolunteerRequest,
   RequestStatus,
+  VolunteerCategory,
   VolunteerRequest,
 } from "../../shared/types";
 import { insertInTx } from "./approval-events";
@@ -43,6 +44,36 @@ export type CreateVolunteerRequestInput = {
   contactPersonId?: string | null;
   createdBy?: string | null;
 };
+
+export type VolunteerRequestCategoryOption = VolunteerCategory & { selected: boolean };
+
+export class VolunteerRequestCategoryNotFoundError extends Error {
+  constructor() {
+    super("One or more volunteer categories no longer exist.");
+    this.name = "VolunteerRequestCategoryNotFoundError";
+  }
+}
+
+export class DuplicateVolunteerRequestCategoryError extends Error {
+  constructor() {
+    super("Each volunteer category can only be selected once.");
+    this.name = "DuplicateVolunteerRequestCategoryError";
+  }
+}
+
+export class InactiveVolunteerRequestCategoryError extends Error {
+  constructor() {
+    super("An inactive volunteer category cannot be newly selected.");
+    this.name = "InactiveVolunteerRequestCategoryError";
+  }
+}
+
+export class NoActiveVolunteerRequestCategoriesError extends Error {
+  constructor() {
+    super("Assign at least one active volunteer category before approving this request.");
+    this.name = "NoActiveVolunteerRequestCategoriesError";
+  }
+}
 
 export type UpdateVolunteerRequestPatch = Partial<{
   title: string;
@@ -287,6 +318,112 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
       status,
     ]),
   );
+}
+
+/** Active choices, plus an assigned inactive choice when reviewing a request. */
+export async function listCategoryOptions(
+  ctx: DbContext,
+  requestId: string,
+): Promise<VolunteerRequestCategoryOption[]> {
+  return withDbContext(ctx, (c) =>
+    q<VolunteerRequestCategoryOption>(
+      c,
+      `select vc.id, vc.name, vc.is_active as "isActive",
+              (vrc.volunteer_request_id is not null) as selected
+         from volunteer_categories vc
+         left join volunteer_request_categories vrc
+           on vrc.category_id = vc.id and vrc.volunteer_request_id = $1
+        where vc.is_active or vrc.volunteer_request_id is not null
+        order by lower(vc.name), vc.name`,
+      [requestId],
+    ),
+  );
+}
+
+/** The active shared vocabulary for a member posting a new volunteer request. */
+export async function listActiveCategories(ctx: DbContext): Promise<VolunteerCategory[]> {
+  return withDbContext(ctx, (c) =>
+    q<VolunteerCategory>(
+      c,
+      `select id, name, is_active as "isActive"
+         from volunteer_categories
+        where is_active
+        order by lower(name), name`,
+    ),
+  );
+}
+
+/**
+ * Replace request categories as part of a caller-owned transaction. Existing
+ * inactive assignments may stay until deliberately removed; inactive categories
+ * can never be added back. Validation occurs before the diff, so a bad payload
+ * cannot leave a partially rewritten set.
+ */
+export async function replaceCategoriesInTx(
+  c: PoolClient,
+  requestId: string,
+  categoryIds: string[],
+): Promise<void> {
+  if (new Set(categoryIds).size !== categoryIds.length) throw new DuplicateVolunteerRequestCategoryError();
+  await c.query(`select id from volunteer_requests where id = $1 for update`, [requestId]);
+  const currentRows = await q<{ categoryId: string }>(
+    c,
+    `select category_id as "categoryId"
+       from volunteer_request_categories
+      where volunteer_request_id = $1
+      for update`,
+    [requestId],
+  );
+  const current = new Set(currentRows.map((row) => row.categoryId));
+  const categories =
+    categoryIds.length === 0
+      ? []
+      : await q<{ id: string; isActive: boolean }>(
+          c,
+          `select id, is_active as "isActive"
+             from volunteer_categories
+            where id = any($1::uuid[])
+            for share`,
+          [categoryIds],
+        );
+  if (categories.length !== categoryIds.length) throw new VolunteerRequestCategoryNotFoundError();
+  if (categories.some((category) => !category.isActive && !current.has(category.id))) {
+    throw new InactiveVolunteerRequestCategoryError();
+  }
+
+  if (categoryIds.length === 0) {
+    await c.query(`delete from volunteer_request_categories where volunteer_request_id = $1`, [requestId]);
+    return;
+  }
+  await c.query(
+    `delete from volunteer_request_categories
+      where volunteer_request_id = $1 and category_id <> all($2::uuid[])`,
+    [requestId, categoryIds],
+  );
+  const toAdd = categoryIds.filter((categoryId) => !current.has(categoryId));
+  if (toAdd.length > 0) {
+    await c.query(
+      `insert into volunteer_request_categories (volunteer_request_id, category_id)
+       select $1, unnest($2::uuid[])
+       on conflict do nothing`,
+      [requestId, toAdd],
+    );
+  }
+}
+
+/** Guard a status transition under the same transaction that makes it public. */
+export async function assertHasActiveCategoriesInTx(c: PoolClient, requestId: string): Promise<void> {
+  await c.query(`select id from volunteer_requests where id = $1 for update`, [requestId]);
+  const rows = await q<{ id: string }>(
+    c,
+    `select vc.id
+       from volunteer_request_categories vrc
+       join volunteer_categories vc on vc.id = vrc.category_id
+      where vrc.volunteer_request_id = $1 and vc.is_active
+      for share of vc`,
+    [requestId],
+  );
+  if (rows.length === 0) throw new NoActiveVolunteerRequestCategoriesError();
 }
 
 /** Active volunteer requests of approved orgs with public org fields (PB-03). */

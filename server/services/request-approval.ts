@@ -63,6 +63,13 @@ export class NoChildrenError extends Error {
   }
 }
 
+export class NoVolunteerCategoriesError extends Error {
+  constructor() {
+    super("Assign at least one active volunteer category before approving this request.");
+    this.name = "NoVolunteerCategoriesError";
+  }
+}
+
 /** §7: approving under an unapproved org would publish nothing. */
 export class OrgNotApprovedError extends Error {
   constructor(public readonly orgName: string) {
@@ -162,6 +169,16 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
 
   try {
     return await withDbContext(staff, async (c: PoolClient) => {
+      if (kind === "volunteer") {
+        try {
+          await dal.volunteerRequests.assertHasActiveCategoriesInTx(c, requestId);
+        } catch (err) {
+          if (err instanceof dal.volunteerRequests.NoActiveVolunteerRequestCategoriesError) {
+            throw new NoVolunteerCategoriesError();
+          }
+          throw err;
+        }
+      }
       const updated =
         kind === "item"
           ? await dal.itemRequests.transitionStatusInTx(c, { requestId, to: "active", actorUserId: staffUserId })
@@ -226,6 +243,7 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
       err instanceof AlreadyActiveError ||
       err instanceof IllegalStateError ||
       err instanceof NoChildrenError ||
+      err instanceof NoVolunteerCategoriesError ||
       err instanceof OrgNotApprovedError
     ) {
       throw err;
