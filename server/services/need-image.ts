@@ -282,6 +282,29 @@ export function buildPrompt(kind: RequestKind, request: ImageableRequest, subNam
   return [subject.join(" "), GUARDRAIL_CORE, perKind, buildCasting(kind, request.id)].join("\n\n");
 }
 
+/**
+ * Where the OpenAI-compatible image endpoint lives, and which model to ask
+ * for. Both are environment-overridable on purpose:
+ *
+ * Replit AI Integrations bills provider usage to Replit credits instead of a
+ * personal OpenAI account, and supplies the credentials (and, where it routes
+ * through a gateway, the base URL) through the environment. OPENAI_BASE_URL is
+ * the same variable the official OpenAI SDK reads, so honouring it means
+ * moving between a personal key and Replit-managed billing needs no code
+ * change. OPENAI_IMAGE_MODEL likewise allows trying gpt-image-2 without a
+ * deploy. Defaults keep the documented D67 behaviour: OpenAI direct,
+ * gpt-image-1.
+ */
+function imageEndpoint(): string {
+  const base = (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").trim().replace(/\/+$/, "");
+  return `${base}/images/generations`;
+}
+
+function imageModel(): string {
+  const model = (process.env.OPENAI_IMAGE_MODEL ?? "").trim();
+  return model === "" ? "gpt-image-1" : model;
+}
+
 /** OpenAI image generation — the only sourcing path. */
 async function generateWithOpenAi(
   kind: RequestKind,
@@ -292,13 +315,14 @@ async function generateWithOpenAi(
   if (key === "") {
     throw new NeedImageError("OPENAI_API_KEY is not configured — image not generated.");
   }
-  const res = await timedFetch("https://api.openai.com/v1/images/generations", {
+  const endpoint = imageEndpoint();
+  const res = await timedFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
       // gpt-image-1 returns base64 image data by default (the older
       // response_format parameter is rejected by the current API).
-      model: "gpt-image-1",
+      model: imageModel(),
       prompt: buildPrompt(kind, request, subNames),
       n: 1,
       // Native square generation, not a post-hoc crop — matches the square
@@ -315,7 +339,12 @@ async function generateWithOpenAi(
     } catch {
       /* keep the status-only detail */
     }
-    throw new NeedImageError(`OpenAI image generation failed (${detail})`);
+    // Name the host and model: once billing can come from either a personal
+    // key or Replit-managed credentials, "which one answered" is the first
+    // thing staff and we need to know from a failure message.
+    throw new NeedImageError(
+      `Image generation failed via ${new URL(endpoint).host} using ${imageModel()} (${detail})`,
+    );
   }
   const body = (await res.json()) as { data?: { b64_json?: string }[] };
   const b64 = body.data?.[0]?.b64_json;
