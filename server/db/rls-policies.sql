@@ -215,6 +215,70 @@ create policy organization_populations_public_member_select on organization_popu
     )
   );
 
+-- ---------------------------------------------------------------- volunteer_categories
+
+alter table volunteer_categories enable row level security;
+alter table volunteer_categories force row level security;
+
+drop policy if exists volunteer_categories_system_staff_all on volunteer_categories;
+create policy volunteer_categories_system_staff_all on volunteer_categories
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+drop policy if exists volunteer_categories_member_select on volunteer_categories;
+create policy volunteer_categories_member_select on volunteer_categories for select
+  using (
+    current_setting('app.context', true) = 'member'
+  );
+
+-- -------------------------------------------------------- person_volunteer_interests
+
+alter table person_volunteer_interests enable row level security;
+alter table person_volunteer_interests force row level security;
+
+drop policy if exists person_volunteer_interests_system_staff_all on person_volunteer_interests;
+create policy person_volunteer_interests_system_staff_all on person_volunteer_interests
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+drop policy if exists person_volunteer_interests_member_select on person_volunteer_interests;
+create policy person_volunteer_interests_member_select on person_volunteer_interests for select
+  using (
+    current_setting('app.context', true) = 'member'
+    and exists (
+      select 1 from users u
+       where u.person_id = person_volunteer_interests.person_id
+         and u.id = nullif(current_setting('app.user_id', true), '')::uuid
+    )
+  );
+
+drop policy if exists person_volunteer_interests_member_insert on person_volunteer_interests;
+create policy person_volunteer_interests_member_insert on person_volunteer_interests for insert
+  with check (
+    current_setting('app.context', true) = 'member'
+    and exists (
+      select 1 from users u
+       where u.person_id = person_volunteer_interests.person_id
+         and u.id = nullif(current_setting('app.user_id', true), '')::uuid
+    )
+    and exists (
+      select 1 from volunteer_categories vc
+       where vc.id = person_volunteer_interests.category_id
+         and vc.is_active
+    )
+  );
+
+drop policy if exists person_volunteer_interests_member_delete on person_volunteer_interests;
+create policy person_volunteer_interests_member_delete on person_volunteer_interests for delete
+  using (
+    current_setting('app.context', true) = 'member'
+    and exists (
+      select 1 from users u
+       where u.person_id = person_volunteer_interests.person_id
+         and u.id = nullif(current_setting('app.user_id', true), '')::uuid
+    )
+  );
+
 -- ---------------------------------------------------------------- item_requests
 
 alter table item_requests enable row level security;

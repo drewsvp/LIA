@@ -39,6 +39,14 @@ args = "test-quick-login"
 task = "workflow.run"
 args = "responsive-nav"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "volunteer-interests"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "typecheck-build"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -69,6 +77,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run test:responsive-nav"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "volunteer-interests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run test:volunteer-interests"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "typecheck-build"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run check && npm run build && git diff --check"
 
 [workflows.workflow.metadata]
 isValidation = true
