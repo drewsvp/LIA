@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Mm2NQiV7HNoMHovBWBEbNlVePTmSXbcukyQI3TrXt5kpIweAfE7f6EVmp2GF8uw
+\restrict ES15r1ueHIbQaYdbkD7C8lzvb6fG1esGTKVhmAemeNfEG2rwGKsugpprQi6vJMg
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -1003,8 +1003,6 @@ CREATE TABLE public.person_volunteer_interests (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY public.person_volunteer_interests FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: populations; Type: TABLE; Schema: public; Owner: -
@@ -1041,8 +1039,6 @@ CREATE TABLE public.request_engagement_events (
     CONSTRAINT request_engagement_events_request_kind_check CHECK ((request_kind = ANY (ARRAY['item'::text, 'volunteer'::text]))),
     CONSTRAINT request_engagement_request_target CHECK ((((request_kind = 'item'::text) AND (item_request_id IS NOT NULL) AND (volunteer_request_id IS NULL)) OR ((request_kind = 'volunteer'::text) AND (volunteer_request_id IS NOT NULL) AND (item_request_id IS NULL))))
 );
-
-ALTER TABLE ONLY public.request_engagement_events FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1148,8 +1144,6 @@ CREATE TABLE public.volunteer_alert_preferences (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY public.volunteer_alert_preferences FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: TABLE volunteer_alert_preferences; Type: COMMENT; Schema: public; Owner: -
@@ -1176,8 +1170,6 @@ CREATE TABLE public.volunteer_categories (
     CONSTRAINT volunteer_categories_name_check CHECK ((btrim(name) <> ''::text))
 );
 
-ALTER TABLE ONLY public.volunteer_categories FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: volunteer_match_alert_claims; Type: TABLE; Schema: public; Owner: -
@@ -1190,8 +1182,6 @@ CREATE TABLE public.volunteer_match_alert_claims (
     claimed_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT volunteer_match_alert_claims_to_email_check CHECK ((btrim(to_email) <> ''::text))
 );
-
-ALTER TABLE ONLY public.volunteer_match_alert_claims FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1210,8 +1200,6 @@ CREATE TABLE public.volunteer_request_categories (
     category_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-ALTER TABLE ONLY public.volunteer_request_categories FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1398,6 +1386,14 @@ ALTER TABLE ONLY public.item_requests
 
 ALTER TABLE ONLY public.item_requests
     ADD CONSTRAINT item_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: items items_id_request_ownership_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.items
+    ADD CONSTRAINT items_id_request_ownership_key UNIQUE (id, item_request_id);
 
 
 --
@@ -1657,6 +1653,14 @@ ALTER TABLE ONLY public.volunteer_requests
 
 
 --
+-- Name: volunteer_roles volunteer_roles_id_request_ownership_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.volunteer_roles
+    ADD CONSTRAINT volunteer_roles_id_request_ownership_key UNIQUE (id, volunteer_request_id);
+
+
+--
 -- Name: volunteer_roles volunteer_roles_legacy_wix_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1803,13 +1807,6 @@ CREATE INDEX item_requests_public_idx ON public.item_requests USING btree (statu
 
 
 --
--- Name: items_id_request_ownership_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX items_id_request_ownership_idx ON public.items USING btree (id, item_request_id);
-
-
---
 -- Name: items_request_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1933,13 +1930,6 @@ CREATE INDEX volunteer_requests_org_idx ON public.volunteer_requests USING btree
 --
 
 CREATE INDEX volunteer_requests_public_idx ON public.volunteer_requests USING btree (status, created_at DESC) WHERE (status = 'active'::text);
-
-
---
--- Name: volunteer_roles_id_request_ownership_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX volunteer_roles_id_request_ownership_idx ON public.volunteer_roles USING btree (id, volunteer_request_id);
 
 
 --
@@ -2837,48 +2827,6 @@ CREATE POLICY people_system_staff_all ON public.people USING ((current_setting('
 
 
 --
--- Name: person_volunteer_interests; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.person_volunteer_interests ENABLE ROW LEVEL SECURITY;
-
---
--- Name: person_volunteer_interests person_volunteer_interests_member_delete; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_member_delete ON public.person_volunteer_interests FOR DELETE USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))))));
-
-
---
--- Name: person_volunteer_interests person_volunteer_interests_member_insert; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_member_insert ON public.person_volunteer_interests FOR INSERT WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid)))) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_categories vc
-  WHERE ((vc.id = person_volunteer_interests.category_id) AND vc.is_active)))));
-
-
---
--- Name: person_volunteer_interests person_volunteer_interests_member_select; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_member_select ON public.person_volunteer_interests FOR SELECT USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))))));
-
-
---
--- Name: person_volunteer_interests person_volunteer_interests_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_system_staff_all ON public.person_volunteer_interests USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
 -- Name: populations; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2899,19 +2847,6 @@ CREATE POLICY populations_system_staff_all ON public.populations USING ((current
 
 
 --
--- Name: request_engagement_events; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.request_engagement_events ENABLE ROW LEVEL SECURITY;
-
---
--- Name: request_engagement_events request_engagement_events_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY request_engagement_events_system_staff_all ON public.request_engagement_events USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
 -- Name: users; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2929,105 +2864,6 @@ CREATE POLICY users_member_select_self ON public.users FOR SELECT USING (((curre
 --
 
 CREATE POLICY users_system_staff_all ON public.users USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_alert_preferences; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_alert_preferences ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_member_insert; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_member_insert ON public.volunteer_alert_preferences FOR INSERT WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.id = volunteer_alert_preferences.user_id) AND (u.kind = 'supporter'::text) AND (u.status = 'active'::text))))));
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_member_select; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_member_select ON public.volunteer_alert_preferences FOR SELECT USING (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid)));
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_member_update; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_member_update ON public.volunteer_alert_preferences FOR UPDATE USING (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))) WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.id = volunteer_alert_preferences.user_id) AND (u.kind = 'supporter'::text) AND (u.status = 'active'::text))))));
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_system_staff_all ON public.volunteer_alert_preferences USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_categories; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_categories ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_categories volunteer_categories_member_select; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_categories_member_select ON public.volunteer_categories FOR SELECT USING ((current_setting('app.context'::text, true) = 'member'::text));
-
-
---
--- Name: volunteer_categories volunteer_categories_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_categories_system_staff_all ON public.volunteer_categories USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_match_alert_claims; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_match_alert_claims ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_match_alert_claims volunteer_match_alert_claims_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_match_alert_claims_system_staff_all ON public.volunteer_match_alert_claims USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_request_categories; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_request_categories ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_request_categories volunteer_request_categories_member_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_request_categories_member_all ON public.volunteer_request_categories USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_requests r
-  WHERE ((r.id = volunteer_request_categories.volunteer_request_id) AND (r.org_id IN ( SELECT om.org_id
-           FROM public.org_memberships om
-          WHERE ((om.user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (om.status = 'active'::text))))))))) WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_requests r
-  WHERE ((r.id = volunteer_request_categories.volunteer_request_id) AND (r.org_id IN ( SELECT om.org_id
-           FROM public.org_memberships om
-          WHERE ((om.user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (om.status = 'active'::text)))))))));
-
-
---
--- Name: volunteer_request_categories volunteer_request_categories_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_request_categories_system_staff_all ON public.volunteer_request_categories USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3172,5 +3008,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Mm2NQiV7HNoMHovBWBEbNlVePTmSXbcukyQI3TrXt5kpIweAfE7f6EVmp2GF8uw
+\unrestrict ES15r1ueHIbQaYdbkD7C8lzvb6fG1esGTKVhmAemeNfEG2rwGKsugpprQi6vJMg
 
