@@ -24,16 +24,17 @@ export type RequestCardProps = {
   titleVariant: "bar" | "caps";
   underlineLabels?: boolean;
   iconPlacement: "above" | "overlay";
+  imageShape?: "square" | "wide";
 };
 
 /** Standard placeholder graphic for requests without an image (PB-01 §7). */
-function PlaceholderGraphic(): ReactElement {
+function PlaceholderGraphic({ imageShape }: Pick<RequestCardProps, "imageShape">): ReactElement {
   return (
     <div
       aria-hidden
       style={{
         width: "100%",
-        aspectRatio: "16 / 10",
+        aspectRatio: imageShape === "square" ? "1 / 1" : "16 / 10",
         background: "#e8e8e8",
         display: "flex",
         alignItems: "center",
@@ -51,6 +52,7 @@ export function RequestCard(props: RequestCardProps): ReactElement {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = props.imageUrl != null && props.imageUrl.trim() !== "" && !imageFailed;
   const hasLogo = props.orgLogoUrl != null && props.orgLogoUrl.trim() !== "";
+  const imageAspectRatio = props.imageShape === "square" ? "1 / 1" : "16 / 10";
   const labelStyle = {
     color: "var(--color-navy)",
     textDecoration: props.underlineLabels ? "underline" : "none",
@@ -82,10 +84,10 @@ export function RequestCard(props: RequestCardProps): ReactElement {
             src={props.imageUrl ?? undefined}
             alt={props.title}
             onError={() => setImageFailed(true)}
-            style={{ width: "100%", aspectRatio: "16 / 10", objectFit: "cover", display: "block" }}
+            style={{ width: "100%", aspectRatio: imageAspectRatio, objectFit: "cover", display: "block" }}
           />
         ) : (
-          <PlaceholderGraphic />
+          <PlaceholderGraphic imageShape={props.imageShape} />
         )}
         {props.iconPlacement === "overlay" && hasLogo && (
           <img

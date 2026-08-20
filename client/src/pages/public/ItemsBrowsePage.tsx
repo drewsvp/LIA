@@ -101,6 +101,7 @@ export function ItemsBrowsePage(): ReactElement {
                 buttonText="Learn More / View Details"
                 titleVariant="bar"
                 iconPlacement="above"
+                imageShape="square"
               />
             ))}
           </div>
