@@ -30,6 +30,24 @@ and supersession (a newer still-valid link for the same email) refuse a token.
 **Why:** a single-use token fails for ordinary human behavior, and the error is
 indistinguishable to the user from the scanner bug it replaced.
 
+## Do not hold a database connection during magic-link delivery
+
+The login endpoint replies before starting the provider flow. A repeat request
+can create a newer token before the first email is opened, which supersedes the
+first link. Disable the client submit button immediately so ordinary
+double-clicks cannot cause that sequence.
+
+**Why:** guarding a repeat by keeping a transaction-scoped advisory lock open
+while Better Auth renders and sends email looks correct for one request, but
+the auth and email paths share the same connection pool. Concurrent requests
+can exhaust that pool and deadlock waiting for a connection that cannot be
+released until the send finishes.
+
+**How to apply:** any cross-instance deduplication must commit a durable,
+short-lived claim before invoking Better Auth or the mail provider, then
+recover the claim safely after known and ambiguous delivery failures. Never
+hold a pool client or transaction lock across those calls.
+
 ## The provider's consume deletes every row for the identifier
 
 Not just the matched row — the whole identifier is cleared inside the

@@ -17,7 +17,7 @@ import { auth } from "../auth/auth";
 import { resolveSessionInfo, ACTIVE_ORG_COOKIE } from "../auth/session";
 import { NOT_FOUND_BODY, requireStaff } from "../auth/guards";
 import { magicLinkEmailLimiter, magicLinkIpLimiter, magicLinkVerifyIpLimiter } from "../auth/rate-limit";
-import { PUBLIC, SYSTEM, pool, withDbContext } from "../db/client";
+import { PUBLIC, SYSTEM, pool } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as dal from "../dal";
 import * as storage from "../storage/object-storage";
@@ -28,47 +28,6 @@ import { registerAdminRoutes } from "./admin";
 import { registerEmailTemplateAdminRoutes } from "./admin-email-templates";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// A repeated submit must not mint a second token while the first email is
-// arriving. The production login form was submitted twice four seconds apart;
-// Better Auth correctly created two tokens, so the second one superseded the
-// link in the first email before the member could use it.
-//
-// The advisory lock coalesces concurrent requests across autoscale instances.
-// The email-log check covers repeats after the first send finishes. Both happen
-// after the uniform HTTP response, so account existence and provider timing
-// remain undisclosed.
-const MAGIC_LINK_COALESCE_WINDOW_SECONDS = 60;
-
-async function dispatchMagicLinkUnlessRecent(email: string): Promise<"dispatched" | "coalesced"> {
-  return withDbContext(SYSTEM, async (client) => {
-    const lock = await client.query<{ acquired: boolean }>(
-      `SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS acquired`,
-      [`magic-link:${email}`],
-    );
-    if (lock.rows[0]?.acquired !== true) return "coalesced";
-
-    const recent = await client.query<{ exists: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1
-           FROM email_log
-          WHERE template_key = 'auth_magic_link'
-            AND to_email = $1
-            AND status IN ('queued', 'sending', 'sent')
-            AND COALESCE(sent_at, created_at)
-                > NOW() - make_interval(secs => $2::double precision)
-       ) AS "exists"`,
-      [email, MAGIC_LINK_COALESCE_WINDOW_SECONDS],
-    );
-    if (recent.rows[0]?.exists === true) return "coalesced";
-
-    await auth.api.signInMagicLink({
-      body: { email, callbackURL: "/dashboard" },
-      headers: new Headers({ "content-type": "application/json" }),
-    });
-    return "dispatched";
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Magic-link confirmation (D66).
@@ -361,10 +320,15 @@ export function registerRoutes(app: Express): void {
     if (!magicLinkIpLimiter.consume(req.ip ?? "unknown") || !magicLinkEmailLimiter.consume(normalized)) {
       return;
     }
-    void dispatchMagicLinkUnlessRecent(normalized).catch((err: unknown) => {
-      // Send failures (config, provider) are recorded in email_log and here.
-      console.error("magic-link request failed:", err);
-    });
+    void auth.api
+      .signInMagicLink({
+        body: { email: normalized, callbackURL: "/dashboard" },
+        headers: new Headers({ "content-type": "application/json" }),
+      })
+      .catch((err: unknown) => {
+        // Send failures (config, provider) are recorded in email_log and here.
+        console.error("magic-link request failed:", err);
+      });
   });
 
   // ---- Magic-link confirmation (D66). The state-changing half of the split:

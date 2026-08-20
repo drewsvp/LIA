@@ -542,6 +542,15 @@ h3 {
 .mp1-submit:hover {
   background: rgb(10, 70, 118);
 }
+.mp1-submit:disabled {
+  background: #9aa5ad;
+  color: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 1;
+}
+.mp1-submit:disabled:hover {
+  background: #9aa5ad;
+}
 .mp1-sent {
   color: var(--color-navy);
   font-size: 17px;
