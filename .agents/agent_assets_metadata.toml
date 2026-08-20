@@ -126,3 +126,31 @@ mtime_ms = 1787241307991
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/a657ed44-39d2-499c-92c1-cb77ee7d4702/4db6baba-56f4-461d-8eb5-385dbc288d29"
 storage_version_token = "1787241327366723"
 content_type = "image/png"
+
+[[outputs]]
+id = "zKUfnrp_TtQa6lHtXIOQR"
+uri = "file://attached_assets/guardrail-v2-crib.png"
+type = "image"
+title = "Revised guardrails — crib request"
+description = "The parent-and-child carve-out working: a mother leaning over her own baby's crib now reads as tenderness, not benefactor staging. Casting rotated from the request id."
+logical_id = "1cc37251-62ab-4283-bce4-c451d5371035"
+content_hash = "sha256:3e2a1466cd033c743a657918b3d5d8def2c915730bd523d6b55564f565e333cf"
+size = 1614724
+mtime_ms = 1787242715370
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/1cc37251-62ab-4283-bce4-c451d5371035/c72de6e8-2d11-409a-9ae2-c769288c7039"
+storage_version_token = "1787242750485885"
+content_type = "image/png"
+
+[[outputs]]
+id = "2hyvU-TPiNyRgHIZglzik"
+uri = "file://attached_assets/guardrail-v2-tutor.png"
+type = "image"
+title = "Revised guardrails — tutoring request"
+description = "Volunteer and student at the same level, sharing the same page, with the two casting descriptors drawn separately from the rotation."
+logical_id = "13ddec93-5d93-4264-ac3d-7c706925e1f4"
+content_hash = "sha256:ea3227677b51accbb1a19b08166b5c176e130b8a164e31c83436568be53c1529"
+size = 1623619
+mtime_ms = 1787242709254
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/13ddec93-5d93-4264-ac3d-7c706925e1f4/d02627fd-25a5-4edc-9523-ae66f81a98ac"
+storage_version_token = "1787242750983966"
+content_type = "image/png"

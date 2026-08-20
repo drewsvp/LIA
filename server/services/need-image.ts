@@ -110,12 +110,20 @@ soiled, faded, or broken, even while being actively used; items on the
 ground or in disarray; cluttered, dim, or unsanitary settings;
 institutional settings (shelters, waiting rooms, intake desks, fluorescent
 light); charity iconography (donation bins, collection boxes, giving
-hands, checks, coins); cash, currency, price tags; visible distress,
-anguish, or downcast/averted gaze; before/after or rescue framing; any
-figure positioned above, reaching down to, or handing something to another
-figure; violence, weapons, restraints, needles; religious symbols or
-devotional imagery; brand marks or legible packaging; any text, words,
-letters, or signage.
+hands, checks, coins); cash, currency, price tags; expressions of
+distress, anguish, shame, or defeat; before/after or rescue framing;
+benefactor-and-beneficiary staging of any kind — one person presenting,
+bestowing, or handing something down to another, or standing over a
+seated or smaller figure as a giver; violence, weapons, restraints,
+needles; religious symbols or devotional imagery; brand marks or legible
+packaging; any text, words, letters, or signage.
+
+ORDINARY CARE IS NOT CHARITY STAGING: the rule above is about donor-and-
+recipient framing between strangers, not about ordinary closeness. A
+parent, caregiver, teacher, or volunteer leaning over a crib, bending
+down, kneeling beside a child, lifting a toddler, or looking down at a
+child with affection is exactly right and always welcome. Looking down at
+a baby is tenderness, not a downcast gaze.
 
 ALWAYS SHOW: items or settings brand-new and pristine, even mid-use; warm
 soft daylight; uncluttered composition with generous negative space; a
@@ -175,8 +183,10 @@ const GUARDRAIL_VOLUNTEER = `
 PEOPLE: Always include people actively engaged in the activity — a
 volunteer and the person or people they're working with, mid-task, not
 posed. Faces visible, ordinary warm or contented expression, never
-distress. Depict the moment at eye level and side by side, never one
-figure positioned above or giving something down to another.
+distress. Depict the moment as shared work between equals: side by side,
+attention on the same task. A volunteer bending or kneeling to meet a
+child at the child's own level is right; a volunteer standing over
+someone and handing them something is not.
 
 CATEGORY GUIDANCE: depict the actual service happening, not an empty
 setting waiting for someone. A mentor and a child working through the
@@ -186,6 +196,69 @@ a passenger beside them in easy conversation. The moment is warm,
 ordinary, and mid-activity, never staged as a photo-op and never framed
 as one person rescuing another.
 `.trim();
+
+/**
+ * Casting rotation.
+ *
+ * Silence in a prompt is not neutrality. Left unspecified, the model picks a
+ * single default person and returns it every time — two unrelated test
+ * prompts (a crib request and a tutoring request) came back with visibly the
+ * same woman. Unaddressed, every family on the site would look alike.
+ *
+ * So the casting is named explicitly, and rotated by a stable hash of the
+ * request id: varied across requests, stable for any one request, so a staff
+ * Regenerate returns the same family rather than reshuffling who they are.
+ * Volunteer scenes draw a second, always-different descriptor for the person
+ * being helped — since both ends come from the same rotation, no fixed
+ * pairing (such as one background always in the helper role) can settle in.
+ */
+const CASTING = [
+  "Black",
+  "East Asian",
+  "Latino or Hispanic",
+  "South Asian",
+  "White",
+  "Middle Eastern or North African",
+  "Southeast Asian",
+  "multiracial",
+  "Indigenous American",
+  "Pacific Islander",
+] as const;
+
+/** FNV-1a: stable across processes and restarts, unlike an ad hoc char sum. */
+function stableHash(input: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function buildCasting(kind: RequestKind, requestId: string): string {
+  const h = stableHash(requestId);
+  const firstIdx = h % CASTING.length;
+  const first = CASTING[firstIdx];
+
+  if (kind === "item") {
+    return [
+      `CASTING: the people in this photograph are ${first}. Anyone else in`,
+      "frame belongs to the same family. Vary age and body type naturally for",
+      "the scene. Their background is never the subject of the photograph —",
+      "they are simply the people in it, doing an ordinary thing.",
+    ].join("\n");
+  }
+
+  // Offset by at least 1 so the pair is never the same descriptor twice.
+  const secondIdx = (firstIdx + 1 + ((h >>> 8) % (CASTING.length - 1))) % CASTING.length;
+  const second = CASTING[secondIdx];
+  return [
+    `CASTING: the volunteer is ${first}. The person or people they are`,
+    `working with are ${second}. Vary age and body type naturally for the`,
+    "scene. Their backgrounds are never the subject of the photograph — they",
+    "are simply the people in it, working on something together.",
+  ].join("\n");
+}
 
 type SourcedImage = { data: Buffer; filename: string };
 
@@ -205,7 +278,8 @@ export function buildPrompt(kind: RequestKind, request: ImageableRequest, subNam
     request.description ? `Context: ${request.description.slice(0, 400)}` : "",
     "Square 1:1 composition, suitable as a listing photo for a community donation request.",
   ].filter((p) => p !== "");
-  return `${subject.join(" ")}\n\n${GUARDRAIL_CORE}\n\n${kind === "item" ? GUARDRAIL_ITEM : GUARDRAIL_VOLUNTEER}`;
+  const perKind = kind === "item" ? GUARDRAIL_ITEM : GUARDRAIL_VOLUNTEER;
+  return [subject.join(" "), GUARDRAIL_CORE, perKind, buildCasting(kind, request.id)].join("\n\n");
 }
 
 /** OpenAI image generation — the only sourcing path. */
