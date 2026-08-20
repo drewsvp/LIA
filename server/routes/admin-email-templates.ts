@@ -17,11 +17,17 @@ import { copyPlaceholders, finalizeHtml, type TemplateCopy } from "../email/rend
 import { absoluteUrl, headerImageDataUri } from "../email/send";
 import { effectiveCopy, envStaffRecipients, parseRecipientOverride, validateCopy } from "../email/overrides";
 import { templateDisplayName } from "../../shared/email-templates";
+import { SCHEDULABLE_TEMPLATE_KEYS } from "../digest-schedule";
+import type { EmailSchedule } from "../dal/email-schedules";
 
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
 
 function staffCtx(req: Request): DbContext {
   return { kind: "staff", userId: staffContext(req).userId };
+}
+
+async function scheduleResponse(ctx: DbContext, schedule: EmailSchedule): Promise<EmailSchedule & { nextSendAt: string | null }> {
+  return { ...schedule, nextSendAt: await dal.emailSchedules.nextSendAt(ctx, schedule) };
 }
 
 /** Parse a request-body copy block; null = clear the override. */
@@ -37,17 +43,39 @@ function parseCopyBody(raw: unknown): { ok: true; copy: TemplateCopy | null } | 
 }
 
 const EMAILISH_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isCalendarDate(value: string): boolean {
+  if (!CALENDAR_DATE_RE.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year!, month! - 1, day!));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month! - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
 
 export function registerEmailTemplateAdminRoutes(app: Express): void {
   // ---- List every automated email with metadata + current override state.
   app.get("/api/admin/email-templates", requireStaffAdmin, async (req: Request, res: Response, next) => {
     try {
       const ctx = staffCtx(req);
-      const overrides = new Map((await dal.emailTemplateOverrides.listOverrides(ctx)).map((o) => [o.templateKey, o]));
+       const [overrideRows, scheduleRows] = await Promise.all([
+         dal.emailTemplateOverrides.listOverrides(ctx),
+         dal.emailSchedules.listSchedules(ctx),
+       ]);
+       const overrides = new Map(overrideRows.map((o) => [o.templateKey, o]));
+       const schedules = new Map(
+         await Promise.all(
+           scheduleRows.map(async (schedule) => [schedule.templateKey, await scheduleResponse(ctx, schedule)] as const),
+         ),
+       );
       const envStaff = envStaffRecipients().all;
 
       const templates = Object.entries(PRODUCT_TEMPLATES).map(([key, template]) => {
         const ov = overrides.get(key) ?? null;
+         const schedule = schedules.get(key) ?? null;
         const hasCopyOverride = !!ov && ov.subject != null;
         return {
           key,
@@ -66,6 +94,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
           copy: effectiveCopy(key as ProductTemplateKey, ov) ?? template.defaultCopy,
           placeholders: copyPlaceholders(template.defaultCopy),
           authInfrastructure: false,
+           deliveryType: schedule ? "scheduled" : "event_triggered",
+           schedule,
           updatedAt: ov?.updatedAt ?? null,
           updatedByName: ov?.updatedByName ?? null,
         };
@@ -85,6 +115,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         copy: { subject: "Your sign-in link for Love in Action", heading: "Sign in to Love in Action", paragraphs: [] },
         placeholders: [],
         authInfrastructure: true,
+         deliveryType: "event_triggered",
+         schedule: null,
         updatedAt: null,
         updatedByName: null,
       });
@@ -92,6 +124,82 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
       res.json({ templates });
     } catch (err) {
       next(err);
+    }
+  });
+
+  // ---- Scheduled templates only. Event-triggered notifications have no
+  // irrelevant timing fields and cannot be delayed through this endpoint.
+  app.put("/api/admin/email-templates/:key/schedule", requireStaffAdmin, async (req: Request, res: Response) => {
+    const key = req.params.key ?? "";
+    if (!isProductTemplateKey(key)) {
+      sendNotFound(res);
+      return;
+    }
+    if (!SCHEDULABLE_TEMPLATE_KEYS.has(key)) {
+      res.status(400).json({ message: "This is an event-triggered email and does not have a schedule." });
+      return;
+    }
+    const active = req.body?.active;
+    const weeklyWeekday = req.body?.weeklyWeekday;
+    const weeklyMinutes = req.body?.weeklyMinutes;
+    const oneTimeDate = req.body?.oneTimeDate;
+    const oneTimeTime = req.body?.oneTimeTime;
+    if (
+      typeof active !== "boolean" ||
+      !Number.isInteger(weeklyWeekday) ||
+      weeklyWeekday < 0 ||
+      weeklyWeekday > 6 ||
+      !Number.isInteger(weeklyMinutes) ||
+      weeklyMinutes < 0 ||
+      weeklyMinutes > 1439
+    ) {
+      res.status(400).json({ message: "Choose a valid weekly day and time." });
+      return;
+    }
+
+    try {
+      let oneTimeAt: string | null = null;
+      if (oneTimeDate !== null || oneTimeTime !== null) {
+        if (
+          typeof oneTimeDate !== "string" ||
+          typeof oneTimeTime !== "string" ||
+          !isCalendarDate(oneTimeDate) ||
+          !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(oneTimeTime)
+        ) {
+          res.status(400).json({ message: "Enter a valid one-time Pacific date and time, or cancel it." });
+          return;
+        }
+        oneTimeAt = await dal.emailSchedules.pacificLocalToInstant(staffCtx(req), oneTimeDate, oneTimeTime);
+        if (oneTimeAt === null) {
+          res.status(400).json({ message: "That Pacific time does not exist because of the daylight-saving change. Choose another time." });
+          return;
+        }
+        if (new Date(oneTimeAt).getTime() <= Date.now()) {
+          // Preserve an existing pending one-time send that became overdue
+          // while paused. Resuming then runs it immediately instead of forcing
+          // staff to silently replace or cancel it.
+          const existing = await dal.emailSchedules.getSchedule(staffCtx(req), key);
+          const samePending =
+            existing?.oneTimeAt !== null &&
+            existing?.oneTimeAt !== undefined &&
+            new Date(existing.oneTimeAt).getTime() === new Date(oneTimeAt).getTime();
+          if (!samePending) {
+            res.status(400).json({ message: "The one-time send must be in the future (Pacific time)." });
+            return;
+          }
+        }
+      }
+      const saved = await dal.emailSchedules.saveSchedule(staffCtx(req), key, {
+        active,
+        weeklyWeekday,
+        weeklyMinutes,
+        oneTimeAt,
+        updatedByUserId: staffContext(req).userId,
+      });
+      res.json({ ok: true, schedule: await scheduleResponse(staffCtx(req), saved) });
+    } catch (err) {
+      console.error(`[admin] email schedule save failed (${key}):`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
     }
   });
 

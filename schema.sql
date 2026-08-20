@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict LUdF4o5cXHpgB963LvubKgfYt6bpgLQGZy4TwnfxcxJP9zXnEzPudqlAvQdYlQf
+\restrict XkUoZ7vlYPzNi3cWZQptRdZH8adriYQdIs6yVrrAFzNGa6fElH6sFCbjnREMxfY
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -108,6 +108,34 @@ begin
 
   return new;
 end;
+$$;
+
+
+--
+-- Name: item_request_current_la_date(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.item_request_current_la_date() RETURNS date
+    LANGUAGE sql
+    AS $$
+  select (clock_timestamp() at time zone 'America/Los_Angeles')::date;
+$$;
+
+
+--
+-- Name: item_request_expired_on(text, date, date, date); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.item_request_expired_on(p_deadline_type text, p_deadline_date date, p_expires_on date, p_today date) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  select
+    (p_expires_on is not null and p_expires_on < p_today)
+    or (
+      p_deadline_type = 'date_specific'
+      and p_deadline_date is not null
+      and p_deadline_date < p_today
+    );
 $$;
 
 
@@ -452,6 +480,32 @@ $$;
 
 
 --
+-- Name: reject_expired_item_pledge(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reject_expired_item_pledge() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if exists (
+    select 1
+      from item_requests r
+     where r.id = new.item_request_id
+       and item_request_expired_on(
+         r.deadline_type,
+         r.deadline_date,
+         r.expires_on,
+         item_request_current_la_date()
+       )
+  ) then
+    raise exception 'request_not_active';
+  end if;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: set_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -655,6 +709,7 @@ CREATE TABLE public.digest_runs (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
     needs_payload jsonb,
+    occurrence_key text NOT NULL,
     CONSTRAINT digest_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'sent'::text, 'skipped_empty'::text])))
 );
 
@@ -666,6 +721,13 @@ ALTER TABLE ONLY public.digest_runs FORCE ROW LEVEL SECURITY;
 --
 
 COMMENT ON COLUMN public.digest_runs.needs_payload IS 'Canonical DigestNeed[] snapshot for this run; set once after selection, reused verbatim on resume.';
+
+
+--
+-- Name: COLUMN digest_runs.occurrence_key; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.digest_runs.occurrence_key IS 'Durable schedule occurrence claim: weekly:YYYY-MM-DD, once:<ISO instant>, or date:<YYYY-MM-DD> for direct verification passes.';
 
 
 --
@@ -734,6 +796,25 @@ ALTER TABLE ONLY public.email_log FORCE ROW LEVEL SECURITY;
 --
 
 COMMENT ON COLUMN public.email_log.status IS 'queued -> sending (dispatch claim) -> sent | failed. skipped = template disabled by staff; never dispatched.';
+
+
+--
+-- Name: email_schedules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_schedules (
+    template_key text NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    weekly_weekday smallint NOT NULL,
+    weekly_minutes smallint NOT NULL,
+    one_time_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by uuid,
+    CONSTRAINT email_schedules_weekly_minutes_check CHECK (((weekly_minutes >= 0) AND (weekly_minutes <= 1439))),
+    CONSTRAINT email_schedules_weekly_weekday_check CHECK (((weekly_weekday >= 0) AND (weekly_weekday <= 6)))
+);
+
+ALTER TABLE ONLY public.email_schedules FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1084,19 +1165,19 @@ ALTER TABLE ONLY public.digest_exclusions
 
 
 --
+-- Name: digest_runs digest_runs_occurrence_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digest_runs
+    ADD CONSTRAINT digest_runs_occurrence_key_key UNIQUE (occurrence_key);
+
+
+--
 -- Name: digest_runs digest_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.digest_runs
     ADD CONSTRAINT digest_runs_pkey PRIMARY KEY (id);
-
-
---
--- Name: digest_runs digest_runs_run_date_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.digest_runs
-    ADD CONSTRAINT digest_runs_run_date_key UNIQUE (run_date);
 
 
 --
@@ -1113,6 +1194,14 @@ ALTER TABLE ONLY public.digest_subscribers
 
 ALTER TABLE ONLY public.email_log
     ADD CONSTRAINT email_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: email_schedules email_schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_schedules
+    ADD CONSTRAINT email_schedules_pkey PRIMARY KEY (template_key);
 
 
 --
@@ -1608,6 +1697,13 @@ CREATE INDEX volunteer_signups_request_idx ON public.volunteer_signups USING btr
 
 
 --
+-- Name: item_pledges item_pledges_reject_expired_request; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER item_pledges_reject_expired_request BEFORE INSERT ON public.item_pledges FOR EACH ROW EXECUTE FUNCTION public.reject_expired_item_pledge();
+
+
+--
 -- Name: item_pledges item_pledges_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1751,6 +1847,14 @@ ALTER TABLE ONLY public.email_log
 
 ALTER TABLE ONLY public.email_log
     ADD CONSTRAINT email_log_to_person_id_fkey FOREIGN KEY (to_person_id) REFERENCES public.people(id);
+
+
+--
+-- Name: email_schedules email_schedules_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_schedules
+    ADD CONSTRAINT email_schedules_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id);
 
 
 --
@@ -2055,6 +2159,19 @@ ALTER TABLE public.email_log ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY email_log_system_staff_all ON public.email_log USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: email_schedules; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.email_schedules ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: email_schedules email_schedules_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY email_schedules_system_staff_all ON public.email_schedules USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -2508,5 +2625,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict LUdF4o5cXHpgB963LvubKgfYt6bpgLQGZy4TwnfxcxJP9zXnEzPudqlAvQdYlQf
+\unrestrict XkUoZ7vlYPzNi3cWZQptRdZH8adriYQdIs6yVrrAFzNGa6fElH6sFCbjnREMxfY
 

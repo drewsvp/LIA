@@ -27,7 +27,19 @@ type TemplateRow = {
   copy: Copy;
   placeholders: string[];
   authInfrastructure: boolean;
+  deliveryType: "scheduled" | "event_triggered";
+  schedule: Schedule | null;
   updatedAt: string | null;
+  updatedByName: string | null;
+};
+
+type Schedule = {
+  active: boolean;
+  weeklyWeekday: number;
+  weeklyMinutes: number;
+  oneTimeAt: string | null;
+  nextSendAt: string | null;
+  updatedAt: string;
   updatedByName: string | null;
 };
 
@@ -46,6 +58,41 @@ function lastEditedLabel(row: TemplateRow): string | null {
   const who = row.updatedByName ?? "a staff member";
   if (!row.enabled) return `Disabled by ${who} on ${fmtDate(row.updatedAt)}`;
   return `Last edited by ${who} on ${fmtDate(row.updatedAt)}`;
+}
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function timeValue(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function pacificDateTime(iso: string | null): { date: string; time: string } {
+  if (iso === null) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const get = (part: string) => parts.find((p) => p.type === part)?.value ?? "";
+  return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour") === "24" ? "00" : get("hour")}:${get("minute")}` };
+}
+
+function fmtPacific(iso: string | null): string {
+  if (iso === null) return "No pending send";
+  return new Date(iso).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
 }
 
 async function postJson(url: string, body: unknown, method = "POST"): Promise<{ ok: boolean; data: unknown }> {
@@ -69,6 +116,10 @@ export function EmailTemplatesPage(): ReactElement {
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [scheduleDraft, setScheduleDraft] = useState<Schedule | null>(null);
+  const [oneTimeDate, setOneTimeDate] = useState("");
+  const [oneTimeTime, setOneTimeTime] = useState("");
+  const [savingSchedule, setSavingSchedule] = useState(false);
   // Incremented each time the selected template changes so stale in-flight
   // responses from a previous selection are discarded on arrival.
   const previewGenRef = useRef(0);
@@ -84,10 +135,15 @@ export function EmailTemplatesPage(): ReactElement {
     setPreviewing(false);
     if (!selected) {
       setDraft(null);
+      setScheduleDraft(null);
       return;
     }
     setDraft({ ...selected.copy, paragraphs: [...selected.copy.paragraphs] });
     setDraftRecipients(selected.recipientsOverride ?? "");
+    setScheduleDraft(selected.schedule ? { ...selected.schedule } : null);
+    const once = pacificDateTime(selected.schedule?.oneTimeAt ?? null);
+    setOneTimeDate(once.date);
+    setOneTimeTime(once.time);
 
     const gen = ++previewGenRef.current;
     void postJson(`/api/admin/email-templates/${selected.key}/preview`, {}).then(({ ok, data: body }) => {
@@ -163,6 +219,38 @@ export function EmailTemplatesPage(): ReactElement {
     await queryClient.invalidateQueries({ queryKey: [LIST_KEY] });
   }
 
+  async function saveSchedule(cancelOneTime = false): Promise<void> {
+    if (!selected || !scheduleDraft || savingSchedule) return;
+    setSavingSchedule(true);
+    setMessage(null);
+    setErrors([]);
+    try {
+      const { ok, data: body } = await postJson(`/api/admin/email-templates/${selected.key}/schedule`, {
+        active: scheduleDraft.active,
+        weeklyWeekday: scheduleDraft.weeklyWeekday,
+        weeklyMinutes: scheduleDraft.weeklyMinutes,
+        oneTimeDate: cancelOneTime || oneTimeDate === "" ? null : oneTimeDate,
+        oneTimeTime: cancelOneTime || oneTimeTime === "" ? null : oneTimeTime,
+      }, "PUT");
+      if (!ok) {
+        const b = body as { message?: string } | null;
+        setMessage(b?.message ?? SAVE_FAILURE);
+        return;
+      }
+      const schedule = (body as { schedule: Schedule }).schedule;
+      setScheduleDraft(schedule);
+      const once = pacificDateTime(schedule.oneTimeAt);
+      setOneTimeDate(once.date);
+      setOneTimeTime(once.time);
+      setMessage(cancelOneTime ? "One-time digest canceled. The weekly schedule is unchanged." : "Digest schedule saved.");
+      await queryClient.invalidateQueries({ queryKey: [LIST_KEY] });
+    } catch {
+      setMessage(SAVE_FAILURE);
+    } finally {
+      setSavingSchedule(false);
+    }
+  }
+
   return (
     <div className="adm-page">
       <h1 className="adm-heading">Automated emails</h1>
@@ -216,7 +304,7 @@ export function EmailTemplatesPage(): ReactElement {
                         </div>
                       )}
                     </td>
-                    <td>{row.trigger}</td>
+                    <td>{row.deliveryType === "scheduled" ? `Scheduled — ${row.trigger}` : `Event-triggered — ${row.trigger}`}</td>
                     <td>
                       {row.recipients}
                       {row.effectiveRecipients && <span className="adm-muted"> ({row.effectiveRecipients.join(", ")})</span>}
@@ -249,7 +337,7 @@ export function EmailTemplatesPage(): ReactElement {
             <h2 className="adm-subheading">{selected.name}</h2>
             <dl className="adm-detail-list">
               <dt>Sent when</dt>
-              <dd>{selected.trigger}</dd>
+               <dd>{selected.deliveryType === "scheduled" ? selected.trigger : `Event-triggered: ${selected.trigger}`}</dd>
               <dt>Goes to</dt>
               <dd>
                 {selected.recipients}
@@ -272,6 +360,73 @@ export function EmailTemplatesPage(): ReactElement {
               </p>
             ) : (
               <>
+                {scheduleDraft && (
+                  <section className="adm-upcoming-digest" aria-label="Digest schedule">
+                    <h3 className="adm-subheading">Digest schedule</h3>
+                    <p className="adm-sub-note">
+                      All times are Pacific time. Pausing stops new digest runs but lets an already-started send finish safely.
+                      Needs that arrive while paused stay in the next digest window after you resume.
+                      On daylight-saving transition days, a skipped spring time moves forward by one hour, and a repeated fall time uses the second occurrence.
+                    </p>
+                    <p className="adm-sub-note">
+                      Status: <strong>{scheduleDraft.active ? "Active" : "Paused"}</strong>.{" "}
+                      {scheduleDraft.active ? `Next expected send: ${fmtPacific(scheduleDraft.nextSendAt)} (Pacific).` : "No new digest will start until resumed."}
+                    </p>
+                    <label className="adm-filter">
+                      <input
+                        type="checkbox"
+                        checked={scheduleDraft.active}
+                        onChange={(e) => setScheduleDraft({ ...scheduleDraft, active: e.target.checked })}
+                      />{" "}
+                      Send the weekly digest automatically
+                    </label>
+                    <div className="adm-filter-row">
+                      <label className="adm-filter">
+                        Weekly day
+                        <select
+                          value={scheduleDraft.weeklyWeekday}
+                          onChange={(e) => setScheduleDraft({ ...scheduleDraft, weeklyWeekday: Number(e.target.value) })}
+                        >
+                          {WEEKDAYS.map((day, i) => <option key={day} value={i}>{day}</option>)}
+                        </select>
+                      </label>
+                      <label className="adm-filter">
+                        Weekly time (Pacific)
+                        <input
+                          type="time"
+                          value={timeValue(scheduleDraft.weeklyMinutes)}
+                          onChange={(e) => {
+                            const parts = e.target.value.split(":");
+                            const hour = Number(parts[0]);
+                            const minute = Number(parts[1]);
+                            if (parts.length === 2 && Number.isInteger(hour) && Number.isInteger(minute)) {
+                              setScheduleDraft({ ...scheduleDraft, weeklyMinutes: hour * 60 + minute });
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <h4 className="adm-subheading">One-time digest</h4>
+                    <p className="adm-sub-note">
+                      {scheduleDraft.oneTimeAt ? `Pending: ${fmtPacific(scheduleDraft.oneTimeAt)} (Pacific).` : "No one-time digest is pending."}
+                      {" "}This does not replace the weekly schedule.
+                    </p>
+                    <div className="adm-filter-row">
+                      <label className="adm-filter">Date (Pacific)<input type="date" value={oneTimeDate} onChange={(e) => setOneTimeDate(e.target.value)} /></label>
+                      <label className="adm-filter">Time (Pacific)<input type="time" value={oneTimeTime} onChange={(e) => setOneTimeTime(e.target.value)} /></label>
+                    </div>
+                    <div className="adm-btn-row">
+                      <button type="button" className="adm-btn" disabled={savingSchedule} onClick={() => void saveSchedule()}>
+                        {savingSchedule ? "Saving schedule…" : "Save schedule"}
+                      </button>
+                      {scheduleDraft.oneTimeAt && (
+                        <button type="button" className="adm-btn-outline" disabled={savingSchedule} onClick={() => void saveSchedule(true)}>
+                          Cancel one-time send
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
                 {selected.recipientsConfigurable && (
                   <label className="adm-filter">
                     Recipient addresses (comma-separated; leave blank to use the configured staff addresses)

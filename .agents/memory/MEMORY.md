@@ -16,7 +16,7 @@
 - [SPA identity switch](spa-identity-switch.md) — logout/quick-login must end in a full page reload; queryClient.clear() with mounted queries leaves stale session UI.
 - [Email copy overrides](email-copy-overrides.md) — only free-text copy is editable, all-or-nothing override with defaultCopy fallback; disabled templates write visible skipped log rows, never silent drops.
 - [Policy migrations vs bootstrap](policy-migration-bootstrap.md) — migrations run before apply-rls on fresh DBs: policy drops need 'if exists'; rls-policies.sql must mirror policy changes.
-- [Digest run guard](digest-run-guard.md) — scheduled email jobs need a durable run-date claim + run-bound once-only fan-out, not the in-memory expiry guard; skipped weeks write visible rows.
+- [Digest run guard](digest-run-guard.md) — scheduled email jobs need occurrence claims, cross-process serialization, catch-up, and run-bound once-only fan-out; date-only guards lose same-day sends.
 - [Supporter accounts](supporter-accounts.md) — users.kind='supporter', zero memberships is valid; login routes them to /profile; provisioning never rolls back the public submission.
 - [Need auto-image sourcing](need-image-sourcing.md) — AI-generation only for item + volunteer, fixed per-kind guardrail prompt; uploaded-wins enforced in SQL; gpt-image-1 rejects response_format.
 - [Public image asset sets](public-image-asset-sets.md) — one photo backs several graphics with different baked-in wording/crops; match new art by its words + surface, never by photo or filename.

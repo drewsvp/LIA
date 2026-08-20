@@ -1,15 +1,15 @@
 /**
  * Weekly "New Needs" digest job (task 58).
  *
- * Every Thursday at 9:00 AM Pacific, one digest email per subscribed
+ * On the configured Pacific weekly or one-time schedule, one digest email per subscribed
  * digest_subscribers row, listing the needs that transitioned to 'active'
  * since the previous completed digest run (a durable watermark in
  * digest_runs, NOT a fixed 7-day window).
  *
  * Restart safety — unlike the nightly expiry pass, sending email is not
  * idempotent by nature, so the guard is durable, not in-memory:
- *   1. The digest_runs.run_date unique key claims the LA Thursday date once.
- *      A completed run for today means a restarted process does nothing.
+ *   1. The digest_runs.occurrence_key uniquely claims each weekly/one-time
+ *      occurrence. A completed occurrence means a restarted process does nothing.
  *   2. A run left 'running' by a crash is RESUMED — on ANY day, not just
  *      Thursday: every pass first finishes the oldest unfinished run before
  *      a newer date may be claimed, so a crash that spans past Thursday
@@ -43,9 +43,7 @@ import {
 } from "../email/send";
 import type { DigestRun } from "../dal/digest-runs";
 import type { DigestNeed } from "../email/templates/digest-new-needs";
-
-const RUN_AT_MINUTES_OF_DAY = 9 * 60; // 9:00 AM LA
-const RUN_WEEKDAY = "Thu";
+import { DIGEST_TEMPLATE_KEY, pacificClock } from "../digest-schedule";
 
 export type DigestSummary = {
   outcome: "already_ran" | "skipped_empty" | "sent";
@@ -65,6 +63,21 @@ export type DigestDeps = {
 const REAL_DEPS: DigestDeps = {
   listSubscribers: async () => dal.digestSubscribers.list(SYSTEM, "subscribed"),
   dispatch: dispatchQueuedEmails,
+};
+
+export type DigestSchedulerDeps = DigestDeps & {
+  getSchedule: () => ReturnType<typeof dal.emailSchedules.getSchedule>;
+  weeklyOccurrenceAt: (date: string, minutes: number) => Promise<string>;
+  consumeOneTime: (oneTimeAt: string) => Promise<void>;
+};
+
+const REAL_SCHEDULER_DEPS: DigestSchedulerDeps = {
+  ...REAL_DEPS,
+  getSchedule: async () => dal.emailSchedules.getSchedule(SYSTEM, DIGEST_TEMPLATE_KEY),
+  weeklyOccurrenceAt: async (date, minutes) =>
+    dal.emailSchedules.pacificWeeklyLocalToInstant(SYSTEM, date, minutes),
+  consumeOneTime: async (oneTimeAt) =>
+    dal.emailSchedules.consumeOneTimeIfMatches(SYSTEM, DIGEST_TEMPLATE_KEY, oneTimeAt),
 };
 
 function needToVars(n: dal.digestRuns.NewNeed): DigestNeed {
@@ -163,7 +176,7 @@ async function processRun(run: DigestRun, resumed: boolean, deps: DigestDeps): P
 
 /**
  * Finish every run left 'running' from a date before laDate — crash
- * recovery that runs on ANY weekday (boot and every Thursday pass), so an
+ * recovery that runs on ANY weekday (boot and every scheduled pass), so an
  * interrupted Thursday delivers to its remaining recipients on the next
  * restart instead of stranding them, and the watermark advances before a
  * newer run can be claimed.
@@ -179,84 +192,137 @@ export async function recoverUnfinishedRuns(laDate: string, deps: DigestDeps = R
   }
 }
 
-let passRunning = false;
+const NO_RUN: DigestSummary = {
+  outcome: "already_ran",
+  needs: 0,
+  enqueued: 0,
+  duplicates: 0,
+  skippedDisabled: 0,
+  blocked: 0,
+};
 
 /** One digest attempt for the given LA date (recovery first, then today's run). */
 export async function runDigestOnce(laDate: string, deps: DigestDeps = REAL_DEPS): Promise<DigestSummary> {
-  const none: DigestSummary = { outcome: "already_ran", needs: 0, enqueued: 0, duplicates: 0, skippedDisabled: 0, blocked: 0 };
-  if (passRunning) {
-    console.warn("[digest] a pass is already running; not starting another");
-    return none;
-  }
-  passRunning = true;
-  try {
+  const locked = await dal.digestRuns.tryWithSchedulerLock<DigestSummary>(async () => {
     // Older unfinished runs MUST complete before today's run is claimed, or
     // today's watermark would re-cover the unfinished run's window.
     await recoverUnfinishedRuns(laDate, deps);
     const claim = await dal.digestRuns.claimOrResume(SYSTEM, laDate);
     if (claim === null) {
       console.log(`[digest] run for ${laDate} already completed — nothing to do`);
-      return none;
+      return NO_RUN;
     }
-    return await processRun(claim.run, claim.resumed, deps);
-  } finally {
-    passRunning = false;
+    return processRun(claim.run, claim.resumed, deps);
+  });
+  if (!locked.acquired) {
+    console.warn("[digest] a pass is already running; not starting another");
+    return NO_RUN;
   }
+  return locked.result;
 }
 
 /** Boot-time crash recovery only — never claims a new date. */
 export async function recoverAtBoot(laDate: string): Promise<void> {
-  if (passRunning) return;
-  passRunning = true;
-  try {
+  const locked = await dal.digestRuns.tryWithSchedulerLock(async () => {
     const recovered = await recoverUnfinishedRuns(laDate, REAL_DEPS);
     if (recovered > 0) console.warn(`[digest] boot recovery finished ${recovered} interrupted run(s)`);
-  } finally {
-    passRunning = false;
+  });
+  if (!locked.acquired) console.warn("[digest] another process owns boot recovery");
+}
+
+/**
+ * Configuration-aware scheduler pass. Recovery always runs, even while the
+ * schedule is paused; only claiming a NEW run is paused. A due one-time send
+ * is cleared only after the run date was claimed/resumed, so a restart cannot
+ * lose it. Exact same-instant weekly/one-time schedules share an occurrence;
+ * different instants on the same date receive separate durable claims.
+ */
+export async function runScheduledDigestOnce(
+  now = new Date(),
+  deps: DigestSchedulerDeps = REAL_SCHEDULER_DEPS,
+): Promise<DigestSummary> {
+  const locked = await dal.digestRuns.tryWithSchedulerLock<DigestSummary>(async () => {
+    const clock = pacificClock(now);
+    await recoverUnfinishedRuns(clock.date, deps);
+    const schedule = await deps.getSchedule();
+    if (!schedule?.active) return NO_RUN;
+
+    const addDays = (date: string, days: number): string => {
+      const [year, month, day] = date.split("-").map(Number);
+      return new Date(Date.UTC(year!, month! - 1, day! + days)).toISOString().slice(0, 10);
+    };
+    const daysSinceWeekday = (clock.weekday - schedule.weeklyWeekday + 7) % 7;
+    let weeklyDate = addDays(clock.date, -daysSinceWeekday);
+    let weeklyAt = await deps.weeklyOccurrenceAt(weeklyDate, schedule.weeklyMinutes);
+    if (new Date(weeklyAt).getTime() > now.getTime()) {
+      weeklyDate = addDays(weeklyDate, -7);
+      weeklyAt = await deps.weeklyOccurrenceAt(weeklyDate, schedule.weeklyMinutes);
+    }
+    // A schedule edit/resume does not retroactively invent an occurrence
+    // under settings that were not active yet. An unchanged active schedule
+    // still catches up its latest missed occurrence after an outage.
+    const weeklyDue =
+      new Date(weeklyAt).getTime() >= new Date(schedule.updatedAt).getTime();
+    const oneTimeDue =
+      schedule.oneTimeAt !== null && new Date(schedule.oneTimeAt).getTime() <= now.getTime();
+    if (!weeklyDue && !oneTimeDue) return NO_RUN;
+
+    type DueOccurrence = { key: string; targetAt: string; consumeOneTime: string | null };
+    const occurrences: DueOccurrence[] = [];
+    if (weeklyDue && oneTimeDue && new Date(weeklyAt).getTime() === new Date(schedule.oneTimeAt!).getTime()) {
+      // Exact same instant: one digest run, while still consuming the one-time
+      // request so it cannot reappear after restart.
+      occurrences.push({
+        key: `weekly:${weeklyDate}`,
+        targetAt: weeklyAt,
+        consumeOneTime: schedule.oneTimeAt!,
+      });
+    } else {
+      if (weeklyDue) occurrences.push({ key: `weekly:${weeklyDate}`, targetAt: weeklyAt, consumeOneTime: null });
+      if (oneTimeDue) {
+        occurrences.push({
+          key: `once:${new Date(schedule.oneTimeAt!).toISOString()}`,
+          targetAt: schedule.oneTimeAt!,
+          consumeOneTime: schedule.oneTimeAt!,
+        });
+      }
+    }
+    occurrences.sort((a, b) => new Date(a.targetAt).getTime() - new Date(b.targetAt).getTime());
+
+    const summaries: DigestSummary[] = [];
+    for (const occurrence of occurrences) {
+      const claim = await dal.digestRuns.claimOrResume(SYSTEM, clock.date, occurrence.key);
+      if (occurrence.consumeOneTime !== null) await deps.consumeOneTime(occurrence.consumeOneTime);
+      if (claim !== null) summaries.push(await processRun(claim.run, claim.resumed, deps));
+    }
+    if (summaries.length === 0) return NO_RUN;
+    return {
+      outcome: summaries.some((summary) => summary.outcome === "sent") ? "sent" : "skipped_empty",
+      needs: summaries.reduce((sum, summary) => sum + summary.needs, 0),
+      enqueued: summaries.reduce((sum, summary) => sum + summary.enqueued, 0),
+      duplicates: summaries.reduce((sum, summary) => sum + summary.duplicates, 0),
+      skippedDisabled: summaries.reduce((sum, summary) => sum + summary.skippedDisabled, 0),
+      blocked: summaries.reduce((sum, summary) => sum + summary.blocked, 0),
+    };
+  });
+  if (!locked.acquired) {
+    console.warn("[digest] another process owns the scheduled pass");
+    return NO_RUN;
   }
+  return locked.result;
 }
-
-function laClock(now: Date): { date: string; minutesOfDay: number; weekday: string } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-    hour12: false,
-  }).formatToParts(now);
-  const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? "";
-  const hour = Number(get("hour")) % 24; // some ICU builds emit "24" at midnight
-  return {
-    date: `${get("year")}-${get("month")}-${get("day")}`,
-    minutesOfDay: hour * 60 + Number(get("minute")),
-    weekday: get("weekday"),
-  };
-}
-
-let lastAttemptLaDate: string | null = null;
 
 export function startDigestScheduler(): void {
   const tick = (): void => {
-    const { date, minutesOfDay, weekday } = laClock(new Date());
-    if (weekday !== RUN_WEEKDAY) return;
-    if (minutesOfDay < RUN_AT_MINUTES_OF_DAY || lastAttemptLaDate === date) return;
-    // Marked before the pass so the next tick cannot double-start it; the
-    // durable guard is the digest_runs row, this only quiets the loop.
-    lastAttemptLaDate = date;
-    runDigestOnce(date).catch((err) => {
-      console.error(`[digest] run for ${date} failed; will retry on the next tick:`, err);
-      lastAttemptLaDate = null;
+    const now = new Date();
+    const clock = pacificClock(now);
+    void runScheduledDigestOnce(now).catch((err) => {
+      console.error(`[digest] scheduled pass for ${clock.date} failed; will retry:`, err);
     });
   };
   setInterval(tick, 60_000);
-  // Boot: recover any run interrupted before a restart — on ANY weekday —
-  // then the normal Thursday catch-up tick.
-  const { date } = laClock(new Date());
-  recoverAtBoot(date)
-    .then(() => tick())
-    .catch((err) => console.error("[digest] boot recovery failed:", err));
-  console.log("[digest] scheduler started: Thursdays at 9:00 AM Pacific (60s tick, durable once-per-date guard, boot recovery)");
+  // Boot calls the same pass: it recovers interrupted fan-out on any day and
+  // evaluates a due configured schedule without relying on process memory.
+  tick();
+  console.log("[digest] scheduler started: configured Pacific weekly/one-time schedule (60s tick, durable run guard, boot recovery)");
 }

@@ -612,6 +612,16 @@ create policy email_template_overrides_system_staff_all on email_template_overri
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 
+-- ---------------------------------------------------------------- email_schedules
+
+alter table email_schedules enable row level security;
+alter table email_schedules force row level security;
+
+drop policy if exists email_schedules_system_staff_all on email_schedules;
+create policy email_schedules_system_staff_all on email_schedules
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
 -- ---------------------------------------------------------------- digest_subscribers
 
 alter table digest_subscribers enable row level security;
