@@ -167,8 +167,8 @@ export function LoginPage(): ReactElement | null {
               {formError}
             </p>
           ) : null}
-          <button className="mp1-submit" type="submit">
-            Send Login Link
+          <button className="mp1-submit" type="submit" disabled={submitting}>
+            {submitting ? "Sending Link…" : "Send Login Link"}
           </button>
         </form>
       )}
