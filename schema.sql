@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict cgyvIZLH6vf7QnjAxlgt2FevMbsvwTLzv19DIOCgZmYbjvZxEqDa7sGr8vmb08q
+\restrict M4lFTfQO5ZNhnjkJ7DufD4ZJvSz30hZzyicsdqPn5GmIxNLJCARpB2pjGg8vCpj
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -1020,42 +1020,6 @@ ALTER TABLE ONLY public.populations FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: request_engagement_events; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.request_engagement_events (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    client_event_id uuid NOT NULL,
-    event_type text NOT NULL,
-    request_kind text NOT NULL,
-    item_request_id uuid,
-    volunteer_request_id uuid,
-    item_id uuid,
-    volunteer_role_id uuid,
-    user_id uuid,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT request_engagement_child_target CHECK ((((event_type = ANY (ARRAY['product_link_click'::text, 'item_selected'::text])) AND (request_kind = 'item'::text) AND (item_id IS NOT NULL) AND (volunteer_role_id IS NULL)) OR ((event_type = 'role_selected'::text) AND (request_kind = 'volunteer'::text) AND (volunteer_role_id IS NOT NULL) AND (item_id IS NULL)) OR ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'form_start'::text])) AND (item_id IS NULL) AND (volunteer_role_id IS NULL)))),
-    CONSTRAINT request_engagement_events_event_type_check CHECK ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'product_link_click'::text, 'form_start'::text, 'item_selected'::text, 'role_selected'::text]))),
-    CONSTRAINT request_engagement_events_request_kind_check CHECK ((request_kind = ANY (ARRAY['item'::text, 'volunteer'::text]))),
-    CONSTRAINT request_engagement_request_target CHECK ((((request_kind = 'item'::text) AND (item_request_id IS NOT NULL) AND (volunteer_request_id IS NULL)) OR ((request_kind = 'volunteer'::text) AND (volunteer_request_id IS NOT NULL) AND (item_request_id IS NULL))))
-);
-
-
---
--- Name: TABLE request_engagement_events; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.request_engagement_events IS 'Allowlisted public request interactions. Anonymous rows have no persistent visitor identity; pledges/signups remain authoritative conversions.';
-
-
---
--- Name: COLUMN request_engagement_events.client_event_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.request_engagement_events.client_event_id IS 'Fresh UUID for one client interaction, used only to make duplicate delivery idempotent.';
-
-
---
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1501,22 +1465,6 @@ ALTER TABLE ONLY public.populations
 
 
 --
--- Name: request_engagement_events request_engagement_events_client_event_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_client_event_id_key UNIQUE (client_event_id);
-
-
---
--- Name: request_engagement_events request_engagement_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_pkey PRIMARY KEY (id);
-
-
---
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1837,34 +1785,6 @@ CREATE INDEX people_needs_review_idx ON public.people USING btree (needs_review)
 --
 
 CREATE INDEX person_volunteer_interests_category_idx ON public.person_volunteer_interests USING btree (category_id);
-
-
---
--- Name: request_engagement_item_reporting_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_item_reporting_idx ON public.request_engagement_events USING btree (item_request_id, created_at DESC) WHERE (item_request_id IS NOT NULL);
-
-
---
--- Name: request_engagement_type_created_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_type_created_idx ON public.request_engagement_events USING btree (event_type, created_at DESC);
-
-
---
--- Name: request_engagement_user_history_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_user_history_idx ON public.request_engagement_events USING btree (user_id, created_at DESC) WHERE ((user_id IS NOT NULL) AND (event_type = 'detail_view'::text));
-
-
---
--- Name: request_engagement_volunteer_reporting_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_volunteer_reporting_idx ON public.request_engagement_events USING btree (volunteer_request_id, created_at DESC) WHERE (volunteer_request_id IS NOT NULL);
 
 
 --
@@ -2270,46 +2190,6 @@ ALTER TABLE ONLY public.person_volunteer_interests
 
 ALTER TABLE ONLY public.person_volunteer_interests
     ADD CONSTRAINT person_volunteer_interests_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.items(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_item_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_item_request_id_fkey FOREIGN KEY (item_request_id) REFERENCES public.item_requests(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
-
-
---
--- Name: request_engagement_events request_engagement_events_volunteer_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_volunteer_request_id_fkey FOREIGN KEY (volunteer_request_id) REFERENCES public.volunteer_requests(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_volunteer_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_volunteer_role_id_fkey FOREIGN KEY (volunteer_role_id) REFERENCES public.volunteer_roles(id) ON DELETE CASCADE;
 
 
 --
@@ -2976,5 +2856,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict cgyvIZLH6vf7QnjAxlgt2FevMbsvwTLzv19DIOCgZmYbjvZxEqDa7sGr8vmb08q
+\unrestrict M4lFTfQO5ZNhnjkJ7DufD4ZJvSz30hZzyicsdqPn5GmIxNLJCARpB2pjGg8vCpj
 
