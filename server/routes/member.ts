@@ -11,6 +11,7 @@ import multer from "multer";
 import { SYSTEM, isUniqueViolation, withDbContext, q } from "../db/client";
 import * as dal from "../dal";
 import type { DeadlineType, ItemCondition } from "../../shared/types";
+import { parseProductUrl } from "../../shared/item-product-url";
 import { requireOrganization, orgContext, sendNotFound } from "../auth/guards";
 import { storeImage } from "../storage/object-storage";
 import { updateOrganizationSettings } from "../services/org-settings";
@@ -937,6 +938,7 @@ export function registerMemberRoutes(app: Express): void {
           id: i.id,
           name: i.name,
           description: i.description,
+          productUrl: i.productUrl,
           quantityRequested: i.quantityRequested,
           quantityClaimed: i.quantityClaimed,
           condition: i.condition,
@@ -967,7 +969,7 @@ export function registerMemberRoutes(app: Express): void {
         };
         const name = text("name", 200);
         const description = text("description", 2000);
-        const productUrlRaw = text("productUrl", 500);
+        const productUrl = parseProductUrl(body.productUrl);
         const conditionRaw = text("condition", 20);
         const condition = ITEM_CONDITIONS.includes(conditionRaw as ItemCondition)
           ? (conditionRaw as ItemCondition)
@@ -975,8 +977,14 @@ export function registerMemberRoutes(app: Express): void {
         const qtyRaw = body.quantityRequested;
         const quantityRequested =
           typeof qtyRaw === "number" && Number.isInteger(qtyRaw) && qtyRaw > 0 ? qtyRaw : null;
-        if (name === "" || description === "" || condition === null || quantityRequested === null) {
-          res.status(400).json({ message: SAVE_FAILURE });
+        if (
+          name === "" ||
+          description === "" ||
+          condition === null ||
+          quantityRequested === null ||
+          !productUrl.ok
+        ) {
+          res.status(400).json({ message: productUrl.ok ? SAVE_FAILURE : productUrl.message });
           return;
         }
         const { orgId } = orgContext(req);
@@ -984,7 +992,7 @@ export function registerMemberRoutes(app: Express): void {
           name,
           description,
           condition,
-          productUrl: productUrlRaw === "" ? null : productUrlRaw,
+          productUrl: productUrl.value,
           quantityRequested,
         });
         res.json({
@@ -992,6 +1000,7 @@ export function registerMemberRoutes(app: Express): void {
             id: item.id,
             name: item.name,
             description: item.description,
+            productUrl: item.productUrl,
             quantityRequested: item.quantityRequested,
             quantityClaimed: item.quantityClaimed,
             condition: item.condition,
@@ -1229,7 +1238,7 @@ export function registerMemberRoutes(app: Express): void {
           const rowId = rowText("id", 40);
           const name = rowText("name", 200);
           const desc = rowText("description", 2000);
-          const url = rowText("productUrl", 500);
+          const productUrl = parseProductUrl(r.productUrl);
           const conditionRaw = rowText("condition", 20);
           const qReq = r.quantityRequested;
           const qRec = r.quantityReceived;
@@ -1250,12 +1259,15 @@ export function registerMemberRoutes(app: Express): void {
             sendNotFound(res);
             return;
           }
+          if (!productUrl.ok) {
+            res.status(400).json({ message: productUrl.message });
+            return;
+          }
           if (
             name === "" ||
             quantityRequested === null ||
             quantityReceived === null ||
-            condition === undefined ||
-            (url !== "" && !/^https?:\/\//i.test(url))
+            condition === undefined
           ) {
             res.status(400).json({ message: SAVE_FAILURE });
             return;
@@ -1264,7 +1276,7 @@ export function registerMemberRoutes(app: Express): void {
             id: rowId,
             name,
             description: desc === "" ? null : desc,
-            productUrl: url === "" ? null : url,
+            productUrl: productUrl.value,
             condition,
             quantityRequested,
             quantityReceived,
@@ -1347,7 +1359,7 @@ export function registerMemberRoutes(app: Express): void {
         };
         const name = text("name", 200);
         const description = text("description", 2000);
-        const productUrlRaw = text("productUrl", 500);
+        const productUrl = parseProductUrl(body.productUrl);
         const conditionRaw = text("condition", 20);
         const condition = ITEM_CONDITIONS.includes(conditionRaw as ItemCondition)
           ? (conditionRaw as ItemCondition)
@@ -1355,15 +1367,21 @@ export function registerMemberRoutes(app: Express): void {
         const qtyRaw = body.quantityRequested;
         const quantityRequested =
           typeof qtyRaw === "number" && Number.isInteger(qtyRaw) && qtyRaw > 0 ? qtyRaw : null;
-        if (name === "" || description === "" || condition === null || quantityRequested === null) {
-          res.status(400).json({ message: SAVE_FAILURE });
+        if (
+          name === "" ||
+          description === "" ||
+          condition === null ||
+          quantityRequested === null ||
+          !productUrl.ok
+        ) {
+          res.status(400).json({ message: productUrl.ok ? SAVE_FAILURE : productUrl.message });
           return;
         }
         const item = await dal.items.create(SYSTEM, orgId, request.id, {
           name,
           description,
           condition,
-          productUrl: productUrlRaw === "" ? null : productUrlRaw,
+          productUrl: productUrl.value,
           quantityRequested,
         });
         res.json({

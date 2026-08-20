@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { DeadlineField, type DeadlineTypeValue } from "../../components/member/DeadlineField";
+import { productUrlProblem } from "@shared/item-product-url";
 
 const REQUIRED_MSG = "This field is required";
 const SAVE_FAILURE_MSG = "That didn't save. Please check the form and try again.";
@@ -106,8 +107,8 @@ function rowProblem(row: RowState): string | null {
   if (Number(qr) < row.quantityClaimed) return overClaimMessage(row.name, row.quantityClaimed);
   const rec = row.quantityReceived.trim();
   if (rec !== "" && (!/^\d+$/.test(rec) || Number(rec) < 0)) return "Please enter a whole number.";
-  const url = row.productUrl.trim();
-  if (url !== "" && !/^https?:\/\//i.test(url)) return "Please enter a valid URL.";
+  const urlProblem = productUrlProblem(row.productUrl);
+  if (urlProblem) return urlProblem;
   return null;
 }
 
@@ -300,6 +301,8 @@ export function ItemsEditPage() {
     if (q === "") errs.addQuantity = REQUIRED_MSG;
     else if (!/^\d+$/.test(q) || Number(q) < 1) errs.addQuantity = "Please enter a whole number greater than zero.";
     if (addCondition === "") errs.addCondition = REQUIRED_MSG;
+    const urlProblem = productUrlProblem(addUrl);
+    if (urlProblem) errs.addUrl = urlProblem;
     return errs;
   }
 
@@ -333,7 +336,8 @@ export function ItemsEditPage() {
         setErrorsC({});
         setMsgC({ kind: "success", text: ADD_SUCCESS_MSG });
       } else {
-        setMsgC({ kind: "error", text: SAVE_FAILURE_MSG });
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        setMsgC({ kind: "error", text: body?.message ?? SAVE_FAILURE_MSG });
       }
     } catch {
       setMsgC({ kind: "error", text: SAVE_FAILURE_MSG });
@@ -676,6 +680,7 @@ export function ItemsEditPage() {
             value={addUrl}
             onChange={(e) => setAddUrl(e.target.value)}
           />
+          {fieldErrorC("addUrl")}
 
           <div className="mp9-submit-row">
             <button type="submit" className="mp5-submit" disabled={savingC}>

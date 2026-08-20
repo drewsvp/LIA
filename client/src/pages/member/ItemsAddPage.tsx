@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { productUrlProblem } from "@shared/item-product-url";
 
 const REQUIRED_MSG = "This field is required";
 const ADD_SUCCESS_MSG = "Item added.";
@@ -29,6 +30,7 @@ type RequestItem = {
   id: string;
   name: string;
   description: string | null;
+  productUrl: string | null;
   quantityRequested: number;
   quantityClaimed: number;
   condition: string | null;
@@ -112,6 +114,8 @@ export function ItemsAddPage() {
     if (q === "") errs.quantity = REQUIRED_MSG;
     else if (!/^\d+$/.test(q) || Number(q) < 1) errs.quantity = "Please enter a whole number greater than zero.";
     if (condition === "") errs.condition = REQUIRED_MSG;
+    const urlProblem = productUrlProblem(productUrl);
+    if (urlProblem) errs.productUrl = urlProblem;
     return errs;
   }
 
@@ -146,7 +150,8 @@ export function ItemsAddPage() {
         setErrors({});
         setMessage({ kind: "success", text: ADD_SUCCESS_MSG });
       } else {
-        setMessage({ kind: "error", text: ADD_FAILURE_MSG });
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        setMessage({ kind: "error", text: body?.message ?? ADD_FAILURE_MSG });
       }
     } catch {
       setMessage({ kind: "error", text: ADD_FAILURE_MSG });
@@ -269,6 +274,7 @@ export function ItemsAddPage() {
                 value={productUrl}
                 onChange={(e) => setProductUrl(e.target.value)}
               />
+              {fieldError("productUrl")}
 
               <div className="mp8-buttons">
                 <button type="submit" className="mp5-submit mp8-add-btn" disabled={adding}>

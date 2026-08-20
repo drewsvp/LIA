@@ -28,6 +28,7 @@ import {
 } from "../services/email-resend";
 import { MAY_HAVE_SENT_MARKER } from "../email/send";
 import { ENTITY_TYPE_NAMES } from "../../shared/transitions";
+import { parseProductUrl } from "../../shared/item-product-url";
 
 /** ADMIN-05 §5: lowercase, hyphenated. Shared by add (validation) and promote (generation). */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -205,40 +206,26 @@ function parseStaffRequestEdit(
       const name = rowText("name", 200);
       const childDescription = rowText("description", 2000);
       const condition = rowText("condition", 20);
-      const productRaw = row.productUrl;
-      const productUrl =
-        productRaw === null || productRaw === undefined
-          ? null
-          : typeof productRaw === "string" && productRaw.trim().length <= 500
-            ? productRaw.trim() || null
-            : undefined;
+      const productUrl = parseProductUrl(row.productUrl);
       const quantityRequested = row.quantityRequested;
       if (
         (id !== undefined && (typeof id !== "string" || !UUID_RE.test(id))) ||
         !name ||
         !childDescription ||
         (condition !== "new" && condition !== "gently_used" && condition !== "any") ||
-        productUrl === undefined ||
+        !productUrl.ok ||
         typeof quantityRequested !== "number" ||
         !Number.isInteger(quantityRequested) ||
         quantityRequested < 1
       ) {
         return null;
       }
-      if (productUrl !== null) {
-        try {
-          const url = new URL(productUrl);
-          if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-        } catch {
-          return null;
-        }
-      }
       children.push({
         ...(id !== undefined ? { id } : {}),
         name,
         description: childDescription,
         condition,
-        productUrl,
+        productUrl: productUrl.value,
         quantityRequested,
       });
     }

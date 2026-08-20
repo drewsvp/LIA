@@ -7,6 +7,7 @@
  * Usage: NODE_ENV=development npx tsx scripts/test-staff-request-edits.ts
  */
 import { pool } from "../server/db/client";
+import { MAX_PRODUCT_URL_LENGTH } from "../shared/item-product-url";
 
 const BASE = "http://localhost:5000";
 const marker = `zz_fixture_staff_edit_${process.pid}`;
@@ -14,6 +15,10 @@ let passed = 0;
 let failed = 0;
 const requestIds: string[] = [];
 let contactId: string | null = null;
+
+function amazonUrl(asin: string, markerValue: string): string {
+  return `https://www.amazon.com/dp/${asin}?tag=staff-edit-20&ref_=fixture&tracking=${markerValue.repeat(650)}`;
+}
 
 function assert(condition: boolean, label: string, detail = ""): void {
   if (condition) {
@@ -144,14 +149,14 @@ async function main(): Promise<void> {
         name: "Kept and reordered",
         description: "Updated second",
         condition: "gently_used",
-        productUrl: "https://example.com/item",
+        productUrl: amazonUrl("B000000001", "a"),
         quantityRequested: 7,
       },
       {
         name: "New item",
         description: "Added by staff",
         condition: "new",
-        productUrl: null,
+        productUrl: amazonUrl("B000000002", "b"),
         quantityRequested: 4,
       },
     ],
@@ -165,12 +170,14 @@ async function main(): Promise<void> {
     requested: number[];
     claimed: number[];
     received: number[];
+    productUrls: string[];
   }>(
     `select r.title, r.status,
             array_agg(i.name order by i.sort_order) as names,
             array_agg(i.quantity_requested order by i.sort_order)::int[] as requested,
             array_agg(i.quantity_claimed order by i.sort_order)::int[] as claimed,
-            array_agg(i.quantity_received order by i.sort_order)::int[] as received
+             array_agg(i.quantity_received order by i.sort_order)::int[] as received,
+             array_agg(i.product_url order by i.sort_order) as "productUrls"
        from item_requests r join items i on i.item_request_id = r.id
       where r.id = $1 group by r.id`,
     [itemId],
@@ -180,8 +187,34 @@ async function main(): Promise<void> {
       itemCheck.rows[0]?.names.join("|") === "Kept and reordered|New item" &&
       itemCheck.rows[0]?.requested.join("|") === "7|4" &&
       itemCheck.rows[0]?.claimed.every((n) => n === 0) &&
-      itemCheck.rows[0]?.received.every((n) => n === 0),
-    "item edit preserves Pending and never writes claim/receipt activity",
+      itemCheck.rows[0]?.received.every((n) => n === 0) &&
+      itemCheck.rows[0]?.productUrls[0] === itemEditBody.children[0]!.productUrl &&
+      itemCheck.rows[0]?.productUrls[1] === itemEditBody.children[1]!.productUrl,
+    "item edit preserves Pending, distinct long URLs, and claim/receipt activity",
+  );
+  const oversizedStaffEdit = await request(staff, `/api/admin/requests/item/${itemId}/edit`, {
+    ...itemEditBody,
+    title: "must not save oversized URL",
+    children: itemEditBody.children.map((row, index) => ({
+      ...row,
+      productUrl:
+        index === 0
+          ? `https://www.amazon.com/dp/B000000003?tracking=${"x".repeat(MAX_PRODUCT_URL_LENGTH)}`
+          : row.productUrl,
+    })),
+  });
+  assert(oversizedStaffEdit.status === 400, "staff item edits reject an excessive product URL", `status ${oversizedStaffEdit.status}`);
+  const unchangedAfterOversized = await pool.query<{ title: string; productUrls: string[] }>(
+    `select r.title, array_agg(i.product_url order by i.sort_order) as "productUrls"
+       from item_requests r join items i on i.item_request_id = r.id
+      where r.id = $1 group by r.id`,
+    [itemId],
+  );
+  assert(
+    unchangedAfterOversized.rows[0]?.title === itemEditBody.title &&
+      unchangedAfterOversized.rows[0]?.productUrls[0] === itemEditBody.children[0]!.productUrl &&
+      unchangedAfterOversized.rows[0]?.productUrls[1] === itemEditBody.children[1]!.productUrl,
+    "an invalid staff product URL leaves every request and item field unchanged",
   );
   const contactCheck = await pool.query<{ firstName: string; lastName: string; phone: string }>(
     `select first_name as "firstName", last_name as "lastName", phone from people where id = $1`,

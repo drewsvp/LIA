@@ -16,6 +16,7 @@
  */
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { productUrlProblem } from "@shared/item-product-url";
 
 type RequestKind = "item" | "volunteer";
 type Tab = "pending" | "active" | "archived" | "returned";
@@ -236,14 +237,8 @@ function validateEditForm(form: EditForm, kind: RequestKind): string | null {
       if (!child.description.trim()) return "Each item must have a description.";
       if (!Number.isInteger(child.quantityRequested) || child.quantityRequested < 1)
         return "Each item quantity requested must be a whole number of at least 1.";
-      if (child.productUrl.trim()) {
-        try {
-          const parsed = new URL(child.productUrl.trim());
-          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "Each product URL must use http or https.";
-        } catch {
-          return "Each product URL must be a valid web address.";
-        }
-      }
+      const urlProblem = productUrlProblem(child.productUrl);
+      if (urlProblem) return urlProblem;
     }
   } else {
     if (!form.details.trim()) return "Volunteer details are required.";
