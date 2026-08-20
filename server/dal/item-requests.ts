@@ -536,6 +536,48 @@ export async function transitionStatus(ctx: DbContext, input: TransitionInput): 
 }
 
 /**
+ * ADMIN-02 correction-only transition. Kept out of ALLOWED_TRANSITIONS so
+ * member workflows cannot move a public request back to review. The caller
+ * must hold the request lock and verify there is no activity before invoking
+ * this function; the status is rechecked here and the current approval stamp
+ * is cleared in the same transaction as the audit event.
+ */
+export async function unapproveForCorrectionInTx(
+  c: PoolClient,
+  requestId: string,
+  actorUserId: string,
+): Promise<ItemRequest> {
+  const current = await q<{ status: RequestStatus }>(
+    c,
+    `select status from item_requests where id = $1 for update`,
+    [requestId],
+  );
+  const from = current[0]?.status;
+  if (!from) throw new Error(`itemRequests.unapproveForCorrection: request not found: ${requestId}`);
+  if (from !== "active") {
+    throw new Error(`itemRequests.unapproveForCorrection: only active requests can be unapproved (status: ${from})`);
+  }
+  await c.query(
+    `update item_requests
+        set status = 'pending', approved_at = null, approved_by = null
+      where id = $1`,
+    [requestId],
+  );
+  await insertInTx(c, {
+    entityType: "item_request",
+    entityId: requestId,
+    fromStatus: "active",
+    toStatus: "pending",
+    actorUserId,
+    note: "staff correction",
+  });
+  const rows = await q<ItemRequest>(c, `select ${COLS} from item_requests r where r.id = $1`, [requestId]);
+  const request = rows[0];
+  if (!request) throw new Error(`itemRequests.unapproveForCorrection: reload failed: ${requestId}`);
+  return request;
+}
+
+/**
  * ADMIN-02 Reinstate: archived -> active, staff-only. Deliberately NOT an
  * edge in ALLOWED_TRANSITIONS — the generic map keeps the member lane honest
  * (archived reopens only to pending, MP-09 D2). Reinstating is not a
