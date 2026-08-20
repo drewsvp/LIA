@@ -21,3 +21,4 @@
 - [Need auto-image sourcing](need-image-sourcing.md) — Pexels-first, OpenAI fallback; uploaded-wins enforced in SQL; OpenAI images API rejects response_format — use gpt-image-1 (b64 default).
 - [Public image asset sets](public-image-asset-sets.md) — one photo backs several graphics with different baked-in wording/crops; match new art by its words + surface, never by photo or filename.
 - [Polymorphic trigger rows](plpgsql-trigger-row-branches.md) — shared PL/pgSQL triggers must branch before referencing table-specific NEW/OLD fields; an AND guard does not prevent field-resolution errors.
+- [Responsive preview isolation](responsive-preview-isolation.md) — exact-width iframe previews exercise real media queries; run authenticated screenshot states sequentially because the preview cookie jar is shared.

@@ -279,15 +279,6 @@ export function NavBar(): ReactElement {
           <Link href="/volunteer" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
             VOLUNTEER
           </Link>
-          {showAdmin ? (
-            <Link
-              href="/admin/organizations"
-              className="site-nav-panel-item"
-              onClick={() => setMenuOpen(false)}
-            >
-              ADMIN
-            </Link>
-          ) : null}
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />
           {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
         </nav>
