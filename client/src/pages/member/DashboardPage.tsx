@@ -47,6 +47,11 @@ function optionLabel(r: OverviewRequest): string {
 }
 
 const QUERY_ERROR_COPY = "Your requests could not be loaded. Please refresh the page and try again.";
+const ONLINE_COMMUNITY_LOGIN_URL = "https://www.alliancemembercommunity.org/users/sign_in#email";
+
+type DashboardTile =
+  | { img: string; label: string; to: string }
+  | { img: string; label: string; href: string };
 
 function RequestSelector({
   label,
@@ -131,9 +136,12 @@ export function DashboardPage() {
     { img: tileDonors, label: "View Donors/Volunteers", to: "/dashboard/supporters" },
     { img: tileOrg, label: "Edit My Organization", to: "/dashboard/organization" },
     { img: tileUsers, label: "Add Another User", to: "/dashboard/members/new" },
-    // External Wix members-community login; destination out of scope (§13).
-    { img: tileCommunity, label: "Online Community Login", to: null },
-  ];
+    {
+      img: tileCommunity,
+      label: "Online Community Login",
+      href: ONLINE_COMMUNITY_LOGIN_URL,
+    },
+  ] satisfies DashboardTile[];
 
   return (
     <div className="mp4-page">
@@ -165,12 +173,17 @@ export function DashboardPage() {
           {tiles.map((tile) => (
             <div key={tile.label} className="mp4-tile">
               <img className="mp4-tile-img" src={tile.img} alt="" />
-              {tile.to !== null ? (
-                <button type="button" className="mp4-tile-btn" onClick={() => navigate(tile.to)}>
+              {"href" in tile ? (
+                <a
+                  className="mp4-tile-link"
+                  href={tile.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   {tile.label}
-                </button>
+                </a>
               ) : (
-                <button type="button" className="mp4-tile-btn mp4-tile-btn-external" disabled>
+                <button type="button" className="mp4-tile-btn" onClick={() => navigate(tile.to)}>
                   {tile.label}
                 </button>
               )}

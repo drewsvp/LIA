@@ -1208,7 +1208,8 @@ a.site-nav-btn {
   width: 100%;
   height: auto;
 }
-.mp4-tile-btn {
+.mp4-tile-btn,
+.mp4-tile-link {
   margin: 10px;
   background: var(--color-teal);
   color: #ffffff;
@@ -1219,13 +1220,12 @@ a.site-nav-btn {
   border-radius: var(--radius-card);
   padding: 9px 6px;
   cursor: pointer;
+  text-align: center;
+  text-decoration: none;
 }
-.mp4-tile-btn:hover {
+.mp4-tile-btn:hover,
+.mp4-tile-link:hover {
   background: rgb(3, 128, 126);
-}
-.mp4-tile-btn-external:disabled {
-  cursor: default;
-  opacity: 0.75;
 }
 .mp4-edit-heading {
   text-align: center;
