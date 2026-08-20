@@ -30,6 +30,9 @@ type QueueRow = {
   status: string;
   submittedAt: string | null;
   createdAt: string;
+  deadlineType: "date_specific" | "until_fulfilled" | "ongoing";
+  deadlineDate: string | null;
+  expiresOn: string | null;
   returnedAt?: string | null;
   orgId: string;
   orgName: string;
@@ -163,6 +166,44 @@ function formatDate(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { dateStyle: "medium" });
+}
+
+/** Dates from Postgres date columns are calendar values, not local instants. */
+function formatCalendarDate(value: string | null): string {
+  if (!value) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return "—";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return "—";
+  }
+  return date.toLocaleDateString("en-US", { dateStyle: "medium", timeZone: "UTC" });
+}
+
+function datePart(value: string | null): string | null {
+  const match = value && /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  return match ? match[1]! : null;
+}
+
+/**
+ * Legacy expires_on remains an active cutoff for every deadline mode. A
+ * date-specific deadline is an additional cutoff, so the first one wins.
+ */
+function expirationLabel(row: QueueRow): string {
+  const cutoffs = [
+    datePart(row.expiresOn),
+    row.deadlineType === "date_specific" ? datePart(row.deadlineDate) : null,
+  ].filter((date): date is string => date !== null);
+  if (cutoffs.length > 0) return formatCalendarDate(cutoffs.sort()[0]!);
+  return row.deadlineType === "until_fulfilled" ? "Until fulfilled" : row.deadlineType === "ongoing" ? "Ongoing" : "—";
 }
 
 function deadlineLabel(detail: Detail["request"]): string {
@@ -779,6 +820,7 @@ export function RequestsPage() {
               <th>Title</th>
               <th>Organization</th>
               <th>{tab === "returned" ? "Returned" : "Submitted"}</th>
+              <th>Expiration</th>
               <th>{typeFilter === "volunteer" ? "Roles" : typeFilter === "item" ? "Items" : "Items / roles"}</th>
             </tr>
           </thead>
@@ -805,6 +847,7 @@ export function RequestsPage() {
                   {row.orgCity ? ` — ${row.orgCity}` : ""}
                 </td>
                 <td>{formatDate(tab === "returned" ? (row.returnedAt ?? null) : row.submittedAt)}</td>
+                <td>{expirationLabel(row)}</td>
                 <td>{row.childCount}</td>
               </tr>
             ))}

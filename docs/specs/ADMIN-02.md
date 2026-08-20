@@ -48,7 +48,7 @@ Renders inside the shared admin shell, ADMIN-01 section 4.
 
 1. **Type filter.** All, Items, Volunteer. All is the default.
 2. **Status tabs.** Pending, Active, Archived, Returned for changes. Pending is the default. The Returned for changes tab shows requests that staff returned to draft status (status = 'draft' with a return history).
-3. **Queue list.** One row per request: type, title, organization, submitted date (or returned date on the Returned tab), and the count of items or roles.
+3. **Queue list.** One row per request: type, title, organization, submitted date (or returned date on the Returned tab), expiration, and the count of items or roles. Queue rows include `deadline_type`, `deadline_date`, and legacy `expires_on` for every status tab. Expiration shows the earliest applicable dated cutoff (legacy `expires_on` and date-specific `deadline_date` are both cutoffs) as a calendar date, otherwise `Until fulfilled` or `Ongoing`.
 4. **Detail panel.** The full request as a member submitted it, plus every item or role with quantities. Also shows the latest return note and date when present.
 5. **Action region:** Approve, Return to draft, Archive, Edit Request, Unapprove (active only), Move to Pending (returned drafts only), Reinstate (archived only).
 
@@ -132,6 +132,7 @@ Save preserves the request's current status. The edit endpoint does not change s
 | Type filter set | List narrows to one request type. Detail panel adapts: items with quantities, or roles with counts |
 | Request has zero items or roles | Approve is disabled, with a stated reason. This should be unreachable given the submit gates at MP-08 and MP-11, so if it appears, something upstream is wrong |
 | Item request with `deadline_type = 'date_specific'` | Deadline date shown |
+| Queue row has an applicable legacy `expires_on` | Its calendar date is shown, including for ongoing or until-fulfilled requests; when both stored dates apply, the earlier cutoff is shown |
 | Request's organization is not `approved` | Approve is disabled, with a stated reason. Approving a request from an unapproved organization would publish nothing, since public queries filter on organization status |
 | Primary contact and creator are the same person | Result message says so, and one email is queued |
 | `editability.editable` is false | Edit button not shown; image upload not shown; `editability.reason` displayed as a note |
@@ -202,6 +203,8 @@ Per ADMIN-01 section 4. `approved_by` comes from the session user.
 ## 14. Acceptance
 
 - Both request types appear in one queue and the type filter narrows correctly.
+- The Expiration column remains in Pending, Active, Archived, and Returned for changes when filtering by All, Items, or Volunteer.
+- Date-specific and applicable legacy cutoffs display as calendar dates without timezone shifts; requests with no dated cutoff display `Until fulfilled` or `Ongoing`.
 - The Returned tab shows returned drafts (status = 'draft' with return history), with a column showing the return date.
 - The detail panel shows every item or role with its quantities.
 - The detail panel shows the latest return note and date when one exists, with a disclaimer that the note is history only and does not trigger AI, email, or any other action.

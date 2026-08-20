@@ -9,8 +9,11 @@
 import { pool } from "../server/db/client";
 import { approveRequest } from "../server/services/request-approval";
 import { MAX_PRODUCT_URL_LENGTH } from "../shared/item-product-url";
+import { execFileSync } from "node:child_process";
+import { chromium } from "playwright";
 
 const BASE = "http://localhost:5000";
+const BROWSER_BASE = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : BASE;
 const marker = `zz_fixture_staff_edit_${process.pid}`;
 let passed = 0;
 let failed = 0;
@@ -18,6 +21,13 @@ const requestIds: string[] = [];
 let contactId: string | null = null;
 let volunteerCategoryId: string | null = null;
 type RequestKind = "item" | "volunteer";
+type QueueContractRow = {
+  id: string;
+  type: RequestKind;
+  deadlineType: "date_specific" | "until_fulfilled" | "ongoing";
+  deadlineDate: string | null;
+  expiresOn: string | null;
+};
 
 function amazonUrl(asin: string, markerValue: string): string {
   return `https://www.amazon.com/dp/${asin}?tag=staff-edit-20&ref_=fixture&tracking=${markerValue.repeat(650)}`;
@@ -60,6 +70,20 @@ async function request(cookie: string, path: string, body?: unknown): Promise<Re
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+function browserCookies(cookie: string) {
+  return cookie.split("; ").map((pair) => {
+    const separator = pair.indexOf("=");
+    return {
+      name: pair.slice(0, separator),
+      value: pair.slice(separator + 1),
+      url: BROWSER_BASE,
+      httpOnly: true,
+      secure: BROWSER_BASE.startsWith("https://"),
+      sameSite: "Lax" as const,
+    };
   });
 }
 
@@ -164,8 +188,9 @@ async function main(): Promise<void> {
   const itemRequest = await pool.query<{ id: string }>(
     `insert into item_requests
        (org_id, title, description, dropoff_location, people_helped, deadline_type,
-        contact_person_id, status, submitted_at)
-     values ($1, $2, 'Original item description', 'Old dropoff', 2, 'ongoing', $3, 'pending', now())
+         deadline_date, expires_on, contact_person_id, status, submitted_at)
+      values ($1, $2, 'Original item description', 'Old dropoff', 2, 'date_specific',
+              '2027-02-03', '2027-01-20', $3, 'pending', now())
      returning id`,
     [orgId, `${marker} item`, contactId],
   );
@@ -219,11 +244,68 @@ async function main(): Promise<void> {
   assert(unauthorized.status === 404, "organization member cannot open the staff editor", `status ${unauthorized.status}`);
 
   const pending = await request(staff, "/api/admin/requests?status=pending");
-  const pendingBody = (await pending.json()) as { requests?: Array<{ id: string }> };
+  const pendingBody = (await pending.json()) as { requests?: QueueContractRow[] };
+  const queuedItem = pendingBody.requests?.find((row) => row.id === itemId);
+  const queuedVolunteer = pendingBody.requests?.find((row) => row.id === volunteerId);
   assert(
     pending.ok && pendingBody.requests?.some((row) => row.id === itemId) === true,
     "pending fixture appears in the staff queue",
   );
+  assert(
+    queuedItem?.type === "item" &&
+      queuedItem.deadlineType === "date_specific" &&
+      queuedItem.deadlineDate === "2027-02-03" &&
+      queuedItem.expiresOn === "2027-01-20" &&
+      queuedVolunteer?.type === "volunteer" &&
+      queuedVolunteer.deadlineType === "until_fulfilled" &&
+      queuedVolunteer.deadlineDate === null &&
+      queuedVolunteer.expiresOn === null,
+    "pending item and volunteer rows expose the same complete expiration contract",
+    JSON.stringify({ item: queuedItem, volunteer: queuedVolunteer }),
+  );
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath:
+      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim() ||
+      execFileSync("which", ["chromium"], { encoding: "utf8" }).trim(),
+  });
+  try {
+    const context = await browser.newContext();
+    await context.addCookies(browserCookies(staff));
+    const page = await context.newPage();
+    await page.goto(`${BROWSER_BASE}/admin/requests`, { waitUntil: "networkidle" });
+    const queueTable = page.locator(".adm-table");
+    await queueTable.waitFor();
+    const headers = await queueTable.locator("th").allTextContents();
+    const itemQueueRow = queueTable.getByRole("row").filter({ hasText: `${marker} item` });
+    const volunteerQueueRow = queueTable.getByRole("row").filter({ hasText: `${marker} volunteer` });
+    assert(
+      headers.includes("Expiration") &&
+        (await itemQueueRow.getByRole("cell", { name: "Jan 20, 2027", exact: true }).count()) === 1 &&
+        (await volunteerQueueRow.getByRole("cell", { name: "Until fulfilled", exact: true }).count()) === 1,
+      "the queue renders date and non-date expiration labels without shifting calendar days",
+      JSON.stringify(headers),
+    );
+    await itemQueueRow.click();
+    assert(
+      await itemQueueRow.evaluate((row) => row.classList.contains("adm-row-on")),
+      "selecting a queue row still works with the expiration cell",
+    );
+    await page.getByRole("button", { name: "Items", exact: true }).click();
+    assert(
+      headers.includes("Expiration") &&
+        (await queueTable.getByRole("row").filter({ hasText: `${marker} item` }).count()) === 1,
+      "the Items filter keeps the expiration column and matching selected row",
+    );
+    await page.getByRole("button", { name: "Volunteer", exact: true }).click();
+    assert(
+      headers.includes("Expiration") &&
+        (await queueTable.getByRole("row").filter({ hasText: `${marker} volunteer` }).count()) === 1,
+      "the Volunteer filter keeps the expiration column and matching row",
+    );
+  } finally {
+    await browser.close();
+  }
 
   const itemEditBody = {
     title: `${marker} item corrected`,
@@ -331,10 +413,18 @@ async function main(): Promise<void> {
   const returned = await request(staff, `/api/admin/requests/item/${itemId}/return-to-draft`, { note: returnNote });
   assert(returned.ok, "staff can return the item request with an instruction/history note");
   const returnedQueue = await request(staff, "/api/admin/requests?status=returned");
-  const returnedBody = (await returnedQueue.json()) as { requests?: Array<{ id: string }> };
+  const returnedBody = (await returnedQueue.json()) as { requests?: QueueContractRow[] };
+  const returnedItem = returnedBody.requests?.find((row) => row.id === itemId);
   assert(
     returnedQueue.ok && returnedBody.requests?.some((row) => row.id === itemId) === true,
     "returned view contains the previously submitted draft",
+  );
+  assert(
+    returnedItem?.deadlineType === "date_specific" &&
+      returnedItem.deadlineDate === itemEditBody.deadlineDate &&
+      returnedItem.expiresOn === "2027-01-20",
+    "returned item rows retain both current and legacy expiration data",
+    JSON.stringify(returnedItem),
   );
   const returnedDetail = await request(staff, `/api/admin/requests/item/${itemId}`);
   const returnedDetailBody = (await returnedDetail.json()) as { latestReturn?: { note?: string }; editability?: { editable?: boolean } };
@@ -657,6 +747,17 @@ async function main(): Promise<void> {
     { note: "Clarify the shift." },
   );
   assert(volunteerReturned.ok, "volunteer return still works and records history");
+  const volunteerReturnedQueue = await request(staff, "/api/admin/requests?status=returned");
+  const volunteerReturnedBody = (await volunteerReturnedQueue.json()) as { requests?: QueueContractRow[] };
+  const returnedVolunteer = volunteerReturnedBody.requests?.find((row) => row.id === volunteerId);
+  assert(
+    returnedVolunteer?.type === "volunteer" &&
+      returnedVolunteer.deadlineType === "until_fulfilled" &&
+      returnedVolunteer.deadlineDate === null &&
+      returnedVolunteer.expiresOn === null,
+    "returned volunteer rows keep the complete expiration contract",
+    JSON.stringify(returnedVolunteer),
+  );
   const volunteerPending = await request(
     staff,
     `/api/admin/requests/volunteer/${volunteerId}/move-to-pending`,
