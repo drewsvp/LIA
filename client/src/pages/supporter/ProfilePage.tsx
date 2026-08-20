@@ -30,6 +30,15 @@ type ProfilePayload = {
     createdAt: string;
     roles: { roleId: string; roleName: string }[];
   }[];
+  recentlyViewed: {
+    requestKind: "item" | "volunteer";
+    requestId: string;
+    title: string;
+    orgName: string;
+    lastViewedAt: string;
+    available: boolean;
+    converted: boolean;
+  }[];
   volunteerInterests: {
     id: string;
     name: string;
@@ -221,6 +230,48 @@ export function SupporterProfilePage(): ReactElement | null {
                 >
                   {interestResult.text}
                 </p>
+              )}
+            </section>
+
+            <section aria-labelledby="recently-viewed-heading">
+              <h2 id="recently-viewed-heading" className="pb2-section-heading">
+                Recently Viewed Requests
+              </h2>
+              {data.recentlyViewed.length === 0 ? (
+                <p style={{ textAlign: "center", fontSize: 15 }}>
+                  No recently viewed requests yet. <Link href="/items">Browse item needs</Link> or{" "}
+                  <Link href="/volunteer">volunteer opportunities</Link>.
+                </p>
+              ) : (
+                <div className="supporter-recent-grid">
+                  {data.recentlyViewed.map((request) => {
+                    const href =
+                      request.requestKind === "item"
+                        ? `/items/${request.requestId}`
+                        : `/volunteer/${request.requestId}`;
+                    return (
+                      <article
+                        key={`${request.requestKind}-${request.requestId}`}
+                        className="supporter-recent-request"
+                      >
+                        <p className="supporter-recent-kind">
+                          {request.requestKind === "item" ? "Item need" : "Volunteer opportunity"}
+                        </p>
+                        <h3>
+                          {request.available ? <Link href={href}>{request.title}</Link> : request.title}
+                        </h3>
+                        <p>{request.orgName}</p>
+                        <p>
+                          Last viewed {formatDate(request.lastViewedAt)}
+                          {" · "}
+                          <strong>{request.converted ? "Already supported" : "Not yet supported"}</strong>
+                          {" · "}
+                          {request.available ? "Available" : "No longer available"}
+                        </p>
+                      </article>
+                    );
+                  })}
+                </div>
               )}
             </section>
 

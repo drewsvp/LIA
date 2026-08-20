@@ -38,5 +38,6 @@ export * as validation from "./validation";
 export * as adminCounts from "./admin-counts";
 export * as adminRequests from "./admin-requests";
 export * as peopleReview from "./people-review";
+export * as requestEngagement from "./request-engagement";
 
 export { SYSTEM, PUBLIC, type DbContext } from "../db/client";

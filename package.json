@@ -13,6 +13,8 @@
     "test:volunteer-interests": "tsx scripts/test-volunteer-interests.ts",
     "test:volunteer-request-categories": "tsx scripts/test-volunteer-request-categories.ts",
     "test:matching-volunteer-alerts": "tsx scripts/test-matching-volunteer-alerts.ts",
+    "test:request-engagement": "tsx scripts/test-request-engagement.ts",
+    "test:request-engagement-ui": "tsx scripts/test-request-engagement-ui.ts",
     "db:seed": "tsx server/db/seed.ts",
     "db:apply-auth-schema": "tsx server/auth/apply-auth-schema.ts",
     "db:apply-migrations": "tsx server/db/apply-migrations.ts",

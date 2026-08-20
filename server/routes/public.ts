@@ -20,6 +20,7 @@ import { PledgeError } from "../dal/pledges";
 import { SignupError } from "../dal/signups";
 import { FixedWindowLimiter } from "../auth/rate-limit";
 import { NOT_FOUND_BODY } from "../auth/guards";
+import { resolveSessionInfo } from "../auth/session";
 import { queueProductEmail, dispatchQueuedEmails, absoluteUrl, type PendingDispatch } from "../email/send";
 import { storeImage } from "../storage/object-storage";
 import { submitOrganizationSignup, OrgNameTakenError } from "../services/org-signup";
@@ -33,6 +34,17 @@ const pledgeIpLimiter = new FixedWindowLimiter(10, 15 * 60_000);
 const signupIpLimiter = new FixedWindowLimiter(10, 15 * 60_000);
 const subscribeIpLimiter = new FixedWindowLimiter(10, 15 * 60_000);
 const orgSignupIpLimiter = new FixedWindowLimiter(10, 15 * 60_000);
+const engagementIpLimiter = new FixedWindowLimiter(120, 15 * 60_000);
+
+const ENGAGEMENT_EVENT_TYPES = new Set<dal.requestEngagement.EngagementEventType>([
+  "card_click",
+  "detail_view",
+  "product_link_click",
+  "form_start",
+  "item_selected",
+  "role_selected",
+]);
+const ENGAGEMENT_BODY_KEYS = new Set(["eventId", "eventType", "requestKind", "requestId", "targetId"]);
 
 /** MP-03 logo: one image, in memory, stored before the tx (upload failure is non-blocking, §12). */
 const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -267,6 +279,70 @@ async function loadPublicItems(requestId: string): Promise<PublicItemPayload[]> 
 // ---------------------------------------------------------------- routes
 
 export function registerPublicRoutes(app: Express): void {
+  // Privacy-safe engagement ingestion. The only optional attribution is the
+  // current valid application session; anonymous requests gain no cookie or
+  // stable identifier. Unknown fields are refused so form contents can never
+  // accidentally enter this event boundary.
+  app.post("/api/public/engagement", async (req: Request, res: Response, next) => {
+    try {
+      if (!engagementIpLimiter.consume(req.ip ?? "unknown")) {
+        res.status(429).json({ message: "Too many engagement events." });
+        return;
+      }
+      const body = req.body;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        res.status(400).json({ message: "Invalid engagement event." });
+        return;
+      }
+      const raw = body as Record<string, unknown>;
+      if (Object.keys(raw).some((key) => !ENGAGEMENT_BODY_KEYS.has(key))) {
+        res.status(400).json({ message: "Invalid engagement event." });
+        return;
+      }
+      const eventId = typeof raw.eventId === "string" ? raw.eventId : "";
+      const eventType = typeof raw.eventType === "string" ? raw.eventType : "";
+      const requestKind = raw.requestKind;
+      const requestId = typeof raw.requestId === "string" ? raw.requestId : "";
+      const targetId = raw.targetId === undefined || raw.targetId === null ? null : raw.targetId;
+      const childEvent =
+        eventType === "product_link_click" || eventType === "item_selected" || eventType === "role_selected";
+      if (
+        !UUID_RE.test(eventId) ||
+        !ENGAGEMENT_EVENT_TYPES.has(eventType as dal.requestEngagement.EngagementEventType) ||
+        (requestKind !== "item" && requestKind !== "volunteer") ||
+        !UUID_RE.test(requestId) ||
+        (childEvent ? typeof targetId !== "string" || !UUID_RE.test(targetId) : targetId !== null) ||
+        (requestKind === "item" && eventType === "role_selected") ||
+        (requestKind === "volunteer" &&
+          (eventType === "product_link_click" || eventType === "item_selected"))
+      ) {
+        res.status(400).json({ message: "Invalid engagement event." });
+        return;
+      }
+
+      const session = await resolveSessionInfo(req);
+      const result = await dal.requestEngagement.recordPublicEvent(SYSTEM, {
+        clientEventId: eventId,
+        eventType: eventType as dal.requestEngagement.EngagementEventType,
+        requestKind,
+        requestId,
+        targetId: targetId as string | null,
+        userId: session.authenticated && session.user ? session.user.id : null,
+      });
+      if (result === "not_public") {
+        res.status(404).json(NOT_FOUND_BODY);
+        return;
+      }
+      if (result === "invalid_target") {
+        res.status(400).json({ message: "Invalid engagement target." });
+        return;
+      }
+      res.status(202).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ---- PB-01: browse active item requests of approved member orgs.
   app.get("/api/public/item-requests", async (_req: Request, res: Response, next) => {
     try {

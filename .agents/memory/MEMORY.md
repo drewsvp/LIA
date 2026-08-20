@@ -23,3 +23,4 @@
 - [Polymorphic trigger rows](plpgsql-trigger-row-branches.md) — shared PL/pgSQL triggers must branch before referencing table-specific NEW/OLD fields; an AND guard does not prevent field-resolution errors.
 - [Responsive preview isolation](responsive-preview-isolation.md) — exact-width iframe previews exercise real media queries; run authenticated screenshot states sequentially because the preview cookie jar is shared.
 - [Matching-alert once-only rule](matching-alert-once-only.md) — first-approval claims survive failed or disabled sends; only explicit failed-email resend may retry delivery.
+- [Engagement privacy boundary](engagement-privacy-boundary.md) — anonymous request events stay aggregate-only; signed-in views may be attributed; pledges/signups remain the only conversion source.

@@ -17,6 +17,7 @@ import tileDonors from "../../assets/dashboard/tile-donors.png";
 import tileOrg from "../../assets/dashboard/tile-org.png";
 import tileUsers from "../../assets/dashboard/tile-users.png";
 import tileCommunity from "../../assets/dashboard/tile-community.png";
+import { EngagementReport } from "../../components/analytics/EngagementReport";
 
 type OverviewRequest = { id: string; title: string; createdAt: string; status: string };
 type Overview = {
@@ -213,6 +214,18 @@ export function DashboardPage() {
             loading={overviewQuery.isLoading}
             onEdit={(id) => navigate(`/dashboard/volunteer/${id}/edit`)}
           />
+        </section>
+
+        <section className="mp4-engagement-region" aria-labelledby="mp4-engagement-heading">
+          <h2 id="mp4-engagement-heading" className="mp4-edit-heading">
+            REQUEST ENGAGEMENT
+          </h2>
+          <p className="mp4-welcome">
+            See how people are finding and responding to your organization&rsquo;s requests. Engagement counts
+            describe public interactions; completed donations and volunteer signups come from the actual
+            submission records.
+          </p>
+          <EngagementReport apiUrl="/api/dashboard/engagement" />
         </section>
       </div>
     </div>

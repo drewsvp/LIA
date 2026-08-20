@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict ZXoMG2I486YWTXVWQEf930QKgIrNDAl75LC5EEPp1f99JwQqrurC5D5O3MGWmFW
+\restrict Mm2NQiV7HNoMHovBWBEbNlVePTmSXbcukyQI3TrXt5kpIweAfE7f6EVmp2GF8uw
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -1022,6 +1022,44 @@ ALTER TABLE ONLY public.populations FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: request_engagement_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.request_engagement_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    client_event_id uuid NOT NULL,
+    event_type text NOT NULL,
+    request_kind text NOT NULL,
+    item_request_id uuid,
+    volunteer_request_id uuid,
+    item_id uuid,
+    volunteer_role_id uuid,
+    user_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT request_engagement_child_target CHECK ((((event_type = ANY (ARRAY['product_link_click'::text, 'item_selected'::text])) AND (request_kind = 'item'::text) AND (item_id IS NOT NULL) AND (volunteer_role_id IS NULL)) OR ((event_type = 'role_selected'::text) AND (request_kind = 'volunteer'::text) AND (volunteer_role_id IS NOT NULL) AND (item_id IS NULL)) OR ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'form_start'::text])) AND (item_id IS NULL) AND (volunteer_role_id IS NULL)))),
+    CONSTRAINT request_engagement_events_event_type_check CHECK ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'product_link_click'::text, 'form_start'::text, 'item_selected'::text, 'role_selected'::text]))),
+    CONSTRAINT request_engagement_events_request_kind_check CHECK ((request_kind = ANY (ARRAY['item'::text, 'volunteer'::text]))),
+    CONSTRAINT request_engagement_request_target CHECK ((((request_kind = 'item'::text) AND (item_request_id IS NOT NULL) AND (volunteer_request_id IS NULL)) OR ((request_kind = 'volunteer'::text) AND (volunteer_request_id IS NOT NULL) AND (item_request_id IS NULL))))
+);
+
+ALTER TABLE ONLY public.request_engagement_events FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: TABLE request_engagement_events; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.request_engagement_events IS 'Allowlisted public request interactions. Anonymous rows have no persistent visitor identity; pledges/signups remain authoritative conversions.';
+
+
+--
+-- Name: COLUMN request_engagement_events.client_event_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.request_engagement_events.client_event_id IS 'Fresh UUID for one client interaction, used only to make duplicate delivery idempotent.';
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1114,6 +1152,20 @@ ALTER TABLE ONLY public.volunteer_alert_preferences FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: TABLE volunteer_alert_preferences; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.volunteer_alert_preferences IS 'Explicit per-supporter consent for immediate matching-volunteer email alerts. No row is equivalent to enabled=false.';
+
+
+--
+-- Name: COLUMN volunteer_alert_preferences.unsubscribe_token; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.volunteer_alert_preferences.unsubscribe_token IS 'Opaque one-way capability used only to disable future matching alerts.';
+
+
+--
 -- Name: volunteer_categories; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1140,6 +1192,13 @@ CREATE TABLE public.volunteer_match_alert_claims (
 );
 
 ALTER TABLE ONLY public.volunteer_match_alert_claims FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: TABLE volunteer_match_alert_claims; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.volunteer_match_alert_claims IS 'Durable once-only claim for approval-triggered matching alerts, independent of retryable email_log status.';
 
 
 --
@@ -1454,6 +1513,22 @@ ALTER TABLE ONLY public.populations
 
 
 --
+-- Name: request_engagement_events request_engagement_events_client_event_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_client_event_id_key UNIQUE (client_event_id);
+
+
+--
+-- Name: request_engagement_events request_engagement_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1728,6 +1803,13 @@ CREATE INDEX item_requests_public_idx ON public.item_requests USING btree (statu
 
 
 --
+-- Name: items_id_request_ownership_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX items_id_request_ownership_idx ON public.items USING btree (id, item_request_id);
+
+
+--
 -- Name: items_request_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1777,6 +1859,34 @@ CREATE INDEX person_volunteer_interests_category_idx ON public.person_volunteer_
 
 
 --
+-- Name: request_engagement_item_reporting_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_item_reporting_idx ON public.request_engagement_events USING btree (item_request_id, created_at DESC) WHERE (item_request_id IS NOT NULL);
+
+
+--
+-- Name: request_engagement_type_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_type_created_idx ON public.request_engagement_events USING btree (event_type, created_at DESC);
+
+
+--
+-- Name: request_engagement_user_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_user_history_idx ON public.request_engagement_events USING btree (user_id, created_at DESC) WHERE ((user_id IS NOT NULL) AND (event_type = 'detail_view'::text));
+
+
+--
+-- Name: request_engagement_volunteer_reporting_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_volunteer_reporting_idx ON public.request_engagement_events USING btree (volunteer_request_id, created_at DESC) WHERE (volunteer_request_id IS NOT NULL);
+
+
+--
 -- Name: session_userId_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1823,6 +1933,13 @@ CREATE INDEX volunteer_requests_org_idx ON public.volunteer_requests USING btree
 --
 
 CREATE INDEX volunteer_requests_public_idx ON public.volunteer_requests USING btree (status, created_at DESC) WHERE (status = 'active'::text);
+
+
+--
+-- Name: volunteer_roles_id_request_ownership_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX volunteer_roles_id_request_ownership_idx ON public.volunteer_roles USING btree (id, volunteer_request_id);
 
 
 --
@@ -2179,6 +2296,62 @@ ALTER TABLE ONLY public.person_volunteer_interests
 
 ALTER TABLE ONLY public.person_volunteer_interests
     ADD CONSTRAINT person_volunteer_interests_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.items(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_item_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_item_request_id_fkey FOREIGN KEY (item_request_id) REFERENCES public.item_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_volunteer_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_volunteer_request_id_fkey FOREIGN KEY (volunteer_request_id) REFERENCES public.volunteer_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_volunteer_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_volunteer_role_id_fkey FOREIGN KEY (volunteer_role_id) REFERENCES public.volunteer_roles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_item_ownership_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_item_ownership_fk FOREIGN KEY (item_id, item_request_id) REFERENCES public.items(id, item_request_id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_role_ownership_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_role_ownership_fk FOREIGN KEY (volunteer_role_id, volunteer_request_id) REFERENCES public.volunteer_roles(id, volunteer_request_id) ON DELETE CASCADE;
 
 
 --
@@ -2726,6 +2899,19 @@ CREATE POLICY populations_system_staff_all ON public.populations USING ((current
 
 
 --
+-- Name: request_engagement_events; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.request_engagement_events ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: request_engagement_events request_engagement_events_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY request_engagement_events_system_staff_all ON public.request_engagement_events USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: users; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2986,5 +3172,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ZXoMG2I486YWTXVWQEf930QKgIrNDAl75LC5EEPp1f99JwQqrurC5D5O3MGWmFW
+\unrestrict Mm2NQiV7HNoMHovBWBEbNlVePTmSXbcukyQI3TrXt5kpIweAfE7f6EVmp2GF8uw
 

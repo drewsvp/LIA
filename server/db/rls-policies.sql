@@ -674,6 +674,16 @@ create policy volunteer_signup_roles_member_select on volunteer_signup_roles for
 
 -- ---------------------------------------------------------------- approval_events
 
+-- --------------------------------------------------------- request engagement
+
+alter table request_engagement_events enable row level security;
+alter table request_engagement_events force row level security;
+
+drop policy if exists request_engagement_events_system_staff_all on request_engagement_events;
+create policy request_engagement_events_system_staff_all on request_engagement_events
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
 alter table approval_events enable row level security;
 alter table approval_events force row level security;
 

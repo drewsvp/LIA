@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { PublicLayout } from "../../components/public/PublicLayout";
+import { beginEngagementLifecycle, reportEngagement } from "../../lib/engagement";
 
 /**
  * PB-02 — Item request detail and claim (docs/specs/PB-02.md).
@@ -67,6 +68,10 @@ type FieldErrors = {
 export function ItemDetailPage(): ReactElement {
   const params = useParams<{ id: string }>();
   const requestId = params.id ?? "";
+  const formStarted = useRef(false);
+  useEffect(() => {
+    formStarted.current = false;
+  }, [requestId]);
   const { data, isLoading, isError, error } = useQuery<DetailPayload>({
     queryKey: [`/api/public/item-requests/${requestId}`],
     enabled: requestId !== "",
@@ -77,6 +82,14 @@ export function ItemDetailPage(): ReactElement {
   const [items, setItems] = useState<PublicItem[] | null>(null);
   useEffect(() => {
     if (data) setItems(data.items);
+  }, [data]);
+  useEffect(() => {
+    if (!data) return;
+    return beginEngagementLifecycle(`detail:item:${data.request.id}`, {
+      eventType: "detail_view",
+      requestKind: "item",
+      requestId: data.request.id,
+    });
   }, [data]);
 
   const [quantities, setQuantities] = useState<Record<string, string>>({});
@@ -386,9 +399,17 @@ export function ItemDetailPage(): ReactElement {
                               max={item.quantityRemaining}
                               disabled={soldOut}
                               value={quantities[item.id] ?? ""}
-                              onChange={(e) =>
-                                setQuantities((prev) => ({ ...prev, [item.id]: e.target.value }))
-                              }
+                              onChange={(e) => {
+                                setQuantities((prev) => ({ ...prev, [item.id]: e.target.value }));
+                                if (Number.parseInt(e.target.value, 10) > 0) {
+                                  reportEngagement({
+                                    eventType: "item_selected",
+                                    requestKind: "item",
+                                    requestId,
+                                    targetId: item.id,
+                                  });
+                                }
+                              }}
                               className="pb2-qty-input"
                             />
                           </div>
@@ -407,7 +428,19 @@ export function ItemDetailPage(): ReactElement {
                         )}
                         {item.productUrl != null && item.productUrl.trim() !== "" && (
                           <p style={{ margin: "10px 0 0", fontSize: 14, overflowWrap: "anywhere" }}>
-                            <a href={item.productUrl} target="_blank" rel="noreferrer">
+                            <a
+                              href={item.productUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={() =>
+                                reportEngagement({
+                                  eventType: "product_link_click",
+                                  requestKind: "item",
+                                  requestId,
+                                  targetId: item.id,
+                                })
+                              }
+                            >
                               {item.productUrl}
                             </a>
                           </p>
@@ -433,6 +466,15 @@ export function ItemDetailPage(): ReactElement {
                       contact information of the person at the requesting organization.
                     </p>
                     <form
+                      onFocusCapture={() => {
+                        if (formStarted.current) return;
+                        formStarted.current = true;
+                        reportEngagement({
+                          eventType: "form_start",
+                          requestKind: "item",
+                          requestId,
+                        });
+                      }}
                       onSubmit={(e) => {
                         e.preventDefault();
                         void submit();

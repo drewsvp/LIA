@@ -42,6 +42,7 @@ import { SubscribersPage as AdminSubscribersPage } from "./pages/admin/Subscribe
 import { RolesPage as AdminRolesPage } from "./pages/admin/RolesPage";
 import { EmailTemplatesPage as AdminEmailTemplatesPage } from "./pages/admin/EmailTemplatesPage";
 import { VolunteerCategoriesPage as AdminVolunteerCategoriesPage } from "./pages/admin/VolunteerCategoriesPage";
+import { AnalyticsPage as AdminAnalyticsPage } from "./pages/admin/AnalyticsPage";
 
 /** Built surfaces, by surface ID. Everything else renders its placeholder. */
 const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
@@ -81,6 +82,7 @@ const ADMIN_PAGES: Partial<Record<string, () => ReactElement>> = {
   "ADMIN-09": () => <AdminRolesPage />,
   "ADMIN-10": () => <AdminEmailTemplatesPage />,
   "ADMIN-11": () => <AdminVolunteerCategoriesPage />,
+  "ADMIN-12": () => <AdminAnalyticsPage />,
 };
 
 /**

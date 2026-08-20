@@ -26,6 +26,7 @@ import { registerPublicRoutes } from "./public";
 import { registerMemberRoutes } from "./member";
 import { registerAdminRoutes } from "./admin";
 import { registerEmailTemplateAdminRoutes } from "./admin-email-templates";
+import { registerEngagementReportingRoutes } from "./engagement-reporting";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -504,11 +505,12 @@ export function registerRoutes(app: Express): void {
       }
       const personId = session.user.personId;
       const memberCtx = { kind: "member" as const, userId: session.user.id };
-      const [pledges, signups, volunteerInterests, matchingVolunteerAlerts] = await Promise.all([
+      const [pledges, signups, volunteerInterests, matchingVolunteerAlerts, recentlyViewed] = await Promise.all([
         dal.pledges.listByPerson(SYSTEM, personId),
         dal.signups.listByPerson(SYSTEM, personId),
         dal.volunteerInterests.listOptionsForPerson(memberCtx, personId),
         dal.volunteerAlerts.getForUser(memberCtx, session.user.id),
+        dal.requestEngagement.listRecentlyViewedForUser(SYSTEM, session.user.id, personId),
       ]);
       res.json({
         firstName: session.user.firstName,
@@ -516,6 +518,7 @@ export function registerRoutes(app: Express): void {
         email: session.user.email,
         pledges,
         signups,
+        recentlyViewed,
         volunteerInterests,
         matchingVolunteerAlertsEnabled: matchingVolunteerAlerts.enabled,
         matchingVolunteerAlertsEligible: session.user.kind === "supporter" && session.user.status === "active",
@@ -603,6 +606,9 @@ export function registerRoutes(app: Express): void {
 
   // ---- ADMIN-10 Automated emails (staff-admin only).
   registerEmailTemplateAdminRoutes(app);
+
+  // ---- Aggregate request analytics for organization members and staff admins.
+  registerEngagementReportingRoutes(app);
 
   // ---- Public read/write API for the PB surfaces.
   registerPublicRoutes(app);
