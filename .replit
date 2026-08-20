@@ -9,7 +9,7 @@ expertMode = true
 [userenv]
 
 [userenv.shared]
-EMAIL_FROM_ADDRESS = "info@svpsacramento.org"
+EMAIL_FROM_ADDRESS = "info@defendingthecause.org"
 EMAIL_FROM_NAME = "Love in Action"
 STAFF_NOTIFY_PRIMARY = "tiffany@defendingthecause.org"
 STAFF_NOTIFY_SECONDARY = "christina@defendingthecause.org"
