@@ -1,9 +1,9 @@
 /**
  * Digest runs — durable state for the weekly "New Needs" digest (task 58).
  *
- * The unique run_date is the restart-proof once-per-Thursday guard: claiming
- * a date is an insert that either succeeds (this process owns the run) or
- * conflicts (the date is already claimed). A run left at 'running' by a
+ * The unique occurrence_key is the restart-proof schedule guard: claiming an
+ * occurrence either succeeds (this process owns it) or conflicts (it is
+ * already claimed). A run left at 'running' by a
  * crash is RESUMED, not re-created — per-recipient idempotency comes from
  * the email_log once-only index on (template, 'digest_run', run id, email).
  *
@@ -11,12 +11,13 @@
  * (window_start, window_end], so no 'active' transition is ever covered by
  * two runs and none can fall between them.
  */
-import { q, withDbContext, type DbContext } from "../db/client";
+import { pool, q, withDbContext, type DbContext } from "../db/client";
 
 export type DigestRunStatus = "running" | "sent" | "skipped_empty";
 
 export type DigestRun = {
   id: string;
+  occurrenceKey: string;
   runDate: string;
   windowStart: string;
   windowEnd: string;
@@ -30,7 +31,7 @@ export type DigestRun = {
   completedAt: string | null;
 };
 
-const COLS = `id, run_date as "runDate", window_start as "windowStart", window_end as "windowEnd",
+const COLS = `id, occurrence_key as "occurrenceKey", run_date as "runDate", window_start as "windowStart", window_end as "windowEnd",
   status, needs_count as "needsCount", recipients_count as "recipientsCount", note,
   needs_payload as "needsPayload", created_at as "createdAt", completed_at as "completedAt"`;
 
@@ -40,28 +41,63 @@ export type ClaimResult =
   | null;
 
 /**
- * Claim runDate (YYYY-MM-DD, the LA date) or resume its unfinished run.
+ * Serialize complete digest scheduler passes across processes. The advisory
+ * lock is held on one dedicated pool connection while the callback's normal
+ * RLS-scoped DAL work uses other connections. A dropped connection releases
+ * the lock automatically.
+ */
+export async function tryWithSchedulerLock<T>(
+  fn: () => Promise<T>,
+): Promise<{ acquired: false } | { acquired: true; result: T }> {
+  const client = await pool.connect();
+  let acquired = false;
+  try {
+    const lock = await client.query<{ acquired: boolean }>(
+      `select pg_try_advisory_lock(118041, 1) as acquired`,
+    );
+    acquired = lock.rows[0]?.acquired === true;
+    if (!acquired) return { acquired: false };
+    return { acquired: true, result: await fn() };
+  } finally {
+    if (acquired) {
+      try {
+        await client.query(`select pg_advisory_unlock(118041, 1)`);
+      } catch {
+        // Releasing or losing the session releases the advisory lock either way.
+      }
+    }
+    client.release();
+  }
+}
+
+/**
+ * Claim occurrenceKey for runDate (YYYY-MM-DD, the LA send date), or resume
+ * that occurrence's unfinished run.
  * window_start = watermark (last completed run's window_end; first run ever
  * falls back to 7 days before now). window_end = now() at claim time.
  */
-export async function claimOrResume(ctx: DbContext, runDate: string): Promise<ClaimResult> {
+export async function claimOrResume(
+  ctx: DbContext,
+  runDate: string,
+  occurrenceKey = `date:${runDate}`,
+): Promise<ClaimResult> {
   return withDbContext(ctx, async (c) => {
     const inserted = await q<DigestRun>(
       c,
-      `insert into digest_runs (run_date, window_start, window_end)
-       select $1::date,
+      `insert into digest_runs (run_date, occurrence_key, window_start, window_end)
+       select $1::date, $2,
               coalesce((select max(window_end) from digest_runs where status in ('sent','skipped_empty')),
                        now() - interval '7 days'),
               now()
-       on conflict (run_date) do nothing
+       on conflict (occurrence_key) do nothing
        returning ${COLS}`,
-      [runDate],
+      [runDate, occurrenceKey],
     );
     const fresh = inserted[0];
     if (fresh) return { run: fresh, resumed: false };
-    const existing = await q<DigestRun>(c, `select ${COLS} from digest_runs where run_date = $1::date`, [runDate]);
+    const existing = await q<DigestRun>(c, `select ${COLS} from digest_runs where occurrence_key = $1`, [occurrenceKey]);
     const row = existing[0];
-    if (!row) throw new Error(`digestRuns.claimOrResume: conflict but no row for ${runDate}`);
+    if (!row) throw new Error(`digestRuns.claimOrResume: conflict but no row for ${occurrenceKey}`);
     if (row.status !== "running") return null; // completed — restart must not re-send
     return { run: row, resumed: true };
   });
@@ -119,7 +155,7 @@ export async function finalize(
 }
 
 /**
- * Oldest run still 'running' from an earlier date — an interrupted run that
+ * Oldest run still 'running' through this date — an interrupted run that
  * must be finished BEFORE any newer date is claimed, on any weekday. Left
  * unfinished it would strand its remaining recipients and let the next
  * Thursday's watermark re-cover the same window (double send).
@@ -128,7 +164,10 @@ export async function oldestUnfinishedBefore(ctx: DbContext, date: string): Prom
   const rows = await withDbContext(ctx, (c) =>
     q<DigestRun>(
       c,
-      `select ${COLS} from digest_runs where status = 'running' and run_date < $1::date order by run_date limit 1`,
+      `select ${COLS} from digest_runs
+        where status = 'running' and run_date <= $1::date
+        order by run_date, created_at
+        limit 1`,
       [date],
     ),
   );
@@ -138,7 +177,7 @@ export async function oldestUnfinishedBefore(ctx: DbContext, date: string): Prom
 /** Most recent run, for the /admin/subscribers status line. */
 export async function latest(ctx: DbContext): Promise<DigestRun | null> {
   const rows = await withDbContext(ctx, (c) =>
-    q<DigestRun>(c, `select ${COLS} from digest_runs order by run_date desc limit 1`),
+    q<DigestRun>(c, `select ${COLS} from digest_runs order by run_date desc, created_at desc limit 1`),
   );
   return rows[0] ?? null;
 }

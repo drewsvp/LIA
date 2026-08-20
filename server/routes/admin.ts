@@ -1917,10 +1917,14 @@ export function registerAdminRoutes(app: Express): void {
         dal.digestSubscribers.counts(ctx),
         dal.digestRuns.latest(ctx),
       ]);
+      const schedule = await dal.emailSchedules.getSchedule(ctx, "digest_new_needs");
+      const scheduleWithNext = schedule
+        ? { ...schedule, nextSendAt: await dal.emailSchedules.nextSendAt(ctx, schedule) }
+        : null;
       const anyExist = counts.subscribed + counts.unsubscribed + counts.bounced > 0;
       // lastRun makes the digest job's last decision visible here — including
       // the skipped_empty weeks, which send nothing but are never silent.
-      res.json({ rows, counts, anyExist, lastRun });
+       res.json({ rows, counts, anyExist, lastRun, schedule: scheduleWithNext });
     } catch (err) {
       next(err);
     }
