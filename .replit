@@ -107,6 +107,10 @@ isValidation = true
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 5001
+externalPort = 3000
+
 [objectStorage]
 defaultBucketID = "replit-objstore-78fe5153-2524-4ba6-b9a4-13ff9d3bb310"
 
