@@ -346,15 +346,16 @@ async function main(): Promise<void> {
     "non-staff cannot discover analytics",
   );
 
-  // Viewed-but-not-converted audience follows authoritative pledge records.
+  // Outreach audience is supporter-only; staff/member browsing never becomes
+  // a selectable outreach identity.
   const beforeAudience = await json<{
     rows: Array<{ userId: string; requestId: string }>;
   }>("/api/admin/analytics/audience?pageSize=100", adminCookie);
   assert(
-    beforeAudience.body.rows.some(
+    !beforeAudience.body.rows.some(
       (row) => row.userId === adminSession.user.id && row.requestId === adminRequest.id,
     ),
-    "signed-in viewer appears before conversion",
+    "staff viewers stay outside the supporter outreach audience",
   );
   const pledge = await pool.query<{ id: string }>(
     `insert into item_pledges (legacy_wix_id, person_id, item_request_id, notes)
@@ -370,7 +371,7 @@ async function main(): Promise<void> {
     !afterAudience.body.rows.some(
       (row) => row.userId === adminSession.user.id && row.requestId === adminRequest.id,
     ),
-    "authoritative pledge excludes a converted viewer",
+    "staff viewers remain outside the outreach audience after conversion",
   );
   const convertedProfile = await json<Profile>("/api/supporter/profile", adminCookie);
   assert(

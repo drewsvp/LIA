@@ -8,7 +8,8 @@
  *   4. Product emails never block a user-facing response: queue the row in
  *      the request's DB context (queueProductEmail), respond, then dispatch
  *      (dispatchQueuedEmails). Only the twelve TEMPLATES.md templates go
- *      through the product path; the auth magic link uses sendEmail directly.
+ *      through the product path; the auth magic link and staff-composed,
+ *      explicitly confirmed request outreach use sendEmail directly.
  *   5. Every variable must resolve before a product send. An empty required
  *      value or a leftover literal placeholder blocks the send and records
  *      the row failed with the reason.
@@ -149,7 +150,7 @@ export function absoluteUrl(path: string): string {
  * unknown (mid-send crash or provider timeout). The admin resend path
  * refuses rows carrying it — resending could duplicate a delivered email.
  */
-export const MAY_HAVE_SENT_MARKER = "the provider MAY have sent this email";
+export const MAY_HAVE_SENT_MARKER = emailLog.MAY_HAVE_SENT_MARKER;
 
 /**
  * Bound on the provider call, deliberately far below the stranded-sweep
@@ -310,7 +311,8 @@ export async function dispatchQueuedEmails(pending: PendingDispatch[]): Promise<
 }
 
 /* ------------------------------------------------------------------ */
-/* Direct send — auth magic link only (repeatable, no entity binding). */
+/* Direct send — auth magic link or confirmed staff-composed outreach.      */
+/* Auth is repeatable; outreach binds request + recipient for once-only use. */
 /* ------------------------------------------------------------------ */
 
 export type SendEmailInput = {
@@ -328,6 +330,8 @@ export type SendEmailInput = {
   text?: string;
   /** CID-referenced inline attachments forwarded to the provider. */
   attachments?: readonly EmailInlineAttachment[];
+  /** Request outreach uses stable person identity, not mutable email, as its once-only boundary. */
+  oncePerPerson?: boolean;
 };
 
 export type SendEmailResult =
@@ -336,7 +340,10 @@ export type SendEmailResult =
 
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   // 1. Log row first — before any dispatch attempt.
-  const queued = await emailLog.insertQueued(SYSTEM, {
+  const insertQueued = input.oncePerPerson
+    ? emailLog.insertQueuedOnceByPerson
+    : emailLog.insertQueued;
+  const queued = await insertQueued(SYSTEM, {
     templateKey: input.templateKey,
     toEmail: input.toEmail,
     toPersonId: input.toPersonId ?? null,

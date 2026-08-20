@@ -68,6 +68,47 @@ async function main(): Promise<void> {
     const adminContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
     await adminContext.addCookies([adminCookie]);
     const adminPage = await adminContext.newPage();
+    const outreachFixture = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      firstName: "Preview",
+      lastName: "Supporter",
+      email: "preview-supporter@example.test",
+      requestKind: "item",
+      requestId: "22222222-2222-4222-8222-222222222222",
+      requestTitle: "School supply drive",
+      orgName: "Fixture Organization",
+      lastViewedAt: new Date().toISOString(),
+    };
+    await adminPage.route("**/api/admin/analytics/audience?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ rows: [outreachFixture], page: 1, pageSize: 25, total: 1, totalPages: 1 }),
+      });
+    });
+    await adminPage.route("**/api/admin/analytics/outreach/preview", async (route) => {
+      const body = route.request().postDataJSON() as { action: "email" | "export"; subject?: string; message?: string };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          action: body.action,
+          request: {
+            kind: outreachFixture.requestKind,
+            id: outreachFixture.requestId,
+            title: outreachFixture.requestTitle,
+            orgName: outreachFixture.orgName,
+          },
+          recipients: [outreachFixture],
+          requestedCount: 1,
+          eligibleCount: 1,
+          ineligibleCount: 0,
+          preferenceExcludedCount: 0,
+          confirmationToken: "signed-preview-fixture",
+          ...(body.action === "email" ? { subject: body.subject, message: body.message } : {}),
+        }),
+      });
+    });
     await adminPage.goto(`${BASE}/admin/analytics`, { waitUntil: "networkidle" });
     assert(await adminPage.getByRole("heading", { name: "Analytics", exact: true }).isVisible(), "mobile admin analytics loads");
     assert(await adminPage.getByRole("img", { name: /bar chart/i }).isVisible(), "daily chart has an accessible image label");
@@ -77,11 +118,36 @@ async function main(): Promise<void> {
     await adminPage.keyboard.press("Enter");
     const after = await conversionsSort.locator("xpath=..").getAttribute("aria-sort");
     assert(before !== after, "performance table sorting works from the keyboard", { before, after });
-    await assertContained(adminPage, ".adm-table-wrap", "mobile performance table");
+    await assertContained(adminPage, '[aria-label="Engagement report"] .adm-table-wrap', "mobile performance table");
     assert(
       await adminPage.getByRole("heading", { name: /Signed-In Viewers/ }).isVisible(),
       "viewed-but-not-converted audience state is visible",
     );
+    await adminPage.getByRole("checkbox", { name: /Select Preview Supporter/ }).check();
+    await adminPage.getByLabel("Email subject").fill("A request you viewed");
+    await adminPage.getByLabel("Email message").fill("Would you like more information about this request?");
+    await adminPage.getByRole("button", { name: "Review email" }).click();
+    await adminPage.getByRole("heading", { name: "Review email outreach" }).waitFor();
+    assert(
+      await adminPage.getByRole("heading", { name: "Review email outreach" }).isVisible() &&
+        await adminPage.getByRole("button", { name: "Confirm send to 1" }).isVisible(),
+      "email outreach has a distinct preview and confirmation step",
+    );
+    assert(
+      await adminPage.getByLabel("Email subject").isDisabled() &&
+        await adminPage.getByLabel("Email message").isDisabled(),
+      "reviewed email copy cannot change before confirmation",
+    );
+    await assertContained(adminPage, ".anl-outreach-confirm", "mobile outreach confirmation");
+    await adminPage.getByRole("button", { name: "Cancel" }).click();
+    await adminPage.getByRole("button", { name: "Review export" }).click();
+    await adminPage.getByRole("heading", { name: "Review export" }).waitFor();
+    assert(
+      await adminPage.getByRole("heading", { name: "Review export" }).isVisible() &&
+        await adminPage.getByRole("button", { name: "Confirm download of 1" }).isVisible(),
+      "export has a distinct preview and confirmation step",
+    );
+    await adminPage.getByRole("button", { name: "Cancel" }).click();
 
     const publicRequests = (await (await fetch(`${BASE}/api/public/item-requests`)).json()) as {
       requests: Array<{ id: string }>;

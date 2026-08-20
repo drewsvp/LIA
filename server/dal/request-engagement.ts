@@ -372,6 +372,25 @@ export type AudienceRow = {
   lastViewedAt: string;
 };
 
+export type OutreachRecipient = {
+  userId: string;
+  personId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  requestKind: RequestKind;
+  requestId: string;
+  requestTitle: string;
+  orgName: string;
+  lastViewedAt: string;
+};
+
+export type OutreachEligibility = {
+  request: { kind: RequestKind; id: string; title: string; orgName: string } | null;
+  recipients: OutreachRecipient[];
+  preferenceExcludedCount: number;
+};
+
 export async function listUnconvertedViewers(
   ctx: DbContext,
   filters: AnalyticsFilters,
@@ -398,7 +417,10 @@ export async function listUnconvertedViewers(
                r.title, r.org_name, u.person_id, p.first_name, p.last_name, p.email
           from viewed v
           join requests r using (request_kind, request_id)
-          join users u on u.id = v.user_id
+          join users u
+            on u.id = v.user_id
+           and u.status = 'active'
+           and u.kind = 'supporter'
           join people p on p.id = u.person_id
          where ($3::text is null or v.request_kind = $3)
            and ($4::uuid is null or r.org_id = $4)
@@ -432,5 +454,124 @@ export async function listUnconvertedViewers(
       analyticsParams(filters),
     );
     return { rows, total: totals[0]?.total ?? 0 };
+  });
+}
+
+/**
+ * Resolve a staff-selected outreach audience from the authoritative event and
+ * conversion records. The caller supplies only ids from an earlier screen;
+ * every current predicate is intentionally rechecked here before preview,
+ * export, or delivery. Anonymous rows cannot join because user_id is required.
+ *
+ * Volunteer outreach is communication about a volunteer opportunity, so it
+ * observes the explicit matching-alert consent setting. Item outreach has no
+ * equivalent communication preference in the current product.
+ */
+export async function listEligibleOutreachRecipients(
+  ctx: DbContext,
+  input: { requestKind: RequestKind; requestId: string; userIds: readonly string[] },
+): Promise<OutreachEligibility> {
+  if (input.userIds.length === 0) {
+    return { request: null, recipients: [], preferenceExcludedCount: 0 };
+  }
+  return withDbContext(ctx, async (client) => {
+    const rows = await q<
+      OutreachRecipient & {
+        preferenceEligible: boolean;
+      }
+    >(
+      client,
+      `with selected_request as (
+         select 'item'::text as request_kind, r.id as request_id, r.title,
+                o.name as org_name,
+                r.status = 'active'
+                  and o.kind = 'member_org'
+                  and o.status = 'approved'
+                  and not item_request_expired_on(
+                    r.deadline_type, r.deadline_date, r.expires_on,
+                    item_request_current_la_date()
+                  ) as available
+           from item_requests r
+           join organizations o on o.id = r.org_id
+          where $1 = 'item' and r.id = $2
+         union all
+         select 'volunteer'::text, r.id, r.title, o.name,
+                r.status = 'active'
+                  and o.kind = 'member_org'
+                  and o.status = 'approved'
+                  and not (
+                    (r.expires_on is not null and r.expires_on < item_request_current_la_date())
+                    or (
+                      r.deadline_type = 'date_specific'
+                      and r.deadline_date is not null
+                      and r.deadline_date < item_request_current_la_date()
+                    )
+                  )
+           from volunteer_requests r
+           join organizations o on o.id = r.org_id
+          where $1 = 'volunteer' and r.id = $2
+       ),
+       viewed as (
+         select e.user_id, max(e.created_at) as last_viewed_at
+           from request_engagement_events e
+          where e.user_id = any($3::uuid[])
+            and e.event_type = 'detail_view'
+            and e.request_kind = $1
+            and coalesce(e.item_request_id, e.volunteer_request_id) = $2
+          group by e.user_id
+       ),
+       unconverted as (
+         select v.user_id, v.last_viewed_at, sr.request_kind, sr.request_id,
+                sr.title, sr.org_name, u.person_id, p.first_name, p.last_name, p.email,
+                case when sr.request_kind = 'volunteer'
+                     then coalesce(vap.enabled, false)
+                     else true end as preference_eligible
+           from viewed v
+           join selected_request sr on sr.available
+           join users u
+             on u.id = v.user_id
+            and u.status = 'active'
+            and u.kind = 'supporter'
+           join people p on p.id = u.person_id
+           left join volunteer_alert_preferences vap on vap.user_id = u.id
+          where btrim(p.email) <> ''
+            and (
+              (sr.request_kind = 'item' and not exists (
+                select 1 from item_pledges ip
+                 where ip.person_id = u.person_id and ip.item_request_id = sr.request_id
+              ))
+              or
+              (sr.request_kind = 'volunteer' and not exists (
+                select 1 from volunteer_signups vs
+                 where vs.person_id = u.person_id and vs.volunteer_request_id = sr.request_id
+              ))
+            )
+       )
+       select user_id as "userId", person_id as "personId",
+              first_name as "firstName", last_name as "lastName", email,
+              request_kind as "requestKind", request_id as "requestId",
+              title as "requestTitle", org_name as "orgName",
+              last_viewed_at as "lastViewedAt",
+              preference_eligible as "preferenceEligible"
+         from unconverted
+        order by last_viewed_at desc, user_id`,
+      [input.requestKind, input.requestId, input.userIds],
+    );
+    const request = rows[0]
+      ? {
+          kind: rows[0].requestKind,
+          id: rows[0].requestId,
+          title: rows[0].requestTitle,
+          orgName: rows[0].orgName,
+        }
+      : null;
+    const preferenceExcludedCount = rows.filter((row) => !row.preferenceEligible).length;
+    return {
+      request,
+      recipients: rows
+        .filter((row) => row.preferenceEligible)
+        .map(({ preferenceEligible: _preferenceEligible, ...recipient }) => recipient),
+      preferenceExcludedCount,
+    };
   });
 }
