@@ -371,7 +371,9 @@ h3 {
   color: #0b3a5d;
   font-size: 15px;
   line-height: 1.65;
-  margin: 0 0 18px;
+  /* Same 30px of breathing room the tiles below already have, so the intro
+     does not sit flush against the hero image. */
+  margin: 30px 0 18px;
 }
 .pb0-tiles {
   display: grid;
@@ -414,6 +416,9 @@ h3 {
   font-size: 15px;
   line-height: 1.6;
   margin: 0 0 18px;
+}
+.pb0-callout-regular {
+  font-weight: 400;
 }
 .btn-navy {
   display: inline-block;
@@ -557,22 +562,36 @@ h3 {
   margin: 0 0 20px;
   text-align: center;
 }
+/* Body copy matches the homepage intro: same navy, same size, centered like
+   the headings above it. */
 .pb6-section p {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.75;
-  color: var(--color-text);
+  color: #0b3a5d;
+  text-align: center;
   margin: 0 0 14px;
 }
+/* The bullets stay left-aligned even between centered paragraphs — centered
+   list items read as ragged against their markers. */
 .pb6-section ul {
   list-style: disc;
   padding-left: 1.4em;
   margin: 0 0 20px;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.75;
-  color: var(--color-text);
+  color: #0b3a5d;
+  text-align: left;
 }
 .pb6-section li {
   margin-bottom: 10px;
+}
+/* "Meet Real Needs in Real Time" and the section that follows it read as one
+   thought; two full 52px bands between them left an obvious hole. */
+.pb6-section-pair {
+  padding-bottom: 16px;
+}
+.pb6-section-pair + .pb6-section {
+  padding-top: 16px;
 }
 /* CTA row: the buttons are inline <Link>s centered by an inline style on the
    wrapping <p>, so they need inline-block to honor .btn-teal's padding. */
@@ -788,7 +807,8 @@ h3 {
   align-items: flex-end;
   flex: 1 1 0;
   min-width: 0;
-  gap: 8px;
+  /* The two rows read as separate bands rather than one crowded block. */
+  gap: 15px;
 }
 .site-nav-top {
   display: flex;
@@ -843,10 +863,13 @@ a.site-nav-btn {
 }
 .site-nav-link {
   color: var(--color-navy);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.1em;
   white-space: nowrap;
+  /* Stated explicitly: these are the only plain text links in the header and
+     the global anchor underline made the row look like body copy. */
+  text-decoration: none;
 }
 .site-nav-switcher {
   font-family: inherit;

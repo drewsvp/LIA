@@ -2,12 +2,15 @@
  * MP-02 — Global navigation bar, present on every page.
  *
  * Desktop: logo left; the right side is a two-row stack inside one navigation
- * landmark, mirroring the main Alliance site's header. The floating top row
- * holds the two primary calls to action PROVIDE AN ITEM and VOLUNTEER as teal
- * buttons; the row beneath it holds ABOUT, ALLIANCE HOMEPAGE (external, new
- * tab) and MEMBER LOGIN (unauthenticated only) as plain text links, followed
- * by the in-portal utilities (org switcher, DASHBOARD, ADMIN, user menu) when
- * the session carries them.
+ * landmark, mirroring the main Alliance site's header. The floating top row is
+ * session-dependent: unauthenticated it holds the two primary calls to action
+ * PROVIDE AN ITEM and VOLUNTEER as teal buttons, authenticated it holds the
+ * in-portal controls (DASHBOARD, ADMIN, user menu) in their place. The row
+ * beneath it holds ABOUT, ALLIANCE HOMEPAGE (external, new tab) and MEMBER
+ * LOGIN (unauthenticated only) as plain text links — plus PROVIDE AN ITEM and
+ * VOLUNTEER once the top row has been handed to the portal controls, so those
+ * two destinations never leave the header — followed by the org switcher when
+ * the session carries one.
  * Mobile (§10): logo, hamburger, DASHBOARD/ADMIN buttons when authenticated;
  * the remaining items collapse behind the hamburger.
  *
@@ -187,13 +190,34 @@ export function NavBar(): ReactElement {
         {/* One navigation landmark wraps BOTH rows — splitting it would drop
             the top-row destinations out of screen-reader landmark navigation. */}
         <nav className="site-nav-stack" aria-label="Main navigation">
+          {/* The floating row is session-dependent: visitors see the two public
+              CTAs there, members see their portal controls in the same place.
+              The gating flags are unchanged — only where they render moved. */}
           <div className="site-nav-top">
-            <Link href="/items" className="site-nav-btn site-nav-btn-cta">
-              PROVIDE AN ITEM
-            </Link>
-            <Link href="/volunteer" className="site-nav-btn site-nav-btn-cta">
-              VOLUNTEER
-            </Link>
+            {showMemberLogin ? (
+              <>
+                <Link href="/items" className="site-nav-btn site-nav-btn-cta">
+                  PROVIDE AN ITEM
+                </Link>
+                <Link href="/volunteer" className="site-nav-btn site-nav-btn-cta">
+                  VOLUNTEER
+                </Link>
+              </>
+            ) : (
+              <>
+                {showDashboard ? (
+                  <Link href="/dashboard" className="site-nav-btn">
+                    DASHBOARD
+                  </Link>
+                ) : null}
+                {showAdmin ? (
+                  <Link href="/admin/organizations" className="site-nav-btn">
+                    ADMIN
+                  </Link>
+                ) : null}
+                {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
+              </>
+            )}
           </div>
 
           <div className="site-nav-right">
@@ -213,18 +237,21 @@ export function NavBar(): ReactElement {
                 MEMBER LOGIN
               </Link>
             ) : null}
+            {/* The two public destinations keep a home in the header once the
+                floating row is given over to portal controls — a signed-in
+                member can still give or volunteer without going back to the
+                home page. Same order the mobile panel lists them in. */}
+            {!showMemberLogin ? (
+              <>
+                <Link href="/items" className="site-nav-link">
+                  PROVIDE AN ITEM
+                </Link>
+                <Link href="/volunteer" className="site-nav-link">
+                  VOLUNTEER
+                </Link>
+              </>
+            ) : null}
             <OrgSwitcher className="site-nav-switcher" />
-            {showDashboard ? (
-              <Link href="/dashboard" className="site-nav-btn">
-                DASHBOARD
-              </Link>
-            ) : null}
-            {showAdmin ? (
-              <Link href="/admin/organizations" className="site-nav-btn">
-                ADMIN
-              </Link>
-            ) : null}
-            {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
           </div>
         </nav>
 
