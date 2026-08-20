@@ -264,24 +264,80 @@ export type TransitionInput = {
 };
 
 /**
- * Nightly expiry job (work order Part 3): active requests whose expires_on
- * has passed. "Current date" is the LA calendar date — the job runs at
- * 12:15 AM Pacific, and a request expiring on a date stays live through
- * that entire LA day no matter when a pass actually runs.
+ * The database function is the single expiry rule for item requests. It
+ * includes the legacy archive date and date-specific member deadlines, while
+ * keeping a request live through its full LA calendar day.
+ */
+const ITEM_REQUEST_EXPIRED = `item_request_expired_on(
+  r.deadline_type,
+  r.deadline_date,
+  r.expires_on,
+  item_request_current_la_date()
+)`;
+
+/**
+ * Nightly expiry job: active requests whose date-specific deadline or legacy
+ * expires_on date has passed. The database predicate intentionally matches
+ * public visibility and the pledge-write guard.
  */
 export async function expiredActiveIds(ctx: DbContext, limit: number): Promise<string[]> {
   const rows = await withDbContext(ctx, (c) =>
     q<{ id: string }>(
       c,
-      `select id from item_requests
-        where status = 'active' and expires_on is not null
-          and expires_on < (now() at time zone 'America/Los_Angeles')::date
-        order by expires_on, id
+      `select r.id from item_requests r
+        where r.status = 'active' and ${ITEM_REQUEST_EXPIRED}
+        order by least(
+          coalesce(r.expires_on, 'infinity'::date),
+          coalesce(case when r.deadline_type = 'date_specific' then r.deadline_date end, 'infinity'::date)
+        ), r.id
         limit $1`,
       [limit],
     ),
   );
   return rows.map((r) => r.id);
+}
+
+/**
+ * Archive one selected item request only if it is still active and expired
+ * after its row lock is acquired. This closes the selection-to-transition race:
+ * a member deadline extension that commits first wins and the job skips the row.
+ */
+export async function archiveExpiredIfEligibleInTx(c: PoolClient, requestId: string): Promise<boolean> {
+  const locked = await q<{ status: RequestStatus }>(
+    c,
+    `select status from item_requests where id = $1 for update`,
+    [requestId],
+  );
+  if (locked[0]?.status !== "active") return false;
+
+  const eligibility = await q<{ expired: boolean }>(
+    c,
+    `select ${ITEM_REQUEST_EXPIRED} as expired from item_requests r where r.id = $1`,
+    [requestId],
+  );
+  if (eligibility[0]?.expired !== true) return false;
+
+  await transitionStatusInTx(c, {
+    requestId,
+    to: "archived",
+    actorUserId: null,
+    note: "expired",
+    archivedReason: "expired",
+  });
+  return true;
+}
+
+/** Active item request that is still available under the shared expiry rule. */
+export async function getActiveAvailableById(ctx: DbContext, requestId: string): Promise<ItemRequest | null> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<ItemRequest>(
+      c,
+      `select ${COLS} from item_requests r
+        where r.id = $1 and r.status = 'active' and not (${ITEM_REQUEST_EXPIRED})`,
+      [requestId],
+    ),
+  );
+  return rows[0] ?? null;
 }
 
 export async function getById(ctx: DbContext, requestId: string): Promise<ItemRequest | null> {
@@ -313,7 +369,7 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
   );
 }
 
-/** Active requests of approved orgs with public org fields (PB-01). */
+/** Active, unexpired requests of approved orgs with public org fields (PB-01). */
 export async function listActivePublic(ctx: DbContext): Promise<PublicItemRequest[]> {
   type Row = ItemRequest & {
     orgName: string;
@@ -329,7 +385,8 @@ export async function listActivePublic(ctx: DbContext): Promise<PublicItemReques
       `select ${COLS}, o.name as "orgName", o.slug as "orgSlug", o.mission as "orgMission",
               o.website_url as "orgWebsiteUrl", o.city as "orgCity", o.logo_url as "orgLogoUrl"
          from item_requests r join organizations o on o.id = r.org_id
-        where r.status = 'active' and o.status = 'approved' and o.kind = 'member_org'
+         where r.status = 'active' and not (${ITEM_REQUEST_EXPIRED})
+           and o.status = 'approved' and o.kind = 'member_org'
         order by r.approved_at desc nulls last, r.created_at desc`,
     ),
   );
