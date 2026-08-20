@@ -3,10 +3,11 @@
  *
  * Desktop: logo left; the right side is a two-row stack inside one navigation
  * landmark, mirroring the main Alliance site's header. The floating top row
- * holds ABOUT, ALLIANCE HOMEPAGE (external, new tab) and MEMBER LOGIN
- * (unauthenticated only); the row beneath it holds the two primary calls to
- * action PROVIDE AN ITEM and VOLUNTEER, plus the in-portal utilities
- * (DASHBOARD, ADMIN, org switcher, user menu) when the session carries them.
+ * holds the two primary calls to action PROVIDE AN ITEM and VOLUNTEER as teal
+ * buttons; the row beneath it holds ABOUT, ALLIANCE HOMEPAGE (external, new
+ * tab) and MEMBER LOGIN (unauthenticated only) as plain text links, followed
+ * by the in-portal utilities (org switcher, DASHBOARD, ADMIN, user menu) when
+ * the session carries them.
  * Mobile (§10): logo, hamburger, DASHBOARD/ADMIN buttons when authenticated;
  * the remaining items collapse behind the hamburger.
  *
@@ -187,31 +188,31 @@ export function NavBar(): ReactElement {
             the top-row destinations out of screen-reader landmark navigation. */}
         <nav className="site-nav-stack" aria-label="Main navigation">
           <div className="site-nav-top">
-            <Link href="/about" className="site-nav-btn site-nav-btn-cta">
-              ABOUT
-            </Link>
-            <a
-              href="https://www.defendingthecause.org"
-              className="site-nav-btn site-nav-btn-cta"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              ALLIANCE HOMEPAGE
-            </a>
-            {showMemberLogin ? (
-              <Link href="/login" className="site-nav-btn site-nav-btn-cta">
-                MEMBER LOGIN
-              </Link>
-            ) : null}
-          </div>
-
-          <div className="site-nav-right">
             <Link href="/items" className="site-nav-btn site-nav-btn-cta">
               PROVIDE AN ITEM
             </Link>
             <Link href="/volunteer" className="site-nav-btn site-nav-btn-cta">
               VOLUNTEER
             </Link>
+          </div>
+
+          <div className="site-nav-right">
+            <Link href="/about" className="site-nav-link">
+              ABOUT
+            </Link>
+            <a
+              href="https://www.defendingthecause.org"
+              className="site-nav-link"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ALLIANCE HOMEPAGE
+            </a>
+            {showMemberLogin ? (
+              <Link href="/login" className="site-nav-link">
+                MEMBER LOGIN
+              </Link>
+            ) : null}
             <OrgSwitcher className="site-nav-switcher" />
             {showDashboard ? (
               <Link href="/dashboard" className="site-nav-btn">

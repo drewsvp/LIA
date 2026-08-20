@@ -701,6 +701,13 @@ a.site-nav-btn {
 .site-nav-btn-cta:hover {
   background: rgb(2, 122, 120);
 }
+.site-nav-link {
+  color: var(--color-navy);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
 .site-nav-switcher {
   font-family: inherit;
   font-size: 12px;
