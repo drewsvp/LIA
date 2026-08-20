@@ -10,6 +10,7 @@ import { ItemsBrowsePage } from "./pages/public/ItemsBrowsePage";
 import { ItemDetailPage } from "./pages/public/ItemDetailPage";
 import { VolunteerBrowsePage } from "./pages/public/VolunteerBrowsePage";
 import { VolunteerDetailPage } from "./pages/public/VolunteerDetailPage";
+import { VolunteerAlertOptOutPage } from "./pages/public/VolunteerAlertOptOutPage";
 import { AboutPage } from "./pages/public/AboutPage";
 import { DigestPage } from "./pages/public/DigestPage";
 import { HomePage } from "./pages/public/HomePage";
@@ -100,6 +101,9 @@ function AdminGate({ route }: { route: SurfaceRoute }): ReactElement | null {
 function AppRoutes(): ReactElement {
   return (
     <Switch>
+      <Route path="/volunteer-alerts/unsubscribe/:token">
+        <VolunteerAlertOptOutPage />
+      </Route>
       {SURFACE_ROUTES.map((route) => (
         <Route key={`${route.id}-${route.path}`} path={route.path}>
           {route.area === "admin" ? (

@@ -19,6 +19,7 @@ export * as organizations from "./organizations";
 export * as memberships from "./memberships";
 export * as populations from "./populations";
 export * as volunteerInterests from "./volunteer-interests";
+export * as volunteerAlerts from "./volunteer-alerts";
 export * as itemRequests from "./item-requests";
 export * as items from "./items";
 export * as volunteerRequests from "./volunteer-requests";

@@ -69,7 +69,7 @@ export async function listOptionsForPerson(
   });
 }
 
-async function replaceForPersonInTx(c: PoolClient, personId: string, categoryIds: string[]): Promise<void> {
+export async function replaceForPersonInTx(c: PoolClient, personId: string, categoryIds: string[]): Promise<void> {
   const currentRows = await q<{ categoryId: string }>(
     c,
     `select category_id as "categoryId"

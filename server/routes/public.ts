@@ -1127,4 +1127,21 @@ export function registerPublicRoutes(app: Express): void {
       next(err);
     }
   });
+
+  // Matching-alert links are opaque, one-way capabilities: they can only turn
+  // future alerts off. Replay is harmless and no account details are exposed.
+  app.post("/api/public/volunteer-alerts/unsubscribe", async (req: Request, res: Response, next) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const token = typeof body.token === "string" ? body.token.trim() : "";
+      if (!UUID_RE.test(token)) {
+        res.json({ ok: false });
+        return;
+      }
+      const disabled = await dal.volunteerAlerts.disableByToken(SYSTEM, token);
+      res.json({ ok: disabled });
+    } catch (err) {
+      next(err);
+    }
+  });
 }

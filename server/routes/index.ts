@@ -504,10 +504,11 @@ export function registerRoutes(app: Express): void {
       }
       const personId = session.user.personId;
       const memberCtx = { kind: "member" as const, userId: session.user.id };
-      const [pledges, signups, volunteerInterests] = await Promise.all([
+      const [pledges, signups, volunteerInterests, matchingVolunteerAlerts] = await Promise.all([
         dal.pledges.listByPerson(SYSTEM, personId),
         dal.signups.listByPerson(SYSTEM, personId),
         dal.volunteerInterests.listOptionsForPerson(memberCtx, personId),
+        dal.volunteerAlerts.getForUser(memberCtx, session.user.id),
       ]);
       res.json({
         firstName: session.user.firstName,
@@ -516,6 +517,8 @@ export function registerRoutes(app: Express): void {
         pledges,
         signups,
         volunteerInterests,
+        matchingVolunteerAlertsEnabled: matchingVolunteerAlerts.enabled,
+        matchingVolunteerAlertsEligible: session.user.kind === "supporter" && session.user.status === "active",
       });
     } catch (err) {
       next(err);
@@ -542,15 +545,33 @@ export function registerRoutes(app: Express): void {
         return;
       }
       const ctx = { kind: "member" as const, userId: session.user.id };
-      await dal.volunteerInterests.replaceForPerson(ctx, session.user.personId, rawIds as string[]);
+      const rawMatchingAlertsEnabled: unknown = req.body?.matchingVolunteerAlertsEnabled;
+      if (rawMatchingAlertsEnabled !== undefined && typeof rawMatchingAlertsEnabled !== "boolean") {
+        res.status(400).json({ message: "Choose whether matching volunteer alerts are on or off." });
+        return;
+      }
+      const matchingVolunteerAlerts = await dal.volunteerAlerts.saveSupporterPreferences(ctx, {
+        userId: session.user.id,
+        personId: session.user.personId,
+        categoryIds: rawIds as string[],
+        matchingAlertsEnabled: rawMatchingAlertsEnabled as boolean | undefined,
+      });
       const volunteerInterests = await dal.volunteerInterests.listOptionsForPerson(ctx, session.user.personId);
-      res.json({ message: "Volunteer interests saved.", volunteerInterests });
+      res.json({
+        message: "Volunteer interests and alert preference saved.",
+        volunteerInterests,
+        matchingVolunteerAlertsEnabled: matchingVolunteerAlerts.enabled,
+      });
     } catch (err) {
       if (
         err instanceof dal.volunteerInterests.VolunteerCategoryNotFoundError ||
         err instanceof dal.volunteerInterests.InactiveVolunteerCategoryError
       ) {
         res.status(409).json({ message: "The volunteer interest choices changed. Refresh the page and try again." });
+        return;
+      }
+      if (err instanceof dal.volunteerAlerts.VolunteerAlertSupporterOnlyError) {
+        res.status(403).json({ message: "Matching volunteer alerts are available only for supporter profiles." });
         return;
       }
       next(err);

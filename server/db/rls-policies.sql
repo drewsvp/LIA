@@ -279,6 +279,61 @@ create policy person_volunteer_interests_member_delete on person_volunteer_inter
     )
   );
 
+-- ---------------------------------------------------------- volunteer alert consent
+
+alter table volunteer_alert_preferences enable row level security;
+alter table volunteer_alert_preferences force row level security;
+
+drop policy if exists volunteer_alert_preferences_system_staff_all on volunteer_alert_preferences;
+create policy volunteer_alert_preferences_system_staff_all on volunteer_alert_preferences
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+drop policy if exists volunteer_alert_preferences_member_select on volunteer_alert_preferences;
+create policy volunteer_alert_preferences_member_select on volunteer_alert_preferences for select
+  using (
+    current_setting('app.context', true) = 'member'
+    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
+  );
+
+drop policy if exists volunteer_alert_preferences_member_insert on volunteer_alert_preferences;
+create policy volunteer_alert_preferences_member_insert on volunteer_alert_preferences for insert
+  with check (
+    current_setting('app.context', true) = 'member'
+    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
+    and exists (
+      select 1 from users u
+       where u.id = volunteer_alert_preferences.user_id
+         and u.kind = 'supporter'
+         and u.status = 'active'
+    )
+  );
+
+drop policy if exists volunteer_alert_preferences_member_update on volunteer_alert_preferences;
+create policy volunteer_alert_preferences_member_update on volunteer_alert_preferences for update
+  using (
+    current_setting('app.context', true) = 'member'
+    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
+  )
+  with check (
+    current_setting('app.context', true) = 'member'
+    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
+    and exists (
+      select 1 from users u
+       where u.id = volunteer_alert_preferences.user_id
+         and u.kind = 'supporter'
+         and u.status = 'active'
+    )
+  );
+
+alter table volunteer_match_alert_claims enable row level security;
+alter table volunteer_match_alert_claims force row level security;
+
+drop policy if exists volunteer_match_alert_claims_system_staff_all on volunteer_match_alert_claims;
+create policy volunteer_match_alert_claims_system_staff_all on volunteer_match_alert_claims
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
 -- ---------------------------------------------------------------- item_requests
 
 alter table item_requests enable row level security;

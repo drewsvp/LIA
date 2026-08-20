@@ -36,6 +36,8 @@ type ProfilePayload = {
     isActive: boolean;
     selected: boolean;
   }[];
+  matchingVolunteerAlertsEnabled: boolean;
+  matchingVolunteerAlertsEligible: boolean;
 };
 
 function formatDate(iso: string): string {
@@ -52,12 +54,14 @@ export function SupporterProfilePage(): ReactElement | null {
     enabled: session?.authenticated === true,
   });
   const [selectedInterests, setSelectedInterests] = useState<Set<string>>(new Set());
+  const [matchingAlertsEnabled, setMatchingAlertsEnabled] = useState(false);
   const [savingInterests, setSavingInterests] = useState(false);
   const [interestResult, setInterestResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (!data) return;
     setSelectedInterests(new Set(data.volunteerInterests.filter((interest) => interest.selected).map((interest) => interest.id)));
+    setMatchingAlertsEnabled(data.matchingVolunteerAlertsEnabled);
   }, [data]);
 
   async function saveVolunteerInterests(): Promise<void> {
@@ -68,9 +72,18 @@ export function SupporterProfilePage(): ReactElement | null {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryIds: [...selectedInterests] }),
+        body: JSON.stringify({
+          categoryIds: [...selectedInterests],
+          ...(data?.matchingVolunteerAlertsEligible
+            ? { matchingVolunteerAlertsEnabled: matchingAlertsEnabled }
+            : {}),
+        }),
       });
-      let payload: { message?: string; volunteerInterests?: ProfilePayload["volunteerInterests"] } = {};
+      let payload: {
+        message?: string;
+        volunteerInterests?: ProfilePayload["volunteerInterests"];
+        matchingVolunteerAlertsEnabled?: boolean;
+      } = {};
       try {
         payload = (await response.json()) as typeof payload;
       } catch {
@@ -79,8 +92,18 @@ export function SupporterProfilePage(): ReactElement | null {
       if (!response.ok) throw new Error(payload.message ?? "We couldn't save your volunteer interests.");
       if (payload.volunteerInterests) {
         queryClient.setQueryData<ProfilePayload>(["/api/supporter/profile"], (current) =>
-          current ? { ...current, volunteerInterests: payload.volunteerInterests! } : current,
+          current
+            ? {
+                ...current,
+                volunteerInterests: payload.volunteerInterests!,
+                matchingVolunteerAlertsEnabled:
+                  payload.matchingVolunteerAlertsEnabled ?? current.matchingVolunteerAlertsEnabled,
+              }
+            : current,
         );
+      }
+      if (typeof payload.matchingVolunteerAlertsEnabled === "boolean") {
+        setMatchingAlertsEnabled(payload.matchingVolunteerAlertsEnabled);
       }
       setInterestResult({ kind: "ok", text: payload.message ?? "Volunteer interests saved." });
     } catch (err) {
@@ -166,6 +189,23 @@ export function SupporterProfilePage(): ReactElement | null {
                   </label>
                 ))}
               </fieldset>
+              {data.matchingVolunteerAlertsEligible && (
+                <label className="supporter-alert-preference">
+                  <input
+                    type="checkbox"
+                    checked={matchingAlertsEnabled}
+                    disabled={savingInterests}
+                    onChange={(event) => {
+                      setInterestResult(null);
+                      setMatchingAlertsEnabled(event.target.checked);
+                    }}
+                  />
+                  <span>
+                    <strong>Email me when a new volunteer opportunity matches my interests.</strong>
+                    <small>Alerts are off until you turn them on. Every alert includes a link to stop future emails.</small>
+                  </span>
+                </label>
+              )}
               <button
                 type="button"
                 className="pub-btn supporter-interests-save"

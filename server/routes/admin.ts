@@ -723,7 +723,33 @@ export function registerAdminRoutes(app: Express): void {
           message += ` Approval email was already sent previously to ${alreadySentEmails.join(" and ")}, so no duplicate was queued.`;
         }
       }
+      const matchingDispatches = result.matchingVolunteerAlerts
+        .filter(
+          (alert): alert is Extract<(typeof result.matchingVolunteerAlerts)[number], { outcome: "queued" }> =>
+            alert.outcome === "queued",
+        )
+        .map((alert) => alert.dispatch);
+      const matchingSkipped = result.matchingVolunteerAlerts.filter(
+        (alert) => alert.outcome === "skipped_disabled",
+      ).length;
+      const matchingBlocked = result.matchingVolunteerAlerts.filter((alert) => alert.outcome === "blocked").length;
+      if (matchingDispatches.length > 0) {
+        message += ` ${matchingDispatches.length} matching volunteer alert${matchingDispatches.length === 1 ? "" : "s"} queued.`;
+      }
+      if (matchingSkipped > 0) {
+        message += ` ${matchingSkipped} matching volunteer alert${matchingSkipped === 1 ? " was" : "s were"} skipped because that automated email is disabled; the skipped ${matchingSkipped === 1 ? "row is" : "rows are"} in the Email log.`;
+      }
+      if (matchingBlocked > 0) {
+        message += ` ${matchingBlocked} matching volunteer alert${matchingBlocked === 1 ? "" : "s"} could not be rendered; ${matchingBlocked === 1 ? "the failure is" : "the failures are"} in the Email log.`;
+      }
+
       res.json({ request: result.request, message });
+      // Fan-out can be large. Respond as soon as every row and once-only claim
+      // is durably committed, then dispatch; the stranded-email sweep recovers
+      // any queued row left by a process stop in this window.
+      if (matchingDispatches.length > 0) {
+        void dispatchQueuedEmails(matchingDispatches);
+      }
     } catch (err) {
       if (err instanceof RequestNotFoundError) {
         sendNotFound(res);
