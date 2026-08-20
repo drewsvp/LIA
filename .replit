@@ -2,6 +2,7 @@ modules = ["python-3.12", "nodejs-20", "postgresql-16"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["chromium"]
 
 [agent]
 expertMode = true
@@ -34,6 +35,10 @@ args = "Start application"
 task = "workflow.run"
 args = "test-quick-login"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "responsive-nav"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -53,6 +58,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "NODE_ENV=development npx tsx scripts/test-quick-login.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "responsive-nav"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run test:responsive-nav"
 
 [workflows.workflow.metadata]
 isValidation = true

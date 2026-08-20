@@ -12,11 +12,19 @@ Run screenshots that change authentication state sequentially. Parallel preview
 captures can share a cookie jar, allowing one quick-login request to contaminate
 a capture intended to be signed out.
 
+For permanent Playwright checks on Replit, use the Nix-managed `chromium`
+system package and pass its discovered executable path to Playwright. Do not
+depend on Playwright's downloaded browser bundle in this environment.
+
 **Why:** breakpoint verification required exact 719px and 721px layouts, and
 parallel signed-out/staff captures produced misleading mixed-session results
-despite their harness labels.
+despite their harness labels. Playwright's bundled headless Chromium also
+failed at launch because its expected Linux shared libraries were absent,
+whereas the Nix Chromium wrapper carries the correct runtime environment.
 
 **How to apply:** use the harness only for verification, report
 `scrollWidth/clientWidth`, logo/control intersection, visible conditional
 links, and external-link target, then remove the harness and any temporary
 database fixture. Capture signed-out first and authenticated states afterward.
+For an automated script, resolve `chromium` from `PATH` and supply that path as
+the browser `executablePath`.
