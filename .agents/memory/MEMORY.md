@@ -18,7 +18,7 @@
 - [Policy migrations vs bootstrap](policy-migration-bootstrap.md) — migrations run before apply-rls on fresh DBs: policy drops need 'if exists'; rls-policies.sql must mirror policy changes.
 - [Digest run guard](digest-run-guard.md) — scheduled email jobs need a durable run-date claim + run-bound once-only fan-out, not the in-memory expiry guard; skipped weeks write visible rows.
 - [Supporter accounts](supporter-accounts.md) — users.kind='supporter', zero memberships is valid; login routes them to /profile; provisioning never rolls back the public submission.
-- [Need auto-image sourcing](need-image-sourcing.md) — Pexels-first, OpenAI fallback; uploaded-wins enforced in SQL; OpenAI images API rejects response_format — use gpt-image-1 (b64 default).
+- [Need auto-image sourcing](need-image-sourcing.md) — AI-generation only for item + volunteer, fixed per-kind guardrail prompt; uploaded-wins enforced in SQL; gpt-image-1 rejects response_format.
 - [Public image asset sets](public-image-asset-sets.md) — one photo backs several graphics with different baked-in wording/crops; match new art by its words + surface, never by photo or filename.
 - [Polymorphic trigger rows](plpgsql-trigger-row-branches.md) — shared PL/pgSQL triggers must branch before referencing table-specific NEW/OLD fields; an AND guard does not prevent field-resolution errors.
 - [Responsive preview isolation](responsive-preview-isolation.md) — exact-width iframe previews exercise real media queries; run authenticated screenshot states sequentially because the preview cookie jar is shared.

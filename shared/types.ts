@@ -199,6 +199,11 @@ export type VolunteerRequest = {
   details: string | null;
   eventLocation: string | null;
   imageUrl: string | null;
+  /** True when imageUrl was auto-sourced (AI-generated), not uploaded by a person. */
+  imageGenerated: boolean;
+  imageGenStatus: ImageGenStatus | null;
+  imageGenError: string | null;
+  imageGenRetries: number;
   peopleHelped: number | null;
   deadlineType: DeadlineType;
   deadlineDate: string | null;

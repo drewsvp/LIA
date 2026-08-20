@@ -514,6 +514,9 @@ export function registerMemberRoutes(app: Express): void {
         if (actorEmail === "") throw new Error("volunteer-submit: session carries no user email");
         try {
           const result = await submitVolunteerRequest({ request, actorUserId: userId, actorEmail });
+          // Auto-source a listing image in the background when no photo was
+          // provided — the submission never waits on or fails because of it.
+          sourceNeedImageInBackground(request, "volunteer");
           await dispatchQueuedEmails(result.dispatches);
           res.json({ ok: true });
         } catch (err) {
@@ -1027,7 +1030,7 @@ export function registerMemberRoutes(app: Express): void {
           const result = await submitItemRequest({ request, actorUserId: userId, actorEmail });
           // Auto-source a listing image in the background when no photo was
           // provided — the submission never waits on or fails because of it.
-          sourceNeedImageInBackground(request);
+          sourceNeedImageInBackground(request, "item");
           await dispatchQueuedEmails(result.dispatches);
           res.json({ ok: true });
         } catch (err) {

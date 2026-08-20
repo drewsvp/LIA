@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 4ViColEVaqUcXRqJj07LuZbmQjNFkYzy7YZ47hrms2LVi6Yb5gChaSHbsaGz6hk
+\restrict LUdF4o5cXHpgB963LvubKgfYt6bpgLQGZy4TwnfxcxJP9zXnEzPudqlAvQdYlQf
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -1020,9 +1020,14 @@ CREATE TABLE public.volunteer_requests (
     created_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    image_generated boolean DEFAULT false NOT NULL,
+    image_gen_status text,
+    image_gen_error text,
+    image_gen_retries integer DEFAULT 0 NOT NULL,
     CONSTRAINT volunteer_requests_archived_reason_check CHECK ((archived_reason = ANY (ARRAY['manual'::text, 'expired'::text, 'fulfilled'::text]))),
     CONSTRAINT volunteer_requests_deadline_date_required CHECK (((deadline_type <> 'date_specific'::text) OR (deadline_date IS NOT NULL))),
     CONSTRAINT volunteer_requests_deadline_type_check CHECK ((deadline_type = ANY (ARRAY['date_specific'::text, 'until_fulfilled'::text, 'ongoing'::text]))),
+    CONSTRAINT volunteer_requests_image_gen_status_check CHECK ((image_gen_status = ANY (ARRAY['pending'::text, 'succeeded'::text, 'failed'::text]))),
     CONSTRAINT volunteer_requests_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'pending'::text, 'active'::text, 'archived'::text])))
 );
 
@@ -2503,5 +2508,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 4ViColEVaqUcXRqJj07LuZbmQjNFkYzy7YZ47hrms2LVi6Yb5gChaSHbsaGz6hk
+\unrestrict LUdF4o5cXHpgB963LvubKgfYt6bpgLQGZy4TwnfxcxJP9zXnEzPudqlAvQdYlQf
 

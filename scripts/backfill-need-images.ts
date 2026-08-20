@@ -2,14 +2,14 @@
  * One-time backfill: source images for active item requests that still show
  * the gray placeholder (image_url IS NULL).
  *
- * Uses sourceNeedImage (Pexels-first, OpenAI fallback) — identical to the
+ * Uses sourceNeedImage (AI generation, D67) — identical to the
  * submission-time pipeline. Uploaded-photo-wins and failure recording behave
  * exactly as they do in production:
  *   • success → image_gen_status = 'succeeded', image_url set
  *   • failure → image_gen_status = 'failed', image_gen_error set (visible in
  *               the admin request panel so staff can Regenerate individually)
  *
- * Runs with a concurrency cap so we don't hammer Pexels / OpenAI.
+ * Runs with a concurrency cap so we don't hammer OpenAI.
  *
  * Usage:
  *   npx tsx scripts/backfill-need-images.ts
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   await pool(targets, CONCURRENCY, async (target, i) => {
     const prefix = `[${i + 1}/${targets.length}] ${target.id} "${target.title}"`;
     try {
-      const result = await sourceNeedImage(target.id, { overwriteGenerated: false });
+      const result = await sourceNeedImage("item", target.id, { overwriteGenerated: false });
       if (result.request.imageUrl !== null) {
         console.log(`${prefix}: ✓ ${result.source} image stored`);
         succeeded++;

@@ -1,11 +1,17 @@
 /**
- * Auto-sourced images for item requests (needs).
+ * Auto-sourced images for item requests and volunteer requests.
  *
- * Sourcing order (user decision, Aug 2026): try a Pexels stock-photo search
- * first (free, real photos); when Pexels finds nothing, fall back to OpenAI
- * image generation. Either way the bytes land in the app's own object
- * storage via storeImage — external provider URLs are never written to the
- * database (Handbook §7, same rule as uploads).
+ * Sourcing is AI generation only (D67). Stock-photo search was removed: a
+ * keyword match has no mechanism to constrain who or what appears in frame,
+ * so it can misrepresent the requester. Generation runs every image through
+ * the same fixed guardrail block below — a shared core (never-show list,
+ * house style) plus a per-kind people/category section. The bytes land in the
+ * app's own object storage via storeImage; external provider URLs are never
+ * written to the database (Handbook §7, same rule as uploads).
+ *
+ * Both kinds share this one module rather than a copied twin: the guardrail
+ * and prompt logic is the single source of truth, and everything table-shaped
+ * is reached through a per-kind DAL adapter.
  *
  * Uploaded-photo-wins is enforced in the DAL (recordGeneratedImage): an
  * automatic write only fills a NULL image_url; a staff regenerate may also
@@ -17,11 +23,12 @@
  * recorded on the row (image_gen_status = 'failed' + message) so it is
  * visible on the admin request panel, where staff can retry via Regenerate.
  */
-import { SYSTEM } from "../db/client";
+import { SYSTEM, type DbContext } from "../db/client";
 import * as itemRequests from "../dal/item-requests";
 import * as items from "../dal/items";
+import * as volunteerRequests from "../dal/volunteer-requests";
+import * as volunteerRoles from "../dal/volunteer-roles";
 import { storeImage, deleteImage } from "../storage/object-storage";
-import type { ItemRequest } from "../../shared/types";
 
 export class NeedImageError extends Error {
   constructor(message: string) {
@@ -36,36 +43,176 @@ async function timedFetch(url: string, init: RequestInit): Promise<globalThis.Re
   return fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 }
 
-type SourcedImage = { data: Buffer; filename: string; source: "stock" | "ai" };
+export type RequestKind = "item" | "volunteer";
 
-/** Pexels photo search. Returns null when nothing matches (that is not an error). */
-async function searchPexels(query: string): Promise<SourcedImage | null> {
-  const key = (process.env.PEXELS_API_KEY ?? "").trim();
-  if (key === "") return null;
-  const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=3&orientation=landscape`;
-  const res = await timedFetch(url, { headers: { Authorization: key } });
-  if (!res.ok) throw new NeedImageError(`Pexels search failed (HTTP ${res.status})`);
-  const body = (await res.json()) as { photos?: { src?: { large?: string } }[] };
-  const photoUrl = body.photos?.[0]?.src?.large;
-  if (!photoUrl) return null;
-  const dl = await timedFetch(photoUrl, {});
-  if (!dl.ok) throw new NeedImageError(`Pexels photo download failed (HTTP ${dl.status})`);
-  const ext = /\.png(\?|$)/i.test(photoUrl) ? "png" : "jpg";
-  return { data: Buffer.from(await dl.arrayBuffer()), filename: `stock.${ext}`, source: "stock" };
+/**
+ * The common shape the prompt builder and sourcing logic need, whichever
+ * table backs the row. Both ItemRequest and VolunteerRequest satisfy it.
+ */
+export type ImageableRequest = {
+  id: string;
+  title: string;
+  description: string | null;
+  imageUrl: string | null;
+  imageGenerated: boolean;
+};
+
+type KindAdapter = {
+  getById: (ctx: DbContext, id: string) => Promise<ImageableRequest | null>;
+  markImageGenPending: (ctx: DbContext, id: string) => Promise<boolean>;
+  recordGeneratedImage: (
+    ctx: DbContext,
+    id: string,
+    url: string,
+    opts: { overwriteGenerated: boolean },
+  ) => Promise<ImageableRequest | null>;
+  recordImageGenFailure: (ctx: DbContext, id: string, message: string) => Promise<void>;
+  clearGeneratedImage: (ctx: DbContext, id: string) => Promise<ImageableRequest | null>;
+  /** Child names used as prompt context: item names, or volunteer role names. */
+  listSubNames: (ctx: DbContext, requestId: string) => Promise<string[]>;
+};
+
+const adapters: Record<RequestKind, KindAdapter> = {
+  item: {
+    getById: itemRequests.getById,
+    markImageGenPending: itemRequests.markImageGenPending,
+    recordGeneratedImage: itemRequests.recordGeneratedImage,
+    recordImageGenFailure: itemRequests.recordImageGenFailure,
+    clearGeneratedImage: itemRequests.clearGeneratedImage,
+    listSubNames: async (ctx, requestId) => (await items.listByRequest(ctx, requestId)).map((i) => i.name),
+  },
+  volunteer: {
+    getById: volunteerRequests.getById,
+    markImageGenPending: volunteerRequests.markImageGenPending,
+    recordGeneratedImage: volunteerRequests.recordGeneratedImage,
+    recordImageGenFailure: volunteerRequests.recordImageGenFailure,
+    clearGeneratedImage: volunteerRequests.clearGeneratedImage,
+    listSubNames: async (ctx, requestId) => (await volunteerRoles.listByRequest(ctx, requestId)).map((r) => r.name),
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Guardrails. Held fixed for every generation of a kind — never conditional on
+// the individual request. Adapted from the trauma-informed image guardrails,
+// with one deliberate, documented reversal: people ARE shown (Tiffany, Aug 20
+// 2026) because a child asleep in the crib or a real volunteer moment drives
+// donation intent more than an unused product shot. The never-show list is
+// unchanged; this is warm and ordinary, not a staged appeal.
+// ---------------------------------------------------------------------------
+
+const GUARDRAIL_CORE = `
+CORE RULE: Depict the item or activity genuinely in use — warm and
+ordinary, never deprivation, never a staged charity moment.
+
+NEVER SHOW: empty containers, bare shelves, unmade beds; worn, dirty,
+damaged, or secondhand-looking goods — nothing shown is ever worn,
+soiled, faded, or broken, even while being actively used; items on the
+ground or in disarray; cluttered, dim, or unsanitary settings;
+institutional settings (shelters, waiting rooms, intake desks, fluorescent
+light); charity iconography (donation bins, collection boxes, giving
+hands, checks, coins); cash, currency, price tags; visible distress,
+anguish, or downcast/averted gaze; before/after or rescue framing; any
+figure positioned above, reaching down to, or handing something to another
+figure; violence, weapons, restraints, needles; religious symbols or
+devotional imagery; brand marks or legible packaging; any text, words,
+letters, or signage.
+
+ALWAYS SHOW: items or settings brand-new and pristine, even mid-use; warm
+soft daylight; uncluttered composition with generous negative space; a
+domestic, cared-for surface or setting (light wood, linen, clean counter);
+natural texture; genuine, contented engagement — never posed, never
+transactional.
+
+SAFETY: any person shown, adult or child, is fully clothed in ordinary
+daily wear appropriate to the scene. The one expected exception is a
+diaper worn as intended, depicted exactly as in standard baby product
+photography — never suggestive, never the sole focus of the composition.
+
+HOUSE STYLE (hold fixed, vary only the subject):
+- Lighting: soft diffused daylight, single source upper-left, gentle
+  falloff, no harsh shadows or artificial color.
+- Camera: 50mm-equivalent, f/4, eye-level or slight three-quarter overhead;
+  subject fills roughly the center 60% of frame.
+- Surface/background: warm neutral (light wood, cream linen, oatmeal, pale
+  sage), gently out of focus, no studio-white void, no busy environment.
+- Palette: warm neutrals, muted natural accents, nothing saturated or
+  brand-colored.
+- Finish: photographic, matte, slightly desaturated, fine natural grain, no
+  gloss, no HDR, no vignette.
+`.trim();
+
+const GUARDRAIL_ITEM = `
+PEOPLE: Always include a person actively using the item — wearing it,
+holding it, sitting on it, eating it, whatever "in use" means for this
+item. Faces visible, ordinary warm or contented expression, never
+distress. For child-relevant items (diapers, cribs, car seats, clothing,
+backpacks), show a child using the item — a baby settled and asleep in a
+crib, or a toddler wearing a fresh, unworn diaper, is the expected image,
+not an empty product shot. The item itself stays brand-new and pristine
+throughout — never soiled, faded, or worn-looking, no matter how it's
+being used.
+
+CATEGORY GUIDANCE (apply when the item matches):
+- Infant/child supplies (diapers, formula, wipes, car seats): shown in
+  use, always crisp and clean — a baby wearing a fresh unworn diaper, a
+  toddler in a like-new car seat, a bottle being held. Never soiled,
+  faded, or worn-looking.
+- Clothing/shoes: worn naturally by a child or adult, garment itself
+  looking brand-new — no wrinkles, no fading, no wear.
+- Furniture/bedding: in use and looking new — a baby settled in a crib
+  with a crisp unworn fitted sheet, a made bed with clean linens, a
+  family at a well-kept table.
+- Food/groceries: fresh and appetizing, being eaten or served at a table,
+  people present, abundant enough to read as a real meal.
+- School/learning supplies: a child at a desk using a backpack or books
+  that look new — no worn spines, no scuffed corners.
+- Hygiene/household goods: in use and looking fresh — hands washing with
+  a full clean bar or bottle, a brand-new-looking toothbrush, nothing
+  depleted or grubby.
+`.trim();
+
+const GUARDRAIL_VOLUNTEER = `
+PEOPLE: Always include people actively engaged in the activity — a
+volunteer and the person or people they're working with, mid-task, not
+posed. Faces visible, ordinary warm or contented expression, never
+distress. Depict the moment at eye level and side by side, never one
+figure positioned above or giving something down to another.
+
+CATEGORY GUIDANCE: depict the actual service happening, not an empty
+setting waiting for someone. A mentor and a child working through the
+same book together. A tutor and student both looking at the same page. A
+small group organizing supplies together at a table. Someone driving with
+a passenger beside them in easy conversation. The moment is warm,
+ordinary, and mid-activity, never staged as a photo-op and never framed
+as one person rescuing another.
+`.trim();
+
+type SourcedImage = { data: Buffer; filename: string };
+
+function buildPrompt(kind: RequestKind, request: ImageableRequest, subNames: string[]): string {
+  const subject = [
+    `A warm, realistic photograph of: ${request.title}.`,
+    subNames.length > 0
+      ? kind === "item"
+        ? `The items are: ${subNames.join(", ")}.`
+        : `The volunteer roles are: ${subNames.join(", ")}.`
+      : "",
+    request.description ? `Context: ${request.description.slice(0, 400)}` : "",
+    "Square 1:1 composition, suitable as a listing photo for a community donation request.",
+  ].filter((p) => p !== "");
+  return `${subject.join(" ")}\n\n${GUARDRAIL_CORE}\n\n${kind === "item" ? GUARDRAIL_ITEM : GUARDRAIL_VOLUNTEER}`;
 }
 
-/** OpenAI image generation fallback. */
-async function generateWithOpenAi(request: ItemRequest, itemNames: string[]): Promise<SourcedImage> {
+/** OpenAI image generation — the only sourcing path. */
+async function generateWithOpenAi(
+  kind: RequestKind,
+  request: ImageableRequest,
+  subNames: string[],
+): Promise<SourcedImage> {
   const key = (process.env.OPENAI_API_KEY ?? "").trim();
   if (key === "") {
-    throw new NeedImageError("No stock photo matched and OPENAI_API_KEY is not configured — image not generated.");
+    throw new NeedImageError("OPENAI_API_KEY is not configured — image not generated.");
   }
-  const parts = [
-    `A warm, realistic photograph of: ${request.title}.`,
-    itemNames.length > 0 ? `The items are: ${itemNames.join(", ")}.` : "",
-    request.description ? `Context: ${request.description.slice(0, 400)}` : "",
-    "Wide 16:10 composition, neutral background, natural light, suitable as a listing photo for a charity donation request. No text, no words, no people.",
-  ].filter((p) => p !== "");
   const res = await timedFetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -73,9 +220,11 @@ async function generateWithOpenAi(request: ItemRequest, itemNames: string[]): Pr
       // gpt-image-1 returns base64 image data by default (the older
       // response_format parameter is rejected by the current API).
       model: "gpt-image-1",
-      prompt: parts.join(" "),
+      prompt: buildPrompt(kind, request, subNames),
       n: 1,
-      size: "1536x1024",
+      // Native square generation, not a post-hoc crop — matches the square
+      // format used by request cards and social sharing.
+      size: "1024x1024",
       quality: "medium",
     }),
   });
@@ -92,61 +241,62 @@ async function generateWithOpenAi(request: ItemRequest, itemNames: string[]): Pr
   const body = (await res.json()) as { data?: { b64_json?: string }[] };
   const b64 = body.data?.[0]?.b64_json;
   if (!b64) throw new NeedImageError("OpenAI image generation returned no image data.");
-  return { data: Buffer.from(b64, "base64"), filename: "generated.png", source: "ai" };
+  return { data: Buffer.from(b64, "base64"), filename: "generated.png" };
 }
 
 export type SourceNeedImageResult = {
-  request: ItemRequest;
-  source: "stock" | "ai";
+  request: ImageableRequest;
+  /** Always "ai" now that stock search is gone; kept so callers stay explicit. */
+  source: "ai";
 };
 
 /**
- * Source, store, and record an image for one item request. Throws
+ * Source, store, and record an image for one request of either kind. Throws
  * NeedImageError with the failure already recorded on the row.
  * `overwriteGenerated` is the staff-regenerate mode.
  */
 export async function sourceNeedImage(
+  kind: RequestKind,
   requestId: string,
   opts: { overwriteGenerated: boolean },
 ): Promise<SourceNeedImageResult> {
-  const request = await itemRequests.getById(SYSTEM, requestId);
+  const dal = adapters[kind];
+  const request = await dal.getById(SYSTEM, requestId);
   if (!request) throw new NeedImageError(`Request not found: ${requestId}`);
   if (request.imageUrl !== null && !request.imageGenerated) {
     throw new NeedImageError("This request has an uploaded photo — it is never replaced automatically.");
   }
   if (request.imageUrl !== null && !opts.overwriteGenerated) {
-    return { request, source: request.imageGenerated ? "stock" : "ai" };
+    return { request, source: "ai" };
   }
 
-  const marked = await itemRequests.markImageGenPending(SYSTEM, requestId);
+  const marked = await dal.markImageGenPending(SYSTEM, requestId);
   if (!marked) throw new NeedImageError("This request is no longer eligible for pre-approval image changes.");
   try {
-    const requestItems = await items.listByRequest(SYSTEM, requestId);
-    const itemNames = requestItems.map((i) => i.name).slice(0, 5);
-    const query = [request.title, ...itemNames.slice(0, 2)].join(" ").slice(0, 100);
+    const subNames = (await dal.listSubNames(SYSTEM, requestId)).slice(0, 5);
 
-    const sourced = (await searchPexels(query)) ?? (await generateWithOpenAi(request, itemNames));
+    const sourced = await generateWithOpenAi(kind, request, subNames);
     const stored = await storeImage({ data: sourced.data, filename: sourced.filename });
     const previousUrl = request.imageUrl;
-    const updated = await itemRequests.recordGeneratedImage(SYSTEM, requestId, stored.url, {
+    const updated = await dal.recordGeneratedImage(SYSTEM, requestId, stored.url, {
       overwriteGenerated: opts.overwriteGenerated,
     });
     if (updated === null) {
       // An uploaded photo won the race — discard ours, uploaded wins.
       await deleteImage(stored.url).catch(() => undefined);
-      const current = await itemRequests.getById(SYSTEM, requestId);
+      const current = await dal.getById(SYSTEM, requestId);
       if (!current) throw new NeedImageError(`Request disappeared: ${requestId}`);
-      return { request: current, source: sourced.source };
+      return { request: current, source: "ai" };
     }
     if (previousUrl !== null && previousUrl !== stored.url) {
       // Regenerate replaced an old auto image; clean up the orphaned object.
       await deleteImage(previousUrl).catch(() => undefined);
     }
-    return { request: updated, source: sourced.source };
+    return { request: updated, source: "ai" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await itemRequests.recordImageGenFailure(SYSTEM, requestId, message).catch((recordErr) => {
-      console.error(`[need-image] could not record failure for ${requestId}:`, recordErr);
+    await dal.recordImageGenFailure(SYSTEM, requestId, message).catch((recordErr) => {
+      console.error(`[need-image] could not record failure for ${kind} ${requestId}:`, recordErr);
     });
     throw err instanceof NeedImageError ? err : new NeedImageError(message);
   }
@@ -156,13 +306,16 @@ export async function sourceNeedImage(
  * Fire-and-forget hook for the submit flow. Never throws; failures are
  * recorded on the row and logged.
  */
-export function sourceNeedImageInBackground(request: ItemRequest): void {
+export function sourceNeedImageInBackground(request: ImageableRequest, kind: RequestKind): void {
   if (request.imageUrl !== null) return; // a photo exists — nothing to fill
-  void sourceNeedImage(request.id, { overwriteGenerated: false })
-    .then((result) => {
-      console.log(`[need-image] ${request.id} "${request.title}": ${result.source} image stored`);
+  void sourceNeedImage(kind, request.id, { overwriteGenerated: false })
+    .then(() => {
+      console.log(`[need-image] ${kind} ${request.id} "${request.title}": ai image stored`);
     })
     .catch((err) => {
-      console.error(`[need-image] ${request.id} "${request.title}" failed:`, err instanceof Error ? err.message : err);
+      console.error(
+        `[need-image] ${kind} ${request.id} "${request.title}" failed:`,
+        err instanceof Error ? err.message : err,
+      );
     });
 }

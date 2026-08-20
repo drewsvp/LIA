@@ -861,9 +861,9 @@ export function registerAdminRoutes(app: Express): void {
     }
   }
 
-  // ---- Auto-sourced images (item requests only). Regenerate finds a stock
-  // photo (or AI-generates one) on demand; it never replaces an uploaded
-  // photo. Runs synchronously so staff see the result or the exact error.
+  // ---- Auto-sourced images. Regenerate AI-generates an image on demand; it
+  // never replaces an uploaded photo. Runs synchronously so staff see the
+  // result or the exact error. Item and volunteer requests behave identically.
   app.post("/api/admin/requests/item/:id/generate-image", requireStaff, async (req: Request, res: Response) => {
     const id = req.params.id ?? "";
     if (!UUID_RE.test(id)) {
@@ -893,11 +893,8 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({ message: "This request has an uploaded photo. Remove or replace it instead." });
         return;
       }
-      const result = await sourceNeedImage(id, { overwriteGenerated: true });
-      res.json({
-        request: result.request,
-        message: result.source === "stock" ? "Stock photo found and saved." : "AI image generated and saved.",
-      });
+      const result = await sourceNeedImage("item", id, { overwriteGenerated: true });
+      res.json({ request: result.request, message: "AI image generated and saved." });
     } catch (err) {
       if (err instanceof NeedImageError) {
         res.status(502).json({ message: `Image could not be sourced: ${err.message}` });
@@ -952,6 +949,98 @@ export function registerAdminRoutes(app: Express): void {
       res.status(500).json({ message: SAVE_FAILURE });
     }
   });
+
+  // ---- Volunteer twins of the two endpoints above. Same guards, same voice;
+  // only the table differs.
+  app.post("/api/admin/requests/volunteer/:id/generate-image", requireStaff, async (req: Request, res: Response) => {
+    const id = req.params.id ?? "";
+    if (!UUID_RE.test(id)) {
+      sendNotFound(res);
+      return;
+    }
+    const ctx = staffCtx(req);
+    try {
+      const request = await dal.volunteerRequests.getById(ctx, id);
+      if (!request) {
+        sendNotFound(res);
+        return;
+      }
+      const [editability, latestReturn] = await Promise.all([
+        dal.adminRequests.preApprovalEditability(ctx, "volunteer", id),
+        request.status === "draft" ? dal.adminRequests.latestReturn(ctx, "volunteer", id) : Promise.resolve(null),
+      ]);
+      if (!editability.editable || (request.status === "draft" && latestReturn === null)) {
+        res.status(409).json({
+          message:
+            editability.reason ??
+            "Only pending requests and drafts previously returned by staff can have their image changed.",
+        });
+        return;
+      }
+      if (request.imageUrl !== null && !request.imageGenerated) {
+        res.status(409).json({ message: "This request has an uploaded photo. Remove or replace it instead." });
+        return;
+      }
+      const result = await sourceNeedImage("volunteer", id, { overwriteGenerated: true });
+      res.json({ request: result.request, message: "AI image generated and saved." });
+    } catch (err) {
+      if (err instanceof NeedImageError) {
+        res.status(502).json({ message: `Image could not be sourced: ${err.message}` });
+        return;
+      }
+      console.error(`[admin] generate image failed for volunteer request ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
+    }
+  });
+
+  app.post(
+    "/api/admin/requests/volunteer/:id/remove-generated-image",
+    requireStaff,
+    async (req: Request, res: Response) => {
+      const id = req.params.id ?? "";
+      if (!UUID_RE.test(id)) {
+        sendNotFound(res);
+        return;
+      }
+      const ctx = staffCtx(req);
+      try {
+        const request = await dal.volunteerRequests.getById(ctx, id);
+        if (!request) {
+          sendNotFound(res);
+          return;
+        }
+        if (!request.imageGenerated || request.imageUrl === null) {
+          res.status(409).json({ message: "This request has no auto-sourced image to remove." });
+          return;
+        }
+        const [editability, latestReturn] = await Promise.all([
+          dal.adminRequests.preApprovalEditability(ctx, "volunteer", id),
+          request.status === "draft" ? dal.adminRequests.latestReturn(ctx, "volunteer", id) : Promise.resolve(null),
+        ]);
+        if (!editability.editable || (request.status === "draft" && latestReturn === null)) {
+          res.status(409).json({
+            message:
+              editability.reason ??
+              "Only pending requests and drafts previously returned by staff can have their image changed.",
+          });
+          return;
+        }
+        const previousUrl = request.imageUrl;
+        const updated = await dal.volunteerRequests.clearGeneratedImage(ctx, id);
+        if (updated === null) {
+          res.status(409).json({ message: "This request has no auto-sourced image to remove." });
+          return;
+        }
+        await deleteImage(previousUrl).catch((err) => {
+          console.error(`[admin] orphaned storage object ${previousUrl} after remove:`, err);
+        });
+        res.json({ request: updated, message: "Auto-sourced image removed." });
+      } catch (err) {
+        console.error(`[admin] remove generated image failed for volunteer request ${id}:`, err);
+        res.status(500).json({ message: SAVE_FAILURE });
+      }
+    },
+  );
 
   // --------------------------------------------------------------------------
   // ADMIN-03 — member approval queue (docs/specs/ADMIN-03.md)

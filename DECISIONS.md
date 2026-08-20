@@ -472,6 +472,16 @@ Quick login is unaffected: it calls `auth.api.magicLinkVerify` directly and neve
 
 Two nullable text columns (0004), stored exactly as entered, never concatenated (§8 rule). A resubscribe updates the stored names to the values just submitted, matching how the email address behaves. D27 stands.
 
+**D67. Item and volunteer request images are sourced by AI generation only. Pexels stock search is removed. Volunteer requests get the same auto-sourcing pipeline item requests already have.**
+
+Stock-photo search has no mechanism to constrain composition, so a keyword match can misrepresent the requester (demographics, context, framing) in ways a controlled generation prompt cannot — a request for a single mother needing a crib matched a stock photo of a man assembling one, and shipped without review. AI generation lets every image enforce the same guardrails every time. Volunteer requests were never wired into the original pipeline; there is no product reason for that gap, so this closes it. The cost difference (near-zero Pexels hits vs. ~$0.02–0.04/image AI generation) is immaterial at current and projected volume.
+
+The guardrail block is held fixed per kind, never varied per request: a shared core (never-show list, safety rule, house style) plus a per-kind people/category section. People **are** shown — a deliberate, documented reversal of the "no people" default in the source guardrail document (Tiffany, Aug 20 2026): a child asleep in the crib or a real volunteer moment drives donation intent more than an unused product shot. That is not a return to distress imagery; the never-show list (no distress, no rescue framing, no charity iconography) is intact, and the donated item itself never reads as worn, soiled, or secondhand even while actively in use.
+
+Generation has no post-hoc verification, so every auto-sourced image carries an **"AI-generated — review before approving."** label beside it on the admin approval screen. A full review queue is phase two; so is alt text on generated images.
+
+*(D66 was already taken by the magic-link decision above; this decision was drafted as D66 and renumbered.)*
+
 ---
 
 ## How to run O2 with Christina

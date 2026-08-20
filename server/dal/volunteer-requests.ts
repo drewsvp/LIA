@@ -9,16 +9,19 @@ import { q, withDbContext, type DbContext } from "../db/client";
 import type {
   ArchivedReason,
   DeadlineType,
+  ImageGenStatus,
   PublicOrganization,
   PublicVolunteerRequest,
   RequestStatus,
   VolunteerRequest,
 } from "../../shared/types";
 import { insertInTx } from "./approval-events";
-import { ALLOWED_TRANSITIONS } from "./item-requests";
+import { ALLOWED_TRANSITIONS, type ImageGenSweepRow } from "./item-requests";
 
 const COLS = `r.id, r.legacy_wix_id as "legacyWixId", r.org_id as "orgId", r.title, r.description,
   r.details, r.event_location as "eventLocation", r.image_url as "imageUrl",
+  r.image_generated as "imageGenerated", r.image_gen_status as "imageGenStatus",
+  r.image_gen_error as "imageGenError", r.image_gen_retries as "imageGenRetries",
   r.people_helped as "peopleHelped", r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate",
   r.expires_on as "expiresOn", r.contact_person_id as "contactPersonId", r.status,
   r.submitted_at as "submittedAt", r.approved_at as "approvedAt", r.approved_by as "approvedBy",
@@ -52,6 +55,9 @@ export type UpdateVolunteerRequestPatch = Partial<{
   deadlineDate: string | null;
   expiresOn: string | null;
   contactPersonId: string | null;
+  imageGenerated: boolean;
+  imageGenStatus: ImageGenStatus | null;
+  imageGenError: string | null;
 }>;
 
 const PATCH_COLUMNS: Record<keyof UpdateVolunteerRequestPatch, string> = {
@@ -65,7 +71,168 @@ const PATCH_COLUMNS: Record<keyof UpdateVolunteerRequestPatch, string> = {
   deadlineDate: "deadline_date",
   expiresOn: "expires_on",
   contactPersonId: "contact_person_id",
+  imageGenerated: "image_generated",
+  imageGenStatus: "image_gen_status",
+  imageGenError: "image_gen_error",
 };
+
+// ---------------------------------------------------------------------------
+// Auto-sourced images. Twin of the item_requests block — the uploaded-photo-
+// wins rule is enforced HERE, in SQL: an auto write only lands where image_url
+// is still null (or where the current image is itself auto-sourced, for staff
+// regenerate). Callers get null back when an uploaded photo won and must
+// discard their stored object. Activity guards use volunteer_signups and the
+// role counters, the volunteer twins of item_pledges / item quantities.
+// ---------------------------------------------------------------------------
+
+/** Mark an attempt in flight. Returns false when the request no longer qualifies. */
+export async function markImageGenPending(ctx: DbContext, requestId: string): Promise<boolean> {
+  return withDbContext(ctx, async (c) => {
+    const rows = await q<{ id: string }>(
+      c,
+      `update volunteer_requests set image_gen_status = 'pending', image_gen_error = null
+       where id = $1
+         and status in ('draft', 'pending')
+         and approved_at is null
+         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = volunteer_requests.id)
+         and not exists(
+           select 1 from volunteer_roles vr where vr.volunteer_request_id = volunteer_requests.id
+             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
+         )
+       returning id`,
+      [requestId],
+    );
+    return rows.length > 0;
+  });
+}
+
+/**
+ * Record a stored auto-sourced image. `overwriteGenerated` (staff regenerate)
+ * may replace a previous auto image; it never replaces an uploaded photo.
+ */
+export async function recordGeneratedImage(
+  ctx: DbContext,
+  requestId: string,
+  imageUrl: string,
+  opts: { overwriteGenerated: boolean },
+): Promise<VolunteerRequest | null> {
+  return withDbContext(ctx, async (c) => {
+    const guard = opts.overwriteGenerated ? "(r.image_url is null or r.image_generated)" : "r.image_url is null";
+    const rows = await q<VolunteerRequest>(
+      c,
+      `update volunteer_requests r
+       set image_url = $2, image_generated = true, image_gen_status = 'succeeded', image_gen_error = null
+       where r.id = $1 and ${guard}
+         and r.status in ('draft', 'pending')
+         and r.approved_at is null
+         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
+         and not exists(
+           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
+             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
+         )
+       returning ${COLS.replaceAll("r.", "")}`,
+      [requestId, imageUrl],
+    );
+    return rows[0] ?? null;
+  });
+}
+
+/** Record a failed attempt — visible on the admin surface, never silent. */
+export async function recordImageGenFailure(ctx: DbContext, requestId: string, message: string): Promise<void> {
+  await withDbContext(ctx, (c) =>
+    q(c, `update volunteer_requests set image_gen_status = 'failed', image_gen_error = $2
+          where id = $1 and status in ('draft', 'pending') and approved_at is null`, [
+      requestId,
+      message.slice(0, 500),
+    ]),
+  );
+}
+
+/**
+ * Find volunteer_requests that the image-sweep job should retry. Same two
+ * eligible states as the item twin: recorded 'failed', or 'pending' stranded
+ * by a process restart. Rows already retried `maxRetries` times are excluded —
+ * they stay visible on the admin panel at image_gen_status = 'failed'.
+ */
+export async function listFailedOrStrandedImageGen(
+  ctx: DbContext,
+  afterMinutes: number,
+  maxRetries: number,
+): Promise<ImageGenSweepRow[]> {
+  return withDbContext(ctx, (c) =>
+    q<ImageGenSweepRow>(
+      c,
+      `select id, title, image_gen_status as "imageGenStatus", image_gen_retries as "imageGenRetries"
+       from volunteer_requests
+       where image_gen_retries < $2
+         and (
+           image_gen_status = 'failed'
+           or (
+             image_gen_status = 'pending'
+             and updated_at < now() - ($1 || ' minutes')::interval
+           )
+         )`,
+      [afterMinutes, maxRetries],
+    ),
+  );
+}
+
+/**
+ * Atomically claim one volunteer_request for a sweep retry. See the item twin
+ * for the concurrency reasoning: 'failed' rows are always claimable, 'pending'
+ * rows only once old enough to be considered stranded, so a second concurrent
+ * sweep cannot double-attempt a row this one just claimed.
+ */
+export async function claimImageGenForSweep(
+  ctx: DbContext,
+  requestId: string,
+  maxRetries: number,
+  strandedAfterMinutes: number,
+): Promise<boolean> {
+  return withDbContext(ctx, async (c) => {
+    const rows = await q<{ id: string }>(
+      c,
+      `update volunteer_requests
+       set image_gen_status = 'pending',
+           image_gen_retries = image_gen_retries + 1,
+           image_gen_error   = null
+       where id = $1
+         and image_gen_retries < $2
+         and (
+           image_gen_status = 'failed'
+           or (
+             image_gen_status = 'pending'
+             and updated_at < now() - ($3 || ' minutes')::interval
+           )
+         )
+       returning id`,
+      [requestId, maxRetries, strandedAfterMinutes],
+    );
+    return rows.length > 0;
+  });
+}
+
+/** Remove an auto-sourced image. No-op (returns null) when the image was uploaded. */
+export async function clearGeneratedImage(ctx: DbContext, requestId: string): Promise<VolunteerRequest | null> {
+  return withDbContext(ctx, async (c) => {
+    const rows = await q<VolunteerRequest>(
+      c,
+      `update volunteer_requests r
+       set image_url = null, image_generated = false, image_gen_status = null, image_gen_error = null
+       where r.id = $1 and r.image_generated
+         and r.status in ('draft', 'pending')
+         and r.approved_at is null
+         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
+         and not exists(
+           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
+             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
+         )
+       returning ${COLS.replaceAll("r.", "")}`,
+      [requestId],
+    );
+    return rows[0] ?? null;
+  });
+}
 
 export type VolunteerTransitionInput = {
   requestId: string;

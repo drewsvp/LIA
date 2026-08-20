@@ -990,7 +990,9 @@ export function RequestsPage() {
                   {request.imageUrl && (
                     <>
                       <img className="adm-img" src={request.imageUrl} alt={request.title} />
-                      {request.imageGenerated && <p className="adm-muted">This image was auto-sourced, not uploaded.</p>}
+                      {request.imageGenerated && (
+                        <p className="adm-ai-label">AI-generated — review before approving.</p>
+                      )}
                     </>
                   )}
                   <p className="adm-upload">
@@ -1047,17 +1049,17 @@ export function RequestsPage() {
               {request.imageUrl ? (
                 <>
                   <img className="adm-img" src={request.imageUrl} alt={request.title} />
-                  {request.imageGenerated && <p className="adm-muted">This image was auto-sourced, not uploaded.</p>}
+                  {request.imageGenerated && <p className="adm-ai-label">AI-generated — review before approving.</p>}
                 </>
               ) : (
                 <p className="adm-muted">Image: {NOT_PROVIDED}</p>
               )}
-              {detail.type === "item" && request.imageGenStatus === "failed" && (
+              {request.imageGenStatus === "failed" && (
                 <p className="adm-alert">
                   Automatic image sourcing failed{request.imageGenError ? `: ${request.imageGenError}` : "."}
                 </p>
               )}
-              {detail.type === "item" && request.imageGenStatus === "pending" && !request.imageUrl && (
+              {request.imageGenStatus === "pending" && !request.imageUrl && (
                 <p className="adm-muted">An image is being sourced automatically…</p>
               )}
               {request.description ? <p>{request.description}</p> : <p className="adm-muted">Description: {NOT_PROVIDED}</p>}
@@ -1176,29 +1178,29 @@ export function RequestsPage() {
                 </p>
               )}
 
-              {/* Auto-sourced image controls — item requests only, never over an uploaded photo. */}
-              {detail.type === "item" &&
-                isEditable &&
-                (request.imageUrl === null || request.imageGenerated) && (
-                  <p className="adm-upload">
+              {/* Auto-sourced image controls — both kinds, never over an uploaded photo. */}
+              {isEditable && (request.imageUrl === null || request.imageGenerated) && (
+                <p className="adm-upload">
+                  <button
+                    className="adm-btn"
+                    disabled={busy}
+                    onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/generate-image`)}
+                  >
+                    {request.imageUrl ? "Regenerate auto image" : "Find an image automatically"}
+                  </button>{" "}
+                  {request.imageUrl !== null && request.imageGenerated && (
                     <button
                       className="adm-btn"
                       disabled={busy}
-                      onClick={() => void act(`/api/admin/requests/item/${request.id}/generate-image`)}
+                      onClick={() =>
+                        void act(`/api/admin/requests/${detail.type}/${request.id}/remove-generated-image`)
+                      }
                     >
-                      {request.imageUrl ? "Regenerate auto image" : "Find an image automatically"}
-                    </button>{" "}
-                    {request.imageUrl !== null && request.imageGenerated && (
-                      <button
-                        className="adm-btn"
-                        disabled={busy}
-                        onClick={() => void act(`/api/admin/requests/item/${request.id}/remove-generated-image`)}
-                      >
-                        Remove auto image
-                      </button>
-                    )}
-                  </p>
-                )}
+                      Remove auto image
+                    </button>
+                  )}
+                </p>
+              )}
 
               {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}
 
