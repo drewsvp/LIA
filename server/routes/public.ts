@@ -313,8 +313,8 @@ export function registerPublicRoutes(app: Express): void {
         res.status(404).json(NOT_FOUND_BODY);
         return;
       }
-      const request = await dal.itemRequests.getById(PUBLIC, id);
-      if (!request || request.status !== "active") {
+      const request = await dal.itemRequests.getActiveAvailableById(PUBLIC, id);
+      if (!request) {
         res.status(404).json(NOT_FOUND_BODY);
         return;
       }
@@ -393,6 +393,14 @@ export function registerPublicRoutes(app: Express): void {
         return;
       }
       if (gateRequest.status !== "active") {
+        res.status(410).json({ code: "request_not_active" });
+        return;
+      }
+      // An active request can still be closed before the nightly archive pass
+      // when its date-specific deadline (or legacy archive date) has passed.
+      // The SQL pledge trigger repeats this check under the write transaction
+      // so a midnight race cannot record a late donation.
+      if (!(await dal.itemRequests.getActiveAvailableById(PUBLIC, requestId))) {
         res.status(410).json({ code: "request_not_active" });
         return;
       }

@@ -379,7 +379,7 @@ export async function sourceNeedImage(
   }
 
   const marked = await dal.markImageGenPending(SYSTEM, requestId);
-  if (!marked) throw new NeedImageError("This request is no longer eligible for pre-approval image changes.");
+  if (!marked) throw new NeedImageError("This request is no longer eligible for auto-image changes.");
   try {
     const subNames = (await dal.listSubNames(SYSTEM, requestId)).slice(0, 5);
 
@@ -390,8 +390,10 @@ export async function sourceNeedImage(
       overwriteGenerated: opts.overwriteGenerated,
     });
     if (updated === null) {
-      // An uploaded photo won the race — discard ours, uploaded wins.
-      await deleteImage(stored.url).catch(() => undefined);
+      // An uploaded photo won the race — discard the generated image, uploaded wins.
+      await deleteImage(stored.url).catch((deleteErr) => {
+        console.error(`[need-image] orphaned generated image ${stored.url} after race loss:`, deleteErr);
+      });
       const current = await dal.getById(SYSTEM, requestId);
       if (!current) throw new NeedImageError(`Request disappeared: ${requestId}`);
       return { request: current, source: "ai" };

@@ -30,6 +30,9 @@ type QueueRow = {
   submittedAt: string | null;
   createdAt: string;
   returnedAt?: string | null;
+  deadlineType: "date_specific" | "until_fulfilled" | "ongoing";
+  deadlineDate: string | null;
+  expiresOn: string | null;
   orgId: string;
   orgName: string;
   orgCity: string | null;
@@ -87,10 +90,15 @@ type Detail = {
   requestContact: { firstName: string; lastName: string; email: string; phone: string | null } | null;
   children: ItemChild[] | RoleChild[];
   latestReturn: { note: string; createdAt: string } | null;
-  editability: { editable: boolean; reason: string | null };
+  editability: {
+    editable: boolean;
+    reason: string | null;
+    unapprovable: boolean;
+    unapprovalReason: string | null;
+  };
 };
 
-type PendingConfirm = { kind: "approve" | "archive" } | null;
+type PendingConfirm = { kind: "approve" | "archive" | "unapprove" } | null;
 
 // ── Edit-form shape ─────────────────────────────────────────────────────────
 
@@ -102,6 +110,7 @@ type EditItemChild = {
   condition: "new" | "gently_used" | "any";
   productUrl: string;
   quantityRequested: number;
+  participationFloor: number;
 };
 
 type EditRoleChild = {
@@ -110,6 +119,7 @@ type EditRoleChild = {
   name: string;
   description: string;
   quantityNeeded: number;
+  participationFloor: number;
 };
 
 type EditForm = {
@@ -155,6 +165,44 @@ function deadlineLabel(detail: Detail["request"]): string {
   return detail.deadlineType === "until_fulfilled" ? "Until fulfilled" : "Ongoing";
 }
 
+/** Dates from Postgres date columns are calendar values, not local instants. */
+function formatCalendarDate(value: string | null): string {
+  if (!value) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return "—";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return "—";
+  }
+  return date.toLocaleDateString("en-US", { dateStyle: "medium", timeZone: "UTC" });
+}
+
+function datePart(value: string | null): string | null {
+  const match = value && /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  return match ? match[1]! : null;
+}
+
+/**
+ * Legacy expires_on remains an active cutoff for every deadline mode. A
+ * date-specific deadline is an additional cutoff, so the first one wins.
+ */
+function expirationLabel(row: QueueRow): string {
+  const cutoffs = [
+    datePart(row.expiresOn),
+    row.deadlineType === "date_specific" ? datePart(row.deadlineDate) : null,
+  ].filter((date): date is string => date !== null);
+  if (cutoffs.length > 0) return formatCalendarDate(cutoffs.sort()[0]!);
+  return row.deadlineType === "until_fulfilled" ? "Until fulfilled" : row.deadlineType === "ongoing" ? "Ongoing" : "—";
+}
+
 async function postJson(
   path: string,
   body?: unknown,
@@ -186,6 +234,7 @@ function buildEditForm(detail: Detail): EditForm {
         condition: (c.condition as "new" | "gently_used" | "any") ?? "any",
         productUrl: c.productUrl ?? "",
         quantityRequested: c.quantityRequested,
+        participationFloor: Math.max(c.quantityClaimed, c.quantityReceived),
       }))
     : [];
   const roleChildren: EditRoleChild[] = detail.type === "volunteer"
@@ -195,6 +244,7 @@ function buildEditForm(detail: Detail): EditForm {
         name: c.name,
         description: c.description ?? "",
         quantityNeeded: c.quantityNeeded,
+        participationFloor: Math.max(c.quantityInterested, c.quantityConfirmed),
       }))
     : [];
   return {
@@ -232,6 +282,7 @@ function validateEditForm(form: EditForm, kind: RequestKind): string | null {
   )
     return "People helped must be a non-negative whole number.";
   if (kind === "item") {
+    if (form.itemChildren.length === 0) return "Add at least one item before saving this request.";
     for (const child of form.itemChildren) {
       if (!child.name.trim()) return "Each item must have a name.";
       if (!child.description.trim()) return "Each item must have a description.";
@@ -241,6 +292,7 @@ function validateEditForm(form: EditForm, kind: RequestKind): string | null {
       if (urlProblem) return urlProblem;
     }
   } else {
+    if (form.roleChildren.length === 0) return "Add at least one role before saving this request.";
     if (!form.details.trim()) return "Volunteer details are required.";
     if (!form.eventLocation.trim()) return "Event location is required.";
     for (const child of form.roleChildren) {
@@ -314,7 +366,16 @@ function ItemChildEditor({
         <div className="adm-child-actions">
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === 0} onClick={onMoveUp} aria-label="Move up">↑</button>
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === total - 1} onClick={onMoveDown} aria-label="Move down">↓</button>
-          <button type="button" className="adm-btn adm-btn-sm adm-btn-danger" onClick={onRemove} aria-label="Remove item">Remove</button>
+          <button
+            type="button"
+            className="adm-btn adm-btn-sm adm-btn-danger"
+            disabled={child.participationFloor > 0}
+            title={child.participationFloor > 0 ? "This item has donor activity and cannot be removed." : undefined}
+            onClick={onRemove}
+            aria-label="Remove item"
+          >
+            Remove
+          </button>
         </div>
       </div>
       <div className="adm-form-row">
@@ -330,9 +391,14 @@ function ItemChildEditor({
           Quantity Requested *
           <input
             type="number"
-            min={1}
+            min={Math.max(1, child.participationFloor)}
             value={child.quantityRequested}
-            onChange={(e) => onChange({ ...child, quantityRequested: Math.max(1, Number(e.target.value)) })}
+            onChange={(e) =>
+              onChange({
+                ...child,
+                quantityRequested: Math.max(1, child.participationFloor, Number(e.target.value)),
+              })
+            }
             style={{ minWidth: 100 }}
           />
         </label>
@@ -349,6 +415,11 @@ function ItemChildEditor({
           </select>
         </label>
       </div>
+      {child.participationFloor > 0 && (
+        <small className="adm-muted">
+          Minimum {child.participationFloor} because donors have already claimed or received items.
+        </small>
+      )}
       <div className="adm-form-row">
         <label style={{ flex: 1 }}>
           Description *
@@ -397,7 +468,16 @@ function RoleChildEditor({
         <div className="adm-child-actions">
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === 0} onClick={onMoveUp} aria-label="Move up">↑</button>
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === total - 1} onClick={onMoveDown} aria-label="Move down">↓</button>
-          <button type="button" className="adm-btn adm-btn-sm adm-btn-danger" onClick={onRemove} aria-label="Remove role">Remove</button>
+          <button
+            type="button"
+            className="adm-btn adm-btn-sm adm-btn-danger"
+            disabled={child.participationFloor > 0}
+            title={child.participationFloor > 0 ? "This role has volunteer activity and cannot be removed." : undefined}
+            onClick={onRemove}
+            aria-label="Remove role"
+          >
+            Remove
+          </button>
         </div>
       </div>
       <div className="adm-form-row">
@@ -413,13 +493,23 @@ function RoleChildEditor({
           Quantity Needed *
           <input
             type="number"
-            min={1}
+            min={Math.max(1, child.participationFloor)}
             value={child.quantityNeeded}
-            onChange={(e) => onChange({ ...child, quantityNeeded: Math.max(1, Number(e.target.value)) })}
+            onChange={(e) =>
+              onChange({
+                ...child,
+                quantityNeeded: Math.max(1, child.participationFloor, Number(e.target.value)),
+              })
+            }
             style={{ minWidth: 100 }}
           />
         </label>
       </div>
+      {child.participationFloor > 0 && (
+        <small className="adm-muted">
+          Minimum {child.participationFloor} because volunteers are already interested or confirmed.
+        </small>
+      )}
       <div className="adm-form-row">
         <label style={{ flex: 1 }}>
           Description *
@@ -495,7 +585,7 @@ export function RequestsPage() {
     }
   }
 
-  async function act(path: string, body?: unknown) {
+  async function act(path: string, body?: unknown, onSuccess?: () => void) {
     setBusy(true);
     setResult(null);
     try {
@@ -505,6 +595,7 @@ export function RequestsPage() {
         setConfirm(null);
         setReturning(false);
         setNote("");
+        onSuccess?.();
       }
     } catch {
       setResult({ kind: "error", text: FAILURE });
@@ -614,7 +705,15 @@ export function RequestsPage() {
       ...editForm,
       itemChildren: [
         ...editForm.itemChildren,
-        { _key: nextKey(), name: "", description: "", condition: "any", productUrl: "", quantityRequested: 1 },
+        {
+          _key: nextKey(),
+          name: "",
+          description: "",
+          condition: "any",
+          productUrl: "",
+          quantityRequested: 1,
+          participationFloor: 0,
+        },
       ],
     });
   }
@@ -646,7 +745,7 @@ export function RequestsPage() {
       ...editForm,
       roleChildren: [
         ...editForm.roleChildren,
-        { _key: nextKey(), name: "", description: "", quantityNeeded: 1 },
+        { _key: nextKey(), name: "", description: "", quantityNeeded: 1, participationFloor: 0 },
       ],
     });
   }
@@ -746,6 +845,7 @@ export function RequestsPage() {
               <th>Title</th>
               <th>Organization</th>
               <th>{tab === "returned" ? "Returned" : "Submitted"}</th>
+              <th>Expiration</th>
               <th>{typeFilter === "volunteer" ? "Roles" : typeFilter === "item" ? "Items" : "Items / roles"}</th>
             </tr>
           </thead>
@@ -772,6 +872,7 @@ export function RequestsPage() {
                   {row.orgCity ? ` — ${row.orgCity}` : ""}
                 </td>
                 <td>{formatDate(tab === "returned" ? (row.returnedAt ?? null) : row.submittedAt)}</td>
+                <td>{expirationLabel(row)}</td>
                 <td>{row.childCount}</td>
               </tr>
             ))}
@@ -991,7 +1092,7 @@ export function RequestsPage() {
                     <>
                       <img className="adm-img" src={request.imageUrl} alt={request.title} />
                       {request.imageGenerated && (
-                        <p className="adm-ai-label">AI-generated — review before approving.</p>
+                        <p className="adm-ai-label">AI-generated image.</p>
                       )}
                     </>
                   )}
@@ -1009,6 +1110,32 @@ export function RequestsPage() {
                       }}
                     />
                   </p>
+                  {(request.imageUrl === null || request.imageGenerated) && (
+                    <p className="adm-upload">
+                      <button
+                        type="button"
+                        className="adm-btn"
+                        disabled={busy}
+                        onClick={() =>
+                          void act(`/api/admin/requests/${detail.type}/${request.id}/generate-image`)
+                        }
+                      >
+                        {request.imageUrl ? "Regenerate auto image" : "Find an image automatically"}
+                      </button>{" "}
+                      {request.imageUrl !== null && request.imageGenerated && (
+                        <button
+                          type="button"
+                          className="adm-btn"
+                          disabled={busy}
+                          onClick={() =>
+                            void act(`/api/admin/requests/${detail.type}/${request.id}/remove-generated-image`)
+                          }
+                        >
+                          Remove auto image
+                        </button>
+                      )}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1049,7 +1176,7 @@ export function RequestsPage() {
               {request.imageUrl ? (
                 <>
                   <img className="adm-img" src={request.imageUrl} alt={request.title} />
-                  {request.imageGenerated && <p className="adm-ai-label">AI-generated — review before approving.</p>}
+                  {request.imageGenerated && <p className="adm-ai-label">AI-generated image.</p>}
                 </>
               ) : (
                 <p className="adm-muted">Image: {NOT_PROVIDED}</p>
@@ -1205,7 +1332,7 @@ export function RequestsPage() {
               {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}
 
               <div className="adm-actions">
-                {/* Edit button — available from pending and returned when editable */}
+                {/* Edit is independent of unapproval and remains available on active requests. */}
                 {isEditable && (
                   <button className="adm-btn" disabled={busy} onClick={startEdit}>
                     Edit Request
@@ -1230,9 +1357,18 @@ export function RequestsPage() {
                   </>
                 )}
                 {request.status === "active" && (
-                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
-                    Archive
-                  </button>
+                  <>
+                    <button
+                      className="adm-btn adm-btn-primary"
+                      disabled={busy || !detail.editability.unapprovable}
+                      onClick={() => setConfirm({ kind: "unapprove" })}
+                    >
+                      Unapprove
+                    </button>
+                    <button className="adm-btn" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
+                      Archive
+                    </button>
+                  </>
                 )}
                 {request.status === "archived" && (
                   <button
@@ -1259,6 +1395,12 @@ export function RequestsPage() {
                 <p className="adm-alert">{approveBlockedReason}</p>
               )}
 
+              {request.status === "active" &&
+                !detail.editability.unapprovable &&
+                detail.editability.unapprovalReason && (
+                  <p className="adm-alert">{detail.editability.unapprovalReason}</p>
+                )}
+
               {/* Not editable reason */}
               {!isEditable && detail.editability.reason && (
                 <p className="adm-muted" style={{ fontSize: 12, marginTop: 4 }}>
@@ -1266,11 +1408,37 @@ export function RequestsPage() {
                 </p>
               )}
 
+              {confirm?.kind === "unapprove" && (
+                <div className="adm-confirm">
+                  <p>
+                    Unapprove {request.title}? It will leave public view immediately, return to Pending, and become
+                    editable. No email is sent.
+                  </p>
+                  <button
+                    className="adm-btn adm-btn-primary"
+                    disabled={busy}
+                    onClick={() =>
+                      void act(
+                        `/api/admin/requests/${detail.type}/${request.id}/unapprove`,
+                        undefined,
+                        () => setTab("pending"),
+                      )
+                    }
+                  >
+                    Unapprove
+                  </button>
+                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+
               {confirm?.kind === "approve" && (
                 <div className="adm-confirm">
                   {/* §8 verbatim. */}
                   <p>
-                    Approve {request.title}? This publishes the request and emails {recipientsText}.
+                    Approve {request.title}? This publishes the request and sends any approval email not already
+                    delivered to {recipientsText}.
                   </p>
                   <button
                     className="adm-btn adm-btn-primary"

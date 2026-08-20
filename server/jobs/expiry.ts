@@ -43,20 +43,26 @@ type Kind = "item" | "volunteer";
 
 async function archiveOne(kind: Kind, requestId: string): Promise<"archived" | "skipped" | "failed"> {
   try {
-    await withDbContext(SYSTEM, async (c) => {
-      const input = {
+    const archived = await withDbContext(SYSTEM, async (c) => {
+      if (kind === "item") {
+        // Recheck the shared item-expiry rule after locking the row. Selection
+        // and transition are separate transactions, so a deadline extension
+        // that lands between them must prevent archival.
+        return dal.itemRequests.archiveExpiredIfEligibleInTx(c, requestId);
+      }
+      await dal.volunteerRequests.transitionStatusInTx(c, {
         requestId,
-        to: "archived" as const,
+        to: "archived",
         actorUserId: null,
         note: "expired",
-        archivedReason: "expired" as const,
-      };
-      if (kind === "item") {
-        await dal.itemRequests.transitionStatusInTx(c, input);
-      } else {
-        await dal.volunteerRequests.transitionStatusInTx(c, input);
-      }
+        archivedReason: "expired",
+      });
+      return true;
     });
+    if (!archived) {
+      console.warn(`[expiry] ${kind} ${requestId} skipped: no longer active and expired after row lock`);
+      return "skipped";
+    }
     return "archived";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

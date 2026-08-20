@@ -92,13 +92,8 @@ export async function markImageGenPending(ctx: DbContext, requestId: string): Pr
       c,
       `update volunteer_requests set image_gen_status = 'pending', image_gen_error = null
        where id = $1
-         and status in ('draft', 'pending')
-         and approved_at is null
-         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = volunteer_requests.id)
-         and not exists(
-           select 1 from volunteer_roles vr where vr.volunteer_request_id = volunteer_requests.id
-             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
-         )
+         and status in ('draft', 'pending', 'active')
+         and (image_url is null or image_generated)
        returning id`,
       [requestId],
     );
@@ -123,13 +118,7 @@ export async function recordGeneratedImage(
       `update volunteer_requests r
        set image_url = $2, image_generated = true, image_gen_status = 'succeeded', image_gen_error = null
        where r.id = $1 and ${guard}
-         and r.status in ('draft', 'pending')
-         and r.approved_at is null
-         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
-         and not exists(
-           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
-             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
-         )
+         and r.status in ('draft', 'pending', 'active')
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId, imageUrl],
     );
@@ -141,7 +130,8 @@ export async function recordGeneratedImage(
 export async function recordImageGenFailure(ctx: DbContext, requestId: string, message: string): Promise<void> {
   await withDbContext(ctx, (c) =>
     q(c, `update volunteer_requests set image_gen_status = 'failed', image_gen_error = $2
-          where id = $1 and status in ('draft', 'pending') and approved_at is null`, [
+          where id = $1 and status in ('draft', 'pending', 'active')
+            and (image_url is null or image_generated)`, [
       requestId,
       message.slice(0, 500),
     ]),
@@ -220,13 +210,7 @@ export async function clearGeneratedImage(ctx: DbContext, requestId: string): Pr
       `update volunteer_requests r
        set image_url = null, image_generated = false, image_gen_status = null, image_gen_error = null
        where r.id = $1 and r.image_generated
-         and r.status in ('draft', 'pending')
-         and r.approved_at is null
-         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
-         and not exists(
-           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
-             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
-         )
+         and r.status in ('draft', 'pending', 'active')
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId],
     );
@@ -459,6 +443,47 @@ export async function transitionStatusInTx(c: PoolClient, input: VolunteerTransi
 
 export async function transitionStatus(ctx: DbContext, input: VolunteerTransitionInput): Promise<VolunteerRequest> {
   return withDbContext(ctx, (c) => transitionStatusInTx(c, input));
+}
+
+/**
+ * ADMIN-02 staff correction only; deliberately excluded from the member-facing
+ * ALLOWED_TRANSITIONS map. The service locks and checks activity first, while
+ * this DAL rechecks active state and atomically clears the live approval stamp
+ * with the active -> pending audit event.
+ */
+export async function unapproveForCorrectionInTx(
+  c: PoolClient,
+  requestId: string,
+  actorUserId: string,
+): Promise<VolunteerRequest> {
+  const current = await q<{ status: RequestStatus }>(
+    c,
+    `select status from volunteer_requests where id = $1 for update`,
+    [requestId],
+  );
+  const from = current[0]?.status;
+  if (!from) throw new Error(`volunteerRequests.unapproveForCorrection: request not found: ${requestId}`);
+  if (from !== "active") {
+    throw new Error(`volunteerRequests.unapproveForCorrection: only active requests can be unapproved (status: ${from})`);
+  }
+  await c.query(
+    `update volunteer_requests
+        set status = 'pending', approved_at = null, approved_by = null
+      where id = $1`,
+    [requestId],
+  );
+  await insertInTx(c, {
+    entityType: "volunteer_request",
+    entityId: requestId,
+    fromStatus: "active",
+    toStatus: "pending",
+    actorUserId,
+    note: "staff correction",
+  });
+  const rows = await q<VolunteerRequest>(c, `select ${COLS} from volunteer_requests r where r.id = $1`, [requestId]);
+  const request = rows[0];
+  if (!request) throw new Error(`volunteerRequests.unapproveForCorrection: reload failed: ${requestId}`);
+  return request;
 }
 
 /**

@@ -23,6 +23,7 @@ export function entityTypeName(entityType: string): string {
 const REQUEST_LABELS: Record<string, string> = {
   "draft:pending": "Submitted for approval",
   "pending:active": "Approved and published",
+  "active:pending": "Unapproved for correction",
   "pending:draft": "Returned to draft",
   "archived:active": "Reinstated",
   "archived:pending": "Reinstated for approval",

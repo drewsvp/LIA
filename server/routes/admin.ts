@@ -71,6 +71,7 @@ import {
   moveReturnedRequestToPending,
   saveStaffRequestEdits,
   saveStaffRequestImage,
+  unapproveRequestForCorrection,
   StaffRequestEditConflictError,
   type StaffRequestEditInput,
 } from "../services/staff-request-edit";
@@ -114,36 +115,57 @@ function staffCtx(req: Request): DbContext {
   return { kind: "staff", userId: staffContext(req).userId };
 }
 
+class StaffRequestEditValidationError extends Error {
+  constructor(public readonly reason: string) {
+    super(reason);
+    this.name = "StaffRequestEditValidationError";
+  }
+}
+
 function parseStaffRequestEdit(
   kind: RequestKind,
   requestId: string,
   staffUserId: string,
   rawBody: unknown,
-): StaffRequestEditInput | null {
-  if (!rawBody || typeof rawBody !== "object") return null;
-  const body = rawBody as Record<string, unknown>;
-  const text = (key: string, max: number): string | null => {
-    const value = body[key];
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    return trimmed.length <= max ? trimmed : null;
+): StaffRequestEditInput {
+  const invalid = (reason: string): never => {
+    throw new StaffRequestEditValidationError(`${reason} Nothing was changed.`);
   };
-  const title = text("title", 200);
-  const description = text("description", 4000);
-  const contactFirstName = text("contactFirstName", 120);
-  const contactLastName = text("contactLastName", 120);
-  const contactEmail = text("contactEmail", 254)?.toLowerCase() ?? null;
-  const contactPhone = text("contactPhone", 40);
-  const deadlineTypeRaw = text("deadlineType", 20);
-  const deadlineDateRaw = text("deadlineDate", 10);
+  if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
+    invalid("Request details are missing.");
+  }
+  const body = rawBody as Record<string, unknown>;
+  const requiredText = (key: string, label: string, max: number): string => {
+    const value = body[key];
+    if (typeof value !== "string") invalid(`${label} is required.`);
+    const trimmed = (value as string).trim();
+    if (trimmed === "") invalid(`${label} is required.`);
+    if (trimmed.length > max) invalid(`${label} must be ${max.toLocaleString("en-US")} characters or fewer.`);
+    return trimmed;
+  };
+  const title = requiredText("title", "Title", 200);
+  const description = requiredText("description", "Description", 4000);
+  const contactFirstName = requiredText("contactFirstName", "Contact first name", 120);
+  const contactLastName = requiredText("contactLastName", "Contact last name", 120);
+  const contactEmail = requiredText("contactEmail", "Contact email", 254).toLowerCase();
+  const contactPhone = requiredText("contactPhone", "Contact phone", 40);
+  if (!EMAIL_RE.test(contactEmail)) invalid("Contact email is not valid.");
+
+  const deadlineTypeRaw = body.deadlineType;
   const deadlineType: DeadlineType | null =
     deadlineTypeRaw === "date_specific" || deadlineTypeRaw === "until_fulfilled" || deadlineTypeRaw === "ongoing"
       ? deadlineTypeRaw
       : null;
-  const deadlineDate =
-    deadlineType === "date_specific" && deadlineDateRaw !== null && /^\d{4}-\d{2}-\d{2}$/.test(deadlineDateRaw)
-      ? deadlineDateRaw
-      : null;
+  if (!deadlineType) invalid("Deadline type must be Date specific, Until fulfilled, or Ongoing.");
+  let deadlineDate: string | null = null;
+  if (deadlineType === "date_specific") {
+    const raw = body.deadlineDate;
+    if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+      invalid("Deadline date is required in YYYY-MM-DD format for a date-specific request.");
+    }
+    deadlineDate = (raw as string).trim();
+  }
+
   const peopleRaw = body.peopleHelped;
   const peopleHelped =
     peopleRaw === null || peopleRaw === ""
@@ -151,28 +173,20 @@ function parseStaffRequestEdit(
       : typeof peopleRaw === "number" && Number.isInteger(peopleRaw) && peopleRaw >= 0
         ? peopleRaw
         : undefined;
-  const childrenRaw = Array.isArray(body.children) && body.children.length <= 200 ? body.children : null;
-  if (
-    !title ||
-    !description ||
-    !contactFirstName ||
-    !contactLastName ||
-    !contactEmail ||
-    !EMAIL_RE.test(contactEmail) ||
-    !contactPhone ||
-    !deadlineType ||
-    peopleHelped === undefined ||
-    (deadlineType === "date_specific" && deadlineDate === null) ||
-    childrenRaw === null
-  ) {
-    return null;
+  if (peopleHelped === undefined) invalid("People helped must be a non-negative whole number or left blank.");
+  const validPeopleHelped = peopleHelped as number | null;
+  const childrenRaw = Array.isArray(body.children)
+    ? body.children
+    : invalid(kind === "item" ? "The item list is missing." : "The role list is missing.");
+  if (childrenRaw.length > 200) {
+    invalid(kind === "item" ? "An item request can have at most 200 items." : "A volunteer request can have at most 200 roles.");
   }
 
   const common = {
     title,
     description,
-    peopleHelped,
-    deadlineType,
+    peopleHelped: validPeopleHelped,
+    deadlineType: deadlineType as DeadlineType,
     deadlineDate,
     contact: {
       firstName: contactFirstName,
@@ -190,82 +204,90 @@ function parseStaffRequestEdit(
         : typeof dropoffRaw === "string" && dropoffRaw.trim().length <= 300
           ? dropoffRaw.trim() || null
           : undefined;
-    if (dropoffLocation === undefined) return null;
+    if (dropoffLocation === undefined) invalid("Drop-off location must be 300 characters or fewer.");
     const children: StaffRequestEditInput & { kind: "item" } extends { children: infer C } ? C : never = [];
-    for (const raw of childrenRaw) {
-      if (!raw || typeof raw !== "object") return null;
+    for (const [index, raw] of childrenRaw.entries()) {
+      const label = `Item ${index + 1}`;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`${label} is not valid.`);
       const row = raw as Record<string, unknown>;
-      const rowText = (key: string, max: number): string | null => {
+      const rowText = (key: string, field: string, max: number): string => {
         const value = row[key];
-        if (typeof value !== "string") return null;
-        const trimmed = value.trim();
-        return trimmed.length <= max ? trimmed : null;
+        if (typeof value !== "string") invalid(`${label} ${field} is required.`);
+        const trimmed = (value as string).trim();
+        if (trimmed === "") invalid(`${label} ${field} is required.`);
+        if (trimmed.length > max) {
+          invalid(`${label} ${field} must be ${max.toLocaleString("en-US")} characters or fewer.`);
+        }
+        return trimmed;
       };
       const idRaw = row.id;
       const id = idRaw === null || idRaw === undefined || idRaw === "" ? undefined : idRaw;
-      const name = rowText("name", 200);
-      const childDescription = rowText("description", 2000);
-      const condition = rowText("condition", 20);
+      if (id !== undefined && (typeof id !== "string" || !UUID_RE.test(id))) {
+        invalid(`${label} has an invalid stored identifier. Reload the request and try again.`);
+      }
+      const validId = id === undefined ? undefined : (id as string);
+      const name = rowText("name", "name", 200);
+      const childDescription = rowText("description", "description", 2000);
+      const condition = row.condition;
+      if (condition !== "new" && condition !== "gently_used" && condition !== "any") {
+        invalid(`${label} condition must be New, Gently used, or Any.`);
+      }
+      const validCondition = condition as "new" | "gently_used" | "any";
       const productUrl = parseProductUrl(row.productUrl);
+      if (!productUrl.ok) invalid(`${label}: ${productUrl.message}`);
+      const validProductUrl = productUrl.ok ? productUrl.value : null;
       const quantityRequested = row.quantityRequested;
-      if (
-        (id !== undefined && (typeof id !== "string" || !UUID_RE.test(id))) ||
-        !name ||
-        !childDescription ||
-        (condition !== "new" && condition !== "gently_used" && condition !== "any") ||
-        !productUrl.ok ||
-        typeof quantityRequested !== "number" ||
-        !Number.isInteger(quantityRequested) ||
-        quantityRequested < 1
-      ) {
-        return null;
+      if (typeof quantityRequested !== "number" || !Number.isInteger(quantityRequested) || quantityRequested < 1) {
+        invalid(`${label} quantity requested must be a whole number of at least 1.`);
       }
       children.push({
-        ...(id !== undefined ? { id } : {}),
+        ...(validId !== undefined ? { id: validId } : {}),
         name,
         description: childDescription,
-        condition,
-        productUrl: productUrl.value,
-        quantityRequested,
+        condition: validCondition,
+        productUrl: validProductUrl,
+        quantityRequested: quantityRequested as number,
       });
     }
     return {
       kind,
       requestId,
       staffUserId,
-      fields: { ...common, dropoffLocation },
+      fields: { ...common, dropoffLocation: dropoffLocation as string | null },
       children,
     };
   }
 
-  const details = text("details", 4000);
-  const eventLocation = text("eventLocation", 300);
-  if (!details || !eventLocation || (deadlineType !== "ongoing" && deadlineType !== "date_specific")) return null;
+  const details = requiredText("details", "Volunteer details", 4000);
+  const eventLocation = requiredText("eventLocation", "Event location", 300);
   const children: StaffRequestEditInput & { kind: "volunteer" } extends { children: infer C } ? C : never = [];
-  for (const raw of childrenRaw) {
-    if (!raw || typeof raw !== "object") return null;
+  for (const [index, raw] of childrenRaw.entries()) {
+    const label = `Role ${index + 1}`;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`${label} is not valid.`);
     const row = raw as Record<string, unknown>;
     const idRaw = row.id;
     const id = idRaw === null || idRaw === undefined || idRaw === "" ? undefined : idRaw;
-    const name = typeof row.name === "string" && row.name.trim().length <= 200 ? row.name.trim() : "";
+    if (id !== undefined && (typeof id !== "string" || !UUID_RE.test(id))) {
+      invalid(`${label} has an invalid stored identifier. Reload the request and try again.`);
+    }
+    const validId = id === undefined ? undefined : (id as string);
+    const name =
+      typeof row.name === "string" && row.name.trim() !== "" && row.name.trim().length <= 200
+        ? row.name.trim()
+        : invalid(`${label} name is required and must be 200 characters or fewer.`);
     const childDescription =
-      typeof row.description === "string" && row.description.trim().length <= 2000 ? row.description.trim() : "";
+      typeof row.description === "string" && row.description.trim() !== "" && row.description.trim().length <= 2000
+        ? row.description.trim()
+        : invalid(`${label} description is required and must be 2,000 characters or fewer.`);
     const quantityNeeded = row.quantityNeeded;
-    if (
-      (id !== undefined && (typeof id !== "string" || !UUID_RE.test(id))) ||
-      !name ||
-      !childDescription ||
-      typeof quantityNeeded !== "number" ||
-      !Number.isInteger(quantityNeeded) ||
-      quantityNeeded < 1
-    ) {
-      return null;
+    if (typeof quantityNeeded !== "number" || !Number.isInteger(quantityNeeded) || quantityNeeded < 1) {
+      invalid(`${label} quantity needed must be a whole number of at least 1.`);
     }
     children.push({
-      ...(id !== undefined ? { id } : {}),
+      ...(validId !== undefined ? { id: validId } : {}),
       name,
       description: childDescription,
-      quantityNeeded,
+      quantityNeeded: quantityNeeded as number,
     });
   }
   return {
@@ -523,8 +545,8 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ---- Complete pre-approval correction. Status is deliberately preserved;
-  // return and recovery are explicit, separately recorded actions.
+  // ---- Complete staff correction. Status is deliberately preserved, including
+  // an active request's approval stamp and public visibility.
   app.post("/api/admin/requests/:type/:id/edit", requireStaff, async (req: Request, res: Response) => {
     const kind = parseKind(req.params.type);
     const id = req.params.id ?? "";
@@ -532,10 +554,15 @@ export function registerAdminRoutes(app: Express): void {
       sendNotFound(res);
       return;
     }
-    const parsed = parseStaffRequestEdit(kind, id, staffContext(req).userId, req.body);
-    if (!parsed) {
-      res.status(400).json({ message: "Check every field and child row, then try again. Nothing was changed." });
-      return;
+    let parsed: StaffRequestEditInput;
+    try {
+      parsed = parseStaffRequestEdit(kind, id, staffContext(req).userId, req.body);
+    } catch (err) {
+      if (err instanceof StaffRequestEditValidationError) {
+        res.status(400).json({ message: err.reason });
+        return;
+      }
+      throw err;
     }
     try {
       const result = await saveStaffRequestEdits(parsed);
@@ -587,6 +614,40 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  // ---- Active -> Pending for a safe staff correction. The service locks and
+  // rechecks status/activity, clears the current approval stamp, and records
+  // the event atomically. No email is sent.
+  app.post("/api/admin/requests/:type/:id/unapprove", requireStaff, async (req: Request, res: Response) => {
+    const kind = parseKind(req.params.type);
+    const id = req.params.id ?? "";
+    if (!kind || !UUID_RE.test(id)) {
+      sendNotFound(res);
+      return;
+    }
+    try {
+      const request = await unapproveRequestForCorrection({
+        kind,
+        requestId: id,
+        staffUserId: staffContext(req).userId,
+      });
+      res.json({
+        request,
+        message: `${request.title} moved to Pending and is no longer public. It can now be edited and re-approved. No email was sent.`,
+      });
+    } catch (err) {
+      if (err instanceof RequestNotFoundError) {
+        sendNotFound(res);
+        return;
+      }
+      if (err instanceof StaffRequestEditConflictError) {
+        res.status(409).json({ message: err.reason });
+        return;
+      }
+      console.error(`[admin] unapprove failed for ${kind} request ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
+    }
+  });
+
   // ---- §6 Approve: one-tx bundle (status + stamps + one event + email rows),
   // dispatch after commit, result message never claims a send that failed.
   app.post("/api/admin/requests/:type/:id/approve", requireStaff, async (req: Request, res: Response) => {
@@ -608,8 +669,10 @@ export function registerAdminRoutes(app: Express): void {
         const queued: { toEmail: string; dispatch: PendingDispatch }[] = [];
         const failedEmails: string[] = [];
         const skippedEmails: string[] = [];
+        const alreadySentEmails: string[] = [];
         for (const email of result.emails) {
           if (email.outcome === "queued") queued.push({ toEmail: email.toEmail, dispatch: email.dispatch });
+          else if (email.outcome === "already_sent") alreadySentEmails.push(email.toEmail);
           else if (email.outcome === "skipped_disabled") skippedEmails.push(email.toEmail);
           else failedEmails.push(email.toEmail);
         }
@@ -632,6 +695,9 @@ export function registerAdminRoutes(app: Express): void {
           message = `${title} is now public. Approval email queued to ${sentEmails.join(" and ")}. The email to ${failedEmails.join(" and ")} failed to send — it is logged in the Email log and can be resent there.`;
         } else {
           message = `${title} is now public. The approval email failed to send — it is logged in the Email log and can be resent there.`;
+        }
+        if (alreadySentEmails.length > 0) {
+          message += ` Approval email was already sent previously to ${alreadySentEmails.join(" and ")}, so no duplicate was queued.`;
         }
         if (skippedEmails.length > 0) {
           message += ` The approval email is disabled under Automated emails, so the copy to ${skippedEmails.join(" and ")} was skipped (logged in the Email log).`;
@@ -838,9 +904,9 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       const stored = await storeImage({ data: req.file.buffer, filename: req.file.originalname });
-      let updated: AdminRequest;
+      let saved: { request: AdminRequest; previousImageUrl: string | null };
       try {
-        updated = await saveStaffRequestImage({
+        saved = await saveStaffRequestImage({
           kind,
           requestId: id,
           staffUserId: staffContext(req).userId,
@@ -850,7 +916,12 @@ export function registerAdminRoutes(app: Express): void {
         await deleteImage(stored.url).catch(() => undefined);
         throw err;
       }
-      res.json({ request: updated, message: "Image saved." });
+      if (saved.previousImageUrl && saved.previousImageUrl !== stored.url) {
+        await deleteImage(saved.previousImageUrl).catch((deleteErr) => {
+          console.error(`[admin] orphaned request image ${saved.previousImageUrl} after replacement:`, deleteErr);
+        });
+      }
+      res.json({ request: saved.request, message: "Image saved." });
     } catch (err) {
       if (err instanceof StaffRequestEditConflictError) {
         res.status(409).json({ message: err.reason });
@@ -885,7 +956,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only pending requests and drafts previously returned by staff can have their image changed.",
+            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -930,7 +1001,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only pending requests and drafts previously returned by staff can have their image changed.",
+            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -973,7 +1044,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only pending requests and drafts previously returned by staff can have their image changed.",
+            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -1021,7 +1092,7 @@ export function registerAdminRoutes(app: Express): void {
           res.status(409).json({
             message:
               editability.reason ??
-              "Only pending requests and drafts previously returned by staff can have their image changed.",
+              "Only active or pending requests and drafts previously returned by staff can have their image changed.",
           });
           return;
         }

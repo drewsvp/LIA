@@ -36,6 +36,13 @@ const DEADLINE_TYPES: readonly DeadlineType[] = ["ongoing", "until_fulfilled", "
 
 const ITEM_CONDITIONS: readonly string[] = ["new", "gently_used", "any"];
 
+class VolunteerConfirmationRequestNotActiveError extends Error {
+  constructor() {
+    super("volunteer confirmation changes require an active request");
+    this.name = "VolunteerConfirmationRequestNotActiveError";
+  }
+}
+
 const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 
 export function registerMemberRoutes(app: Express): void {
@@ -741,14 +748,31 @@ export function registerMemberRoutes(app: Express): void {
         try {
           // §6: all role changes succeed together or none do.
           const updated = await withDbContext(SYSTEM, async (c) => {
+            // Match the Admin correction lock order (parent, then children).
+            // Recheck Active while holding the parent lock before allowing a
+            // confirmation counter to change.
+            const lockedRequest = await q<{ status: string }>(
+              c,
+              `select status from volunteer_requests where id = $1 and org_id = $2 for update`,
+              [request.id, orgId],
+            );
+            if (!lockedRequest[0]) throw new Error(`volunteer-edit: request ${request.id} not found in organization`);
             const out = [];
             for (const e of edits) {
               const cur = await c.query(
-                `select name, quantity_interested from volunteer_roles where id = $1 and volunteer_request_id = $2 for update`,
+                `select name, quantity_interested, quantity_confirmed
+                   from volunteer_roles
+                  where id = $1 and volunteer_request_id = $2
+                  for update`,
                 [e.id, request.id],
               );
-              const row = cur.rows[0] as { name: string; quantity_interested: number } | undefined;
+              const row = cur.rows[0] as
+                | { name: string; quantity_interested: number; quantity_confirmed: number }
+                | undefined;
               if (!row) throw new Error(`volunteer-edit: role ${e.id} not on request ${request.id}`);
+              if (e.quantityConfirmed !== row.quantity_confirmed && lockedRequest[0].status !== "active") {
+                throw new VolunteerConfirmationRequestNotActiveError();
+              }
               if (e.quantityNeeded < row.quantity_interested) {
                 throw new RoleOverInterestError(row.name, row.quantity_interested);
               }
@@ -776,6 +800,13 @@ export function registerMemberRoutes(app: Express): void {
             })),
           });
         } catch (err) {
+          if (err instanceof VolunteerConfirmationRequestNotActiveError) {
+            res.status(409).json({
+              code: "request_not_active",
+              message: "This request is no longer active. Confirmation changes were not saved.",
+            });
+            return;
+          }
           if (err instanceof RoleOverInterestError) {
             res.status(400).json({ message: err.message });
             return;
@@ -1288,15 +1319,36 @@ export function registerMemberRoutes(app: Express): void {
         // One transaction: every row saves or none does (§6). quantity_claimed
         // is never read from the payload — it has no column in the patch type.
         const outcome = await withDbContext(SYSTEM, async (c) => {
-          const current = await q<{ id: string; name: string; quantity_claimed: number }>(
+          // Parent first, then children: the Admin correction lane uses this
+          // same order. A receipt save that started from a stale Active page
+          // must wait for unapproval and recheck status before it can write.
+          const lockedRequest = await q<{ status: string }>(
             c,
-            `select id, name, quantity_claimed from items where item_request_id = $1 for update`,
+            `select status from item_requests where id = $1 and org_id = $2 for update`,
+            [request.id, orgId],
+          );
+          if (!lockedRequest[0]) return { kind: "unknown-request" as const };
+          const current = await q<{
+            id: string;
+            name: string;
+            quantity_claimed: number;
+            quantity_received: number;
+          }>(
+            c,
+            `select id, name, quantity_claimed, quantity_received
+               from items where item_request_id = $1 for update`,
             [request.id],
           );
           const byId = new Map(current.map((row) => [row.id, row]));
           for (const row of rows) {
             const existing = byId.get(row.id);
             if (!existing) return { kind: "unknown-item" as const };
+            if (
+              row.quantityReceived !== existing.quantity_received &&
+              lockedRequest[0].status !== "active"
+            ) {
+              return { kind: "request-not-active" as const };
+            }
             if (row.quantityRequested < existing.quantity_claimed) {
               return { kind: "over-claim" as const, name: existing.name, claimed: existing.quantity_claimed };
             }
@@ -1316,10 +1368,21 @@ export function registerMemberRoutes(app: Express): void {
           }
           return { kind: "saved" as const, saved };
         });
+        if (outcome.kind === "unknown-request") {
+          sendNotFound(res);
+          return;
+        }
         if (outcome.kind === "unknown-item") {
           // Missing/foreign item ids are identifier failures: byte-identical
           // 404, not a 400 (§11 binding rule).
           sendNotFound(res);
+          return;
+        }
+        if (outcome.kind === "request-not-active") {
+          res.status(409).json({
+            code: "request_not_active",
+            message: "This request is no longer active. Receipt changes were not saved.",
+          });
           return;
         }
         if (outcome.kind === "over-claim") {

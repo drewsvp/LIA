@@ -78,18 +78,18 @@ type LockedRequest = {
   approvedAt: string | null;
   orgId: string;
   contactPersonId: string | null;
+  imageUrl: string | null;
 };
 
-async function lockEditableRequest(
+async function lockRequest(
   c: PoolClient,
   kind: RequestKind,
   requestId: string,
 ): Promise<LockedRequest> {
   const requestTable = kind === "item" ? "item_requests" : "volunteer_requests";
-  const entityType = kind === "item" ? "item_request" : "volunteer_request";
   const locked = await c.query<LockedRequest>(
     `select status, approved_at as "approvedAt", org_id as "orgId",
-            contact_person_id as "contactPersonId"
+            contact_person_id as "contactPersonId", image_url as "imageUrl"
        from ${requestTable}
       where id = $1
       for update`,
@@ -97,6 +97,17 @@ async function lockEditableRequest(
   );
   const request = locked.rows[0];
   if (!request) throw new RequestNotFoundError(requestId);
+  return request;
+}
+
+async function lockEditableRequest(
+  c: PoolClient,
+  kind: RequestKind,
+  requestId: string,
+): Promise<LockedRequest> {
+  const request = await lockRequest(c, kind, requestId);
+  const entityType = kind === "item" ? "item_request" : "volunteer_request";
+  if (request.status === "active") return request;
   if (request.approvedAt !== null || (request.status !== "pending" && request.status !== "draft")) {
     throw new StaffRequestEditConflictError("Approved or archived requests cannot be edited.");
   }
@@ -151,12 +162,25 @@ async function resolveContactInTx(
   );
 }
 
-function mapActivityError(err: unknown): never {
+function mapActivityError(
+  err: unknown,
+  reason = "This request has donor or volunteer activity and cannot be edited.",
+): never {
   if (
     err instanceof dal.items.RequestHasItemActivityError ||
     err instanceof dal.volunteerRoles.RequestHasVolunteerActivityError
   ) {
-    throw new StaffRequestEditConflictError("This request has donor or volunteer activity and cannot be edited.");
+    throw new StaffRequestEditConflictError(reason);
+  }
+  if (
+    err instanceof dal.items.RequestMustRetainAnItemError ||
+    err instanceof dal.items.ItemWithActivityCannotBeRemovedError ||
+    err instanceof dal.items.ItemQuantityBelowParticipationError ||
+    err instanceof dal.volunteerRoles.RequestMustRetainARoleError ||
+    err instanceof dal.volunteerRoles.RoleWithActivityCannotBeRemovedError ||
+    err instanceof dal.volunteerRoles.RoleQuantityBelowParticipationError
+  ) {
+    throw new StaffRequestEditConflictError(`${err.message} Nothing was changed.`);
   }
   if (
     err instanceof dal.items.UnknownItemOnRequestError ||
@@ -183,6 +207,9 @@ export async function saveStaffRequestEdits(
       );
 
       if (input.kind === "item") {
+        if (locked.status !== "active") {
+          await dal.items.assertNoItemActivityInTx(c, input.requestId);
+        }
         const request = await dal.itemRequests.updateInTx(c, locked.orgId, input.requestId, {
           title: input.fields.title,
           description: input.fields.description,
@@ -192,10 +219,13 @@ export async function saveStaffRequestEdits(
           deadlineDate: input.fields.deadlineDate,
           contactPersonId: person.id,
         });
-        await dal.items.replaceForPreApprovalEditInTx(c, input.requestId, input.children);
+        await dal.items.replaceForStaffEditInTx(c, input.requestId, input.children);
         return { request };
       }
 
+      if (locked.status !== "active") {
+        await dal.volunteerRoles.assertNoVolunteerActivityInTx(c, input.requestId);
+      }
       const request = await dal.volunteerRequests.updateInTx(c, locked.orgId, input.requestId, {
         title: input.fields.title,
         description: input.fields.description,
@@ -206,11 +236,11 @@ export async function saveStaffRequestEdits(
         deadlineDate: input.fields.deadlineDate,
         contactPersonId: person.id,
       });
-      await dal.volunteerRoles.replaceForPreApprovalEditInTx(c, input.requestId, input.children);
+      await dal.volunteerRoles.replaceForStaffEditInTx(c, input.requestId, input.children);
       return { request };
     });
   } catch (err) {
-    mapActivityError(err);
+    mapActivityError(err, "This request has donor or volunteer activity and cannot be edited in its current status.");
   }
 }
 
@@ -250,28 +280,64 @@ export async function moveReturnedRequestToPending(input: {
   }
 }
 
-/** Store an already-uploaded image URL only when the request remains editable. */
+/**
+ * Active -> pending correction lane. Lock order is request then child rows,
+ * matching public activity writes; status and activity are both rechecked in
+ * the transaction before the current approval stamp is cleared.
+ */
+export async function unapproveRequestForCorrection(input: {
+  kind: RequestKind;
+  requestId: string;
+  staffUserId: string;
+}): Promise<ItemRequest | VolunteerRequest> {
+  const staff: DbContext = { kind: "staff", userId: input.staffUserId };
+  try {
+    return await withDbContext(staff, async (c) => {
+      const locked = await lockRequest(c, input.kind, input.requestId);
+      if (locked.status !== "active") {
+        throw new StaffRequestEditConflictError(
+          `Only an active request can be unapproved. This one is ${locked.status}.`,
+        );
+      }
+      if (input.kind === "item") {
+        await dal.items.assertNoItemActivityInTx(c, input.requestId);
+        return dal.itemRequests.unapproveForCorrectionInTx(c, input.requestId, input.staffUserId);
+      }
+      await dal.volunteerRoles.assertNoVolunteerActivityInTx(c, input.requestId);
+      return dal.volunteerRequests.unapproveForCorrectionInTx(c, input.requestId, input.staffUserId);
+    });
+  } catch (err) {
+    mapActivityError(err, "This request has donor or volunteer activity and cannot be unapproved.");
+  }
+}
+
+/** Store an uploaded image while preserving request lifecycle metadata. */
 export async function saveStaffRequestImage(input: {
   kind: RequestKind;
   requestId: string;
   staffUserId: string;
   imageUrl: string;
-}): Promise<ItemRequest | VolunteerRequest> {
+}): Promise<{ request: ItemRequest | VolunteerRequest; previousImageUrl: string | null }> {
   const staff: DbContext = { kind: "staff", userId: input.staffUserId };
   try {
     return await withDbContext(staff, async (c) => {
       const locked = await lockEditableRequest(c, input.kind, input.requestId);
       if (input.kind === "item") {
-        await dal.items.assertNoItemActivityInTx(c, input.requestId);
-        return dal.itemRequests.updateInTx(c, locked.orgId, input.requestId, {
+        const request = await dal.itemRequests.updateInTx(c, locked.orgId, input.requestId, {
           imageUrl: input.imageUrl,
           imageGenerated: false,
           imageGenStatus: null,
           imageGenError: null,
         });
+        return { request, previousImageUrl: locked.imageUrl };
       }
-      await dal.volunteerRoles.assertNoVolunteerActivityInTx(c, input.requestId);
-      return dal.volunteerRequests.updateInTx(c, locked.orgId, input.requestId, { imageUrl: input.imageUrl });
+      const request = await dal.volunteerRequests.updateInTx(c, locked.orgId, input.requestId, {
+        imageUrl: input.imageUrl,
+        imageGenerated: false,
+        imageGenStatus: null,
+        imageGenError: null,
+      });
+      return { request, previousImageUrl: locked.imageUrl };
     });
   } catch (err) {
     mapActivityError(err);

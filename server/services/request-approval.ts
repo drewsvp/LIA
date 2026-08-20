@@ -72,6 +72,7 @@ export class OrgNotApprovedError extends Error {
 
 export type RequestApprovalEmail =
   | { outcome: "queued"; toEmail: string; dispatch: PendingDispatch }
+  | { outcome: "already_sent"; toEmail: string }
   | { outcome: "skipped_disabled"; toEmail: string }
   | { outcome: "blocked"; toEmail: string; reason: string };
 
@@ -178,6 +179,16 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
           itemOrVolunteer: kind === "item" ? "Item" : "Volunteer",
           itemsOrRoles,
         };
+        const alreadySent = await dal.emailLog.existsForRecipientInTx(c, {
+          templateKey: "org_request_approved",
+          entityType,
+          entityId: updated.id,
+          toEmail: person.email,
+        });
+        if (alreadySent) {
+          emails.push({ outcome: "already_sent", toEmail: person.email });
+          continue;
+        }
         try {
           const dispatch = await queueProductEmailInTx(c, {
             key: "org_request_approved",

@@ -15,6 +15,11 @@ export type AdminQueueRow = {
   status: RequestStatus;
   submittedAt: string | null;
   createdAt: string;
+  deadlineType: "date_specific" | "until_fulfilled" | "ongoing";
+  /** Calendar date stored by the current request form. */
+  deadlineDate: string | null;
+  /** Calendar date imported from the legacy Archive On field. */
+  expiresOn: string | null;
   orgId: string;
   orgName: string;
   orgCity: string | null;
@@ -27,7 +32,8 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
   return withDbContext(ctx, (c) =>
     q<AdminQueueRow>(
       c,
-      `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
+       `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
+               r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
               o.id as "orgId", o.name as "orgName", o.city as "orgCity", o.status as "orgStatus",
               (select count(*)::int from items i where i.item_request_id = r.id) as "childCount"
          from item_requests r
@@ -35,6 +41,7 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
         where r.status = $1
         union all
        select 'volunteer', v.id, v.title, v.status, v.submitted_at, v.created_at,
+               v.deadline_type, v.deadline_date, v.expires_on,
               o.id, o.name, o.city, o.status,
               (select count(*)::int from volunteer_roles vr where vr.volunteer_request_id = v.id)
          from volunteer_requests v
@@ -51,7 +58,8 @@ export async function listReturnedDrafts(ctx: DbContext): Promise<AdminQueueRow[
   return withDbContext(ctx, (c) =>
     q<AdminQueueRow>(
       c,
-      `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
+       `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
+               r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
               o.id as "orgId", o.name as "orgName", o.city as "orgCity", o.status as "orgStatus",
               (select count(*)::int from items i where i.item_request_id = r.id) as "childCount",
               latest.created_at as "returnedAt"
@@ -68,6 +76,7 @@ export async function listReturnedDrafts(ctx: DbContext): Promise<AdminQueueRow[
         where r.status = 'draft'
         union all
        select 'volunteer', v.id, v.title, v.status, v.submitted_at, v.created_at,
+               v.deadline_type, v.deadline_date, v.expires_on,
               o.id, o.name, o.city, o.status,
               (select count(*)::int from volunteer_roles vr where vr.volunteer_request_id = v.id),
               latest.created_at
@@ -118,7 +127,12 @@ export async function preApprovalEditability(
   ctx: DbContext,
   type: "item" | "volunteer",
   requestId: string,
-): Promise<{ editable: boolean; reason: string | null }> {
+): Promise<{
+  editable: boolean;
+  reason: string | null;
+  unapprovable: boolean;
+  unapprovalReason: string | null;
+}> {
   const table = type === "item" ? "item_requests" : "volunteer_requests";
   const children = type === "item" ? "items" : "volunteer_roles";
   const requestFk = type === "item" ? "item_request_id" : "volunteer_request_id";
@@ -149,13 +163,52 @@ export async function preApprovalEditability(
     ),
   );
   const row = rows[0];
-  if (!row) return { editable: false, reason: "Request not found." };
-  if (row.approvedAt !== null || row.status === "active" || row.status === "archived") {
-    return { editable: false, reason: "Approved or archived requests cannot be edited." };
+  if (!row) {
+    return {
+      editable: false,
+      reason: "Request not found.",
+      unapprovable: false,
+      unapprovalReason: "Request not found.",
+    };
+  }
+  if (row.status === "active") {
+    return {
+      editable: true,
+      reason: null,
+      unapprovable: !row.hasActivity,
+      unapprovalReason: row.hasActivity
+        ? "This request has donor or volunteer activity and cannot be unapproved."
+        : null,
+    };
+  }
+  if (row.approvedAt !== null || row.status === "archived") {
+    return {
+      editable: false,
+      reason: "Approved or archived requests cannot be edited.",
+      unapprovable: false,
+      unapprovalReason: "Only an active request can be unapproved.",
+    };
   }
   if (row.status === "draft" && !row.isReturnedDraft) {
-    return { editable: false, reason: "Only drafts previously returned for changes can be edited by staff." };
+    return {
+      editable: false,
+      reason: "Only drafts previously returned for changes can be edited by staff.",
+      unapprovable: false,
+      unapprovalReason: "Only an active request can be unapproved.",
+    };
   }
-  if (row.hasActivity) return { editable: false, reason: "This request has donor or volunteer activity and cannot be edited." };
-  return { editable: true, reason: null };
+  if (row.hasActivity) {
+    return {
+      editable: false,
+      reason: "This request has donor or volunteer activity and cannot be edited.",
+      unapprovable: false,
+      unapprovalReason: "Only an active request can be unapproved.",
+    };
+  }
+  return {
+    editable: true,
+    reason: null,
+    unapprovable: false,
+    unapprovalReason: "Only an active request can be unapproved.",
+  };
 }
