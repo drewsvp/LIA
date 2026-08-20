@@ -33,7 +33,7 @@ export type UpdateItemPatch = Partial<{
   sortOrder: number;
 }>;
 
-/** Complete pre-approval edit row used by the staff correction flow. */
+/** Complete staff-edit row used by the request correction flow. */
 export type ReplaceItemInput = {
   /** Omit for a new row. Existing ids must belong to this request. */
   id?: string;
@@ -55,6 +55,27 @@ export class UnknownItemOnRequestError extends Error {
   constructor() {
     super("one or more items do not belong to this request");
     this.name = "UnknownItemOnRequestError";
+  }
+}
+
+export class RequestMustRetainAnItemError extends Error {
+  constructor() {
+    super("Add at least one item before saving this request.");
+    this.name = "RequestMustRetainAnItemError";
+  }
+}
+
+export class ItemWithActivityCannotBeRemovedError extends Error {
+  constructor(itemName: string) {
+    super(`"${itemName}" cannot be removed because donors have already participated in it.`);
+    this.name = "ItemWithActivityCannotBeRemovedError";
+  }
+}
+
+export class ItemQuantityBelowParticipationError extends Error {
+  constructor(itemName: string, floor: number) {
+    super(`"${itemName}" must request at least ${floor} because ${floor} have already been claimed or received.`);
+    this.name = "ItemQuantityBelowParticipationError";
   }
 }
 
@@ -165,20 +186,64 @@ export async function update(ctx: DbContext, orgId: string, itemId: string, patc
 }
 
 /**
- * Replace a request's editable item structure in one locked transaction.
- * Claim/receipt counters and their pledge history are never editable.
+ * Reconcile a request's editable item structure in a request-first,
+ * child-second locked transaction. Existing activity remains attached to its
+ * child: active children may be edited and reordered, but never removed, and
+ * their requested quantity cannot drop below claims or receipts.
  */
-export async function replaceForPreApprovalEditInTx(
+export async function replaceForStaffEditInTx(
   c: PoolClient,
   requestId: string,
   rows: ReplaceItemInput[],
 ): Promise<Item[]> {
-  const existing = await assertNoItemActivityInTx(c, requestId);
+  const existing = await q<Item>(
+    c,
+    `select ${COLS}
+       from items
+      where item_request_id = $1
+      order by id
+      for update`,
+    [requestId],
+  );
+  if (rows.length === 0) throw new RequestMustRetainAnItemError();
 
   const existingIds = new Set(existing.map((item) => item.id));
   const suppliedIds = rows.flatMap((row) => (row.id ? [row.id] : []));
   if (new Set(suppliedIds).size !== suppliedIds.length || suppliedIds.some((id) => !existingIds.has(id))) {
     throw new UnknownItemOnRequestError();
+  }
+
+  const suppliedIdSet = new Set(suppliedIds);
+  for (const item of existing) {
+    if (!suppliedIdSet.has(item.id)) {
+      const hasHistory = (
+        await q<{ exists: boolean }>(
+          c,
+          `select (
+             $2::int > 0
+             or $3::int > 0
+             or exists(
+               select 1
+                 from item_pledge_lines line
+                where line.item_id = $1
+             )
+           ) as exists`,
+          [item.id, item.quantityClaimed, item.quantityReceived],
+        )
+      )[0]?.exists;
+      if (hasHistory) throw new ItemWithActivityCannotBeRemovedError(item.name);
+    }
+  }
+
+  const existingById = new Map(existing.map((item) => [item.id, item]));
+  for (const row of rows) {
+    if (!row.id) continue;
+    const item = existingById.get(row.id);
+    if (!item) throw new UnknownItemOnRequestError();
+    const floor = Math.max(item.quantityClaimed, item.quantityReceived);
+    if (row.quantityRequested < floor) {
+      throw new ItemQuantityBelowParticipationError(item.name, floor);
+    }
   }
 
   await q(c, `delete from items where item_request_id = $1 and not (id = any($2::uuid[]))`, [

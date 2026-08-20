@@ -123,13 +123,8 @@ export async function markImageGenPending(ctx: DbContext, requestId: string): Pr
       c,
       `update volunteer_requests set image_gen_status = 'pending', image_gen_error = null
        where id = $1
-         and status in ('draft', 'pending')
-         and approved_at is null
-         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = volunteer_requests.id)
-         and not exists(
-           select 1 from volunteer_roles vr where vr.volunteer_request_id = volunteer_requests.id
-             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
-         )
+          and status in ('draft', 'pending', 'active')
+           and (image_url is null or image_generated)
        returning id`,
       [requestId],
     );
@@ -153,14 +148,8 @@ export async function recordGeneratedImage(
       c,
       `update volunteer_requests r
        set image_url = $2, image_generated = true, image_gen_status = 'succeeded', image_gen_error = null
-       where r.id = $1 and ${guard}
-         and r.status in ('draft', 'pending')
-         and r.approved_at is null
-         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
-         and not exists(
-           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
-             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
-         )
+        where r.id = $1 and ${guard}
+          and r.status in ('draft', 'pending', 'active')
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId, imageUrl],
     );
@@ -172,7 +161,8 @@ export async function recordGeneratedImage(
 export async function recordImageGenFailure(ctx: DbContext, requestId: string, message: string): Promise<void> {
   await withDbContext(ctx, (c) =>
     q(c, `update volunteer_requests set image_gen_status = 'failed', image_gen_error = $2
-          where id = $1 and status in ('draft', 'pending') and approved_at is null`, [
+           where id = $1 and status in ('draft', 'pending', 'active')
+             and (image_url is null or image_generated)`, [
       requestId,
       message.slice(0, 500),
     ]),
@@ -250,14 +240,8 @@ export async function clearGeneratedImage(ctx: DbContext, requestId: string): Pr
       c,
       `update volunteer_requests r
        set image_url = null, image_generated = false, image_gen_status = null, image_gen_error = null
-       where r.id = $1 and r.image_generated
-         and r.status in ('draft', 'pending')
-         and r.approved_at is null
-         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
-         and not exists(
-           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
-             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
-         )
+        where r.id = $1 and r.image_generated
+          and r.status in ('draft', 'pending', 'active')
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId],
     );

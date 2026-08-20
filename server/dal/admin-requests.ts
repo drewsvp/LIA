@@ -172,12 +172,13 @@ export async function preApprovalEditability(
     };
   }
   if (row.status === "active") {
-    const activityReason = "This request has donor or volunteer activity and cannot be unapproved or edited.";
     return {
-      editable: false,
-      reason: row.hasActivity ? activityReason : "Unapprove this request before editing it.",
+      editable: true,
+      reason: null,
       unapprovable: !row.hasActivity,
-      unapprovalReason: row.hasActivity ? activityReason : null,
+      unapprovalReason: row.hasActivity
+        ? "This request has donor or volunteer activity and cannot be unapproved."
+        : null,
     };
   }
   if (row.approvedAt !== null || row.status === "archived") {

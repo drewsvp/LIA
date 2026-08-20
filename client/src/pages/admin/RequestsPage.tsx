@@ -119,6 +119,7 @@ type EditItemChild = {
   condition: "new" | "gently_used" | "any";
   productUrl: string;
   quantityRequested: number;
+  participationFloor: number;
 };
 
 type EditRoleChild = {
@@ -127,6 +128,7 @@ type EditRoleChild = {
   name: string;
   description: string;
   quantityNeeded: number;
+  participationFloor: number;
 };
 
 type EditForm = {
@@ -242,6 +244,7 @@ function buildEditForm(detail: Detail): EditForm {
         condition: (c.condition as "new" | "gently_used" | "any") ?? "any",
         productUrl: c.productUrl ?? "",
         quantityRequested: c.quantityRequested,
+        participationFloor: Math.max(c.quantityClaimed, c.quantityReceived),
       }))
     : [];
   const roleChildren: EditRoleChild[] = detail.type === "volunteer"
@@ -251,6 +254,7 @@ function buildEditForm(detail: Detail): EditForm {
         name: c.name,
         description: c.description ?? "",
         quantityNeeded: c.quantityNeeded,
+        participationFloor: Math.max(c.quantityInterested, c.quantityConfirmed),
       }))
     : [];
   return {
@@ -289,6 +293,7 @@ function validateEditForm(form: EditForm, kind: RequestKind): string | null {
   )
     return "People helped must be a non-negative whole number.";
   if (kind === "item") {
+    if (form.itemChildren.length === 0) return "Add at least one item before saving this request.";
     for (const child of form.itemChildren) {
       if (!child.name.trim()) return "Each item must have a name.";
       if (!child.description.trim()) return "Each item must have a description.";
@@ -300,6 +305,7 @@ function validateEditForm(form: EditForm, kind: RequestKind): string | null {
   } else {
     if (!form.details.trim()) return "Volunteer details are required.";
     if (!form.eventLocation.trim()) return "Event location is required.";
+    if (form.roleChildren.length === 0) return "Add at least one role before saving this request.";
     for (const child of form.roleChildren) {
       if (!child.name.trim()) return "Each role must have a name.";
       if (!child.description.trim()) return "Each role must have a description.";
@@ -372,7 +378,16 @@ function ItemChildEditor({
         <div className="adm-child-actions">
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === 0} onClick={onMoveUp} aria-label="Move up">↑</button>
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === total - 1} onClick={onMoveDown} aria-label="Move down">↓</button>
-          <button type="button" className="adm-btn adm-btn-sm adm-btn-danger" onClick={onRemove} aria-label="Remove item">Remove</button>
+          <button
+            type="button"
+            className="adm-btn adm-btn-sm adm-btn-danger"
+            disabled={child.participationFloor > 0}
+            title={child.participationFloor > 0 ? "This item has donor activity and cannot be removed." : undefined}
+            onClick={onRemove}
+            aria-label="Remove item"
+          >
+            Remove
+          </button>
         </div>
       </div>
       <div className="adm-form-row">
@@ -388,11 +403,21 @@ function ItemChildEditor({
           Quantity Requested *
           <input
             type="number"
-            min={1}
+            min={Math.max(1, child.participationFloor)}
             value={child.quantityRequested}
-            onChange={(e) => onChange({ ...child, quantityRequested: Math.max(1, Number(e.target.value)) })}
+            onChange={(e) =>
+              onChange({
+                ...child,
+                quantityRequested: Math.max(1, child.participationFloor, Number(e.target.value)),
+              })
+            }
             style={{ minWidth: 100 }}
           />
+          {child.participationFloor > 0 && (
+            <small className="adm-muted">
+              Minimum {child.participationFloor} because donors have already claimed or received items.
+            </small>
+          )}
         </label>
         <label>
           Condition
@@ -455,7 +480,16 @@ function RoleChildEditor({
         <div className="adm-child-actions">
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === 0} onClick={onMoveUp} aria-label="Move up">↑</button>
           <button type="button" className="adm-btn adm-btn-sm" disabled={index === total - 1} onClick={onMoveDown} aria-label="Move down">↓</button>
-          <button type="button" className="adm-btn adm-btn-sm adm-btn-danger" onClick={onRemove} aria-label="Remove role">Remove</button>
+          <button
+            type="button"
+            className="adm-btn adm-btn-sm adm-btn-danger"
+            disabled={child.participationFloor > 0}
+            title={child.participationFloor > 0 ? "This role has volunteer activity and cannot be removed." : undefined}
+            onClick={onRemove}
+            aria-label="Remove role"
+          >
+            Remove
+          </button>
         </div>
       </div>
       <div className="adm-form-row">
@@ -471,11 +505,21 @@ function RoleChildEditor({
           Quantity Needed *
           <input
             type="number"
-            min={1}
+            min={Math.max(1, child.participationFloor)}
             value={child.quantityNeeded}
-            onChange={(e) => onChange({ ...child, quantityNeeded: Math.max(1, Number(e.target.value)) })}
+            onChange={(e) =>
+              onChange({
+                ...child,
+                quantityNeeded: Math.max(1, child.participationFloor, Number(e.target.value)),
+              })
+            }
             style={{ minWidth: 100 }}
           />
+          {child.participationFloor > 0 && (
+            <small className="adm-muted">
+              Minimum {child.participationFloor} because volunteers are already interested or confirmed.
+            </small>
+          )}
         </label>
       </div>
       <div className="adm-form-row">
@@ -673,7 +717,15 @@ export function RequestsPage() {
       ...editForm,
       itemChildren: [
         ...editForm.itemChildren,
-        { _key: nextKey(), name: "", description: "", condition: "any", productUrl: "", quantityRequested: 1 },
+        {
+          _key: nextKey(),
+          name: "",
+          description: "",
+          condition: "any",
+          productUrl: "",
+          quantityRequested: 1,
+          participationFloor: 0,
+        },
       ],
     });
   }
@@ -705,7 +757,7 @@ export function RequestsPage() {
       ...editForm,
       roleChildren: [
         ...editForm.roleChildren,
-        { _key: nextKey(), name: "", description: "", quantityNeeded: 1 },
+        { _key: nextKey(), name: "", description: "", quantityNeeded: 1, participationFloor: 0 },
       ],
     });
   }
@@ -1095,7 +1147,7 @@ export function RequestsPage() {
                     <>
                       <img className="adm-img" src={request.imageUrl} alt={request.title} />
                       {request.imageGenerated && (
-                        <p className="adm-ai-label">AI-generated — review before approving.</p>
+                        <p className="adm-ai-label">AI-generated image.</p>
                       )}
                     </>
                   )}
@@ -1113,6 +1165,32 @@ export function RequestsPage() {
                       }}
                     />
                   </p>
+                  {(request.imageUrl === null || request.imageGenerated) && (
+                    <p className="adm-upload">
+                      <button
+                        type="button"
+                        className="adm-btn"
+                        disabled={busy}
+                        onClick={() =>
+                          void act(`/api/admin/requests/${detail.type}/${request.id}/generate-image`)
+                        }
+                      >
+                        {request.imageUrl ? "Regenerate auto image" : "Find an image automatically"}
+                      </button>{" "}
+                      {request.imageUrl !== null && request.imageGenerated && (
+                        <button
+                          type="button"
+                          className="adm-btn"
+                          disabled={busy}
+                          onClick={() =>
+                            void act(`/api/admin/requests/${detail.type}/${request.id}/remove-generated-image`)
+                          }
+                        >
+                          Remove auto image
+                        </button>
+                      )}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1153,7 +1231,7 @@ export function RequestsPage() {
               {request.imageUrl ? (
                 <>
                   <img className="adm-img" src={request.imageUrl} alt={request.title} />
-                  {request.imageGenerated && <p className="adm-ai-label">AI-generated — review before approving.</p>}
+                  {request.imageGenerated && <p className="adm-ai-label">AI-generated image.</p>}
                 </>
               ) : (
                 <p className="adm-muted">Image: {NOT_PROVIDED}</p>
@@ -1322,7 +1400,7 @@ export function RequestsPage() {
               {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}
 
               <div className="adm-actions">
-                {/* Edit button — available from pending and returned when editable */}
+                {/* Edit is independent of unapproval and remains available on active requests. */}
                 {isEditable && (
                   <button className="adm-btn" disabled={busy} onClick={startEdit}>
                     Edit Request
@@ -1387,7 +1465,9 @@ export function RequestsPage() {
               {request.status === "active" &&
                 !detail.editability.unapprovable &&
                 detail.editability.unapprovalReason && (
-                  <p className="adm-alert">{detail.editability.unapprovalReason}</p>
+                  <p className="adm-alert">
+                    {detail.editability.unapprovalReason} Editing remains available and does not change public status.
+                  </p>
                 )}
 
               {/* Not editable reason */}
@@ -1420,8 +1500,8 @@ export function RequestsPage() {
               {confirm?.kind === "unapprove" && (
                 <div className="adm-confirm">
                   <p>
-                    Unapprove {request.title}? It will leave public view immediately, return to Pending, and become
-                    editable. No email is sent.
+                    Unapprove {request.title}? It will leave public view immediately and return to Pending. Editing is
+                    available either way. No email is sent.
                   </p>
                   <button
                     className="adm-btn adm-btn-primary"

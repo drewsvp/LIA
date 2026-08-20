@@ -557,8 +557,8 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ---- Complete pre-approval correction. Status is deliberately preserved;
-  // return and recovery are explicit, separately recorded actions.
+  // ---- Complete staff correction. Status is deliberately preserved, including
+  // an active request's approval stamp and public visibility.
   app.post("/api/admin/requests/:type/:id/edit", requireStaff, async (req: Request, res: Response) => {
     const kind = parseKind(req.params.type);
     const id = req.params.id ?? "";
@@ -956,12 +956,18 @@ export function registerAdminRoutes(app: Express): void {
       const stored = await storeImage({ data: req.file.buffer, filename: req.file.originalname });
       let updated: AdminRequest;
       try {
-        updated = await saveStaffRequestImage({
+        const saved = await saveStaffRequestImage({
           kind,
           requestId: id,
           staffUserId: staffContext(req).userId,
           imageUrl: stored.url,
         });
+        updated = saved.request;
+        if (saved.previousImageUrl && saved.previousImageUrl !== stored.url) {
+          await deleteImage(saved.previousImageUrl).catch((deleteErr) => {
+            console.error(`[admin] orphaned request image ${saved.previousImageUrl} after replacement:`, deleteErr);
+          });
+        }
       } catch (err) {
         await deleteImage(stored.url).catch(() => undefined);
         throw err;
@@ -1001,7 +1007,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only pending requests and drafts previously returned by staff can have their image changed.",
+            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -1046,7 +1052,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only pending requests and drafts previously returned by staff can have their image changed.",
+            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -1089,7 +1095,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only pending requests and drafts previously returned by staff can have their image changed.",
+            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -1137,7 +1143,7 @@ export function registerAdminRoutes(app: Express): void {
           res.status(409).json({
             message:
               editability.reason ??
-              "Only pending requests and drafts previously returned by staff can have their image changed.",
+              "Only active or pending requests and drafts previously returned by staff can have their image changed.",
           });
           return;
         }

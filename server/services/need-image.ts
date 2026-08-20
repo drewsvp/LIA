@@ -379,7 +379,7 @@ export async function sourceNeedImage(
   }
 
   const marked = await dal.markImageGenPending(SYSTEM, requestId);
-  if (!marked) throw new NeedImageError("This request is no longer eligible for pre-approval image changes.");
+  if (!marked) throw new NeedImageError("This request is no longer eligible for image changes.");
   try {
     const subNames = (await dal.listSubNames(SYSTEM, requestId)).slice(0, 5);
 
@@ -390,11 +390,15 @@ export async function sourceNeedImage(
       overwriteGenerated: opts.overwriteGenerated,
     });
     if (updated === null) {
-      // An uploaded photo won the race — discard ours, uploaded wins.
+      // Discard the generated object whenever the guarded write loses.
       await deleteImage(stored.url).catch(() => undefined);
       const current = await dal.getById(SYSTEM, requestId);
       if (!current) throw new NeedImageError(`Request disappeared: ${requestId}`);
-      return { request: current, source: "ai" };
+      if (current.imageUrl !== null && !current.imageGenerated) {
+        // An uploaded photo won the race.
+        return { request: current, source: "ai" };
+      }
+      throw new NeedImageError("The request changed while its image was being generated. Reload and try again.");
     }
     if (previousUrl !== null && previousUrl !== stored.url) {
       // Regenerate replaced an old auto image; clean up the orphaned object.

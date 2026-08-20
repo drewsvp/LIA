@@ -58,7 +58,7 @@ The detail panel must show the request the way the public will see it, including
 
 ### Image upload
 
-Staff may add a themed image before approving. **Image upload on the detail panel**, staff-only, writing `image_url` and nothing else (D11). The upload button is accessible both in view mode and during the edit flow, as long as `editability.editable` is true.
+Staff may add or correct a themed image before approval or while a request is active. **Image upload on the detail panel**, staff-only, writes the image fields and does not change request lifecycle or participation data (D11). Upload and auto-image controls are accessible both in view mode and during the edit flow whenever `editability.editable` is true. An uploaded photo always takes precedence over an auto-generated image, including when the two operations race.
 
 ### Full request edit
 
@@ -72,11 +72,11 @@ When `editability.editable` is true, staff may edit the following fields:
 
 Changing the name or phone for the request's currently attached, same-email contact updates that canonical person record atomically. Entering a different email attaches that existing visible person as-is, or creates a new person if the email is new; it never overwrites a different person's identity from request-form text.
 
-**Children (items or roles):** add new, edit existing (all fields), reorder (move up/move down), remove. Each item has: name, description, condition (new / gently_used / any), product URL, quantity requested. Each role has: name, description, quantity needed.
+**Children (items or roles):** add new, edit existing (all fields), reorder (move up/move down), remove. Each item has: name, description, condition (new / gently_used / any), product URL, quantity requested. Each role has: name, description, quantity needed. While active, a child with pledge, receipt, signup, interest, or confirmation history cannot be removed. Requested/needed quantity cannot be lower than the greater of that child's participation counters, and an active request must retain at least one child. Children without activity may still be removed.
 
-Client-side validation mirrors the organization editors: title and description are required; every contact field is required and email must be valid; deadline date is required for date-specific requests; volunteer details and event location are required; people helped, if provided, must be a non-negative whole number; every child needs a name, description, and whole-number quantity of at least 1; product URLs, if provided, must be valid HTTP(S) URLs. Server rejection messages name the invalid field or child row and state that nothing changed; the generic save failure is reserved for unexpected failures.
+Client-side validation mirrors the organization editors: title and description are required; every contact field is required and email must be valid; deadline date is required for date-specific requests; volunteer details and event location are required; people helped, if provided, must be a non-negative whole number; each request needs at least one child; every child needs a name, description, and whole-number quantity of at least 1; product URLs, if provided, must be valid HTTP(S) URLs. For activity-bearing active children, the editor displays and enforces the participation floor and disables Remove. Server checks remain authoritative: rejection messages name the invalid field or child row and state that nothing changed; the generic save failure is reserved for unexpected failures.
 
-Save preserves the request's current status. The edit endpoint does not change status.
+Save preserves the request's current status. For an active request it also preserves `approved_at`, `approved_by`, public visibility, every activity row and counter, and once-only approval/matching-notification state. The edit endpoint does not write a lifecycle event or queue any notification.
 
 ## 6. Actions
 
@@ -109,16 +109,16 @@ Save preserves the request's current status. The edit endpoint does not change s
 - Emails queued: none. The organization was already told it was approved.
 
 **Edit Request**
-- Enabled when: `editability.editable` is true (available from pending and returned detail views, per server-determined editability).
-- Does: opens the inline edit form. Staff may edit all request, contact, deadline, location, and copy fields, and add/edit/reorder/remove child items or roles with their quantities. Saving calls POST `/api/admin/requests/:type/:id/edit` with the full updated payload. Status is not changed by this action.
+- Enabled when: `editability.editable` is true (available for pending requests, staff-returned drafts, and active requests, including active requests with activity; archived and ordinary organization drafts remain unavailable).
+- Does: opens the inline edit form. Staff may edit all request, contact, deadline, location, category, image, and copy fields, and safely reconcile child items or roles. Saving calls POST `/api/admin/requests/:type/:id/edit` with the full updated payload. Status, approval stamp, activity, and notification claims are not changed by this action.
 - Cancel discards all unsaved changes.
 
 **Unapprove**, from the Active tab
 - Enabled when: the request is `active` and the server-derived activity check finds no item pledge, volunteer signup, claim, receipt, interest, or confirmation activity.
-- Confirms: names the request and states that it immediately leaves public view, returns to Pending, becomes editable, and sends no email.
+- Confirms: names the request and states that it immediately leaves public view, returns to Pending, and sends no email. Editing is already available and remains available after unapproval.
 - Does: under a request-row lock, rechecks active state and activity, sets status to `pending`, clears the current `approved_at` and `approved_by`, and writes one `active → pending` approval event with the acting staff user. All writes commit or roll back together.
 - Emails queued: none.
-- If any activity exists, the action is disabled and the server-derived reason explains that the request cannot be unapproved or edited. Staff cannot change or reset that activity from this surface.
+- If any activity exists, the action is disabled and the server-derived reason explains that the request cannot be unapproved. Edit Request remains available and explicitly preserves that activity. Staff cannot change or reset activity from this surface.
 
 **Move to Pending** (Returned tab only)
 - Enabled when: the request has `status = 'draft'` (returned draft).
@@ -136,8 +136,9 @@ Save preserves the request's current status. The edit endpoint does not change s
 | Request's organization is not `approved` | Approve is disabled, with a stated reason. Approving a request from an unapproved organization would publish nothing, since public queries filter on organization status |
 | Primary contact and creator are the same person | Result message says so, and one email is queued |
 | `editability.editable` is false | Edit button not shown; image upload not shown; `editability.reason` displayed as a note |
-| Active request has no activity | Unapprove is enabled; Edit remains unavailable until unapproval succeeds |
-| Active request has a pledge, receipt, signup, interest, or confirmation | Unapprove is disabled and the activity blocking reason is shown; Edit remains unavailable |
+| Active request has no activity | Unapprove and Edit Request are both enabled; the actions are independent |
+| Active request has a pledge, receipt, signup, interest, or confirmation | Unapprove is disabled and its activity-blocking reason is shown; Edit Request remains enabled |
+| Active edit removes an activity-bearing child or lowers its quantity below participation | Save is rejected with a child-specific explanation; all request, contact, category, and child changes roll back |
 | Request has a latest return note | Return note and date shown at top of detail panel, with a disclaimer that it is history only |
 | Returned tab selected | Column header shows "Returned" date; rows sorted by return date; Move to Pending action available |
 
@@ -153,9 +154,9 @@ Save preserves the request's current status. The edit endpoint does not change s
 | Approve result, same person | {title} is now public. Approval email queued to {email}. |
 | Return to draft prompt | What needs to change? This note is saved to the request history as a record only — it does not trigger any AI processing, send any email, or make any other change to the request. The organization is not emailed; staff must contact the organization directly. |
 | Return to draft result | {title} returned to draft. The note was saved as history only; no changes were made and no email was sent. Contact the organization directly. |
-| Unapprove confirmation | Unapprove {title}? It will leave public view immediately, return to Pending, and become editable. No email is sent. |
+| Unapprove confirmation | Unapprove {title}? It will leave public view immediately and return to Pending. Editing is available either way. No email is sent. |
 | Unapprove result | {title} moved to Pending and is no longer public. It can now be edited and re-approved. No email was sent. |
-| Unapprove blocked by activity | This request has donor or volunteer activity and cannot be unapproved or edited. |
+| Unapprove blocked by activity | This request has donor or volunteer activity and cannot be unapproved. Editing remains available and does not change public status. |
 | Archive confirmation | Archive {title}? It will stop appearing publicly. No email is sent. |
 | Archive result | {title} archived. |
 | Reinstate result | {title} is public again. |
@@ -185,6 +186,7 @@ Per ADMIN-01 section 4. `approved_by` comes from the session user.
 | Request already approved by another staff member | No-op success, row refreshes. Approval is idempotent |
 | Request already unapproved by another staff member | Conflict names the current status; no second event is written |
 | Activity races unapproval | Receipt/confirmation writes and unapproval lock parent then children. Exactly one wins: committed activity rejects unapproval, while committed unapproval rejects the stale activity save. A Pending request never gains activity from the race |
+| Pledge/signup races an active edit | Both paths lock request first and children second. If activity commits first, the edit re-evaluates the now-current history and quantity floor; it either safely preserves it or rejects the unsafe change with no partial write. If the edit safely removes an unused child first, stale public activity for that child is rejected |
 | Email dispatch fails after approval | The approval stands, the request is public, the failure is logged and visible at ADMIN-06. The result message says the email failed rather than claiming it sent |
 | Re-approval recipient already has a successful approval notification | Request is published with a fresh stamp/event; no duplicate email row or provider call is made, and the result says it was already sent |
 | Return to draft with an empty note | Blocked |
@@ -213,6 +215,8 @@ Per ADMIN-01 section 4. `approved_by` comes from the session user.
 - Approving twice sends one email.
 - An active request with no activity can be unapproved to Pending; it immediately leaves both public browse and detail surfaces, clears the current approval stamp, and becomes editable.
 - Unapproval is refused for any item pledge/claim/receipt or volunteer signup/interest/confirmation activity, with no partial status, stamp, or history write.
+- Active requests remain editable with activity; successful edits preserve active/public status, approval stamp, activity rows/counters, and approval/matching notification claims.
+- Active edits can add and reorder children and remove children without activity. They atomically reject removal of an activity-bearing child, quantity below participation, or an empty child list.
 - Unapproval and subsequent re-approval each write a distinct approval event with the acting staff user; re-approval records a fresh `approved_at` and `approved_by`.
 - Re-approval does not create or send a duplicate approval notification for a recipient already notified successfully, while failed and disabled/skipped attempts remain retryable.
 - An approved request appears immediately on the correct public browse surface.
@@ -221,7 +225,7 @@ Per ADMIN-01 section 4. `approved_by` comes from the session user.
 - Return to draft queues no email (D45). The prompt reminds the operator to contact the organization directly and states that the note triggers no AI processing.
 - Archive sets `archived_reason = 'manual'`.
 - Reinstating an archived request returns it to public view.
-- Staff image upload writes `image_url` and nothing else.
+- Staff image upload and auto-image controls work for editable active requests without changing lifecycle or participation data; uploaded-photo precedence and storage cleanup remain enforced.
 - No path on this surface writes a quantity column (claimed, received, interested, confirmed).
 - The pending count in the navigation matches the queue.
 - Edit Request is shown when `editability.editable` is true and hidden otherwise.
