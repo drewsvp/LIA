@@ -189,7 +189,12 @@ as one person rescuing another.
 
 type SourcedImage = { data: Buffer; filename: string };
 
-function buildPrompt(kind: RequestKind, request: ImageableRequest, subNames: string[]): string {
+/**
+ * The exact prompt sent to the provider. Exported so the guardrails can be
+ * previewed and tuned (scripts/print-need-image-prompt.ts) without spending
+ * a generation.
+ */
+export function buildPrompt(kind: RequestKind, request: ImageableRequest, subNames: string[]): string {
   const subject = [
     `A warm, realistic photograph of: ${request.title}.`,
     subNames.length > 0
