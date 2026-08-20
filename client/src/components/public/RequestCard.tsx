@@ -2,10 +2,14 @@ import { useState, type ReactElement } from "react";
 import { Link } from "wouter";
 
 /**
- * Public browse card, shared by PB-01 and PB-03. Both surfaces use a square
- * request image and, where available, a circular organization-logo overlay at
- * its top-left. Title, labels, location source, and button copy remain
- * surface-specific props. Empty fields hide their line entirely.
+ * Public browse card, shared by PB-01 and PB-03. Confirmed orders:
+ *   PB-01 §5: org icon (above), photo, title on a navy bar, plain labels,
+ *             "City" value from the org, button "Learn More / View Details".
+ *   PB-03 §5: circular org icon overlaid on the photo top-left, title in
+ *             bold caps, UNDERLINED labels, "Location" = event_location,
+ *             button "Learn More / View Roles".
+ * The differences arrive as props — never guessed per surface. Empty fields
+ * hide their line entirely.
  */
 export type RequestCardProps = {
   href: string;
@@ -19,16 +23,18 @@ export type RequestCardProps = {
   buttonText: string;
   titleVariant: "bar" | "caps";
   underlineLabels?: boolean;
+  iconPlacement: "above" | "overlay";
+  imageShape?: "square" | "wide";
 };
 
 /** Standard placeholder graphic for requests without an image (PB-01 §7). */
-function PlaceholderGraphic(): ReactElement {
+function PlaceholderGraphic({ imageShape }: Pick<RequestCardProps, "imageShape">): ReactElement {
   return (
     <div
       aria-hidden
       style={{
         width: "100%",
-        aspectRatio: "1 / 1",
+        aspectRatio: imageShape === "square" ? "1 / 1" : "16 / 10",
         background: "#e8e8e8",
         display: "flex",
         alignItems: "center",
@@ -46,6 +52,7 @@ export function RequestCard(props: RequestCardProps): ReactElement {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = props.imageUrl != null && props.imageUrl.trim() !== "" && !imageFailed;
   const hasLogo = props.orgLogoUrl != null && props.orgLogoUrl.trim() !== "";
+  const imageAspectRatio = props.imageShape === "square" ? "1 / 1" : "16 / 10";
   const labelStyle = {
     color: "var(--color-navy)",
     textDecoration: props.underlineLabels ? "underline" : "none",
@@ -62,18 +69,27 @@ export function RequestCard(props: RequestCardProps): ReactElement {
         overflow: "hidden",
       }}
     >
+      {props.iconPlacement === "above" && hasLogo && (
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 12px 0" }}>
+          <img
+            src={props.orgLogoUrl ?? undefined}
+            alt={`${props.orgName} logo`}
+            style={{ height: 44, width: 44, objectFit: "contain" }}
+          />
+        </div>
+      )}
       <div style={{ padding: "12px 12px 0", position: "relative" }}>
         {showImage ? (
           <img
             src={props.imageUrl ?? undefined}
             alt={props.title}
             onError={() => setImageFailed(true)}
-            style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", display: "block" }}
+            style={{ width: "100%", aspectRatio: imageAspectRatio, objectFit: "cover", display: "block" }}
           />
         ) : (
-          <PlaceholderGraphic />
+          <PlaceholderGraphic imageShape={props.imageShape} />
         )}
-        {hasLogo && (
+        {props.iconPlacement === "overlay" && hasLogo && (
           <img
             src={props.orgLogoUrl ?? undefined}
             alt={`${props.orgName} logo`}

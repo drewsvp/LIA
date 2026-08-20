@@ -480,10 +480,6 @@ The guardrail block is held fixed per kind, never varied per request: a shared c
 
 Generation has no post-hoc verification, so every auto-sourced image carries an **"AI-generated — review before approving."** label beside it on the admin approval screen. A full review queue is phase two; so is alt text on generated images.
 
-Two guardrail rules earned their own carve-outs once we looked at real output. The ban on one figure positioned above or handing something down to another is about **donor-and-recipient staging between strangers**, and read literally it also forbade a parent leaning over their own baby's crib; it is now scoped to benefactor framing, with ordinary closeness — bending down, kneeling beside a child, looking down at a baby — explicitly welcomed. "Downcast gaze" is likewise scoped to shame and defeat, since looking down at your own child is tenderness.
-
-Casting is named explicitly and rotated by a stable hash of the request id. Silence in a prompt is not neutrality: with no instruction the model returns one default person every time, and two unrelated test prompts came back with visibly the same woman — every family on the site would have looked alike. The hash keeps casting varied across requests but stable for any one request, so a staff Regenerate returns the same family instead of reshuffling who they are. Volunteer scenes draw a second, always-different descriptor for the person being helped, both ends from the same rotation, so no fixed pairing can settle in.
-
 *(D66 was already taken by the magic-link decision above; this decision was drafted as D66 and renumbered.)*
 
 ---

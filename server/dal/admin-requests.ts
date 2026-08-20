@@ -118,12 +118,7 @@ export async function preApprovalEditability(
   ctx: DbContext,
   type: "item" | "volunteer",
   requestId: string,
-): Promise<{
-  editable: boolean;
-  reason: string | null;
-  unapprovable: boolean;
-  unapprovalReason: string | null;
-}> {
+): Promise<{ editable: boolean; reason: string | null }> {
   const table = type === "item" ? "item_requests" : "volunteer_requests";
   const children = type === "item" ? "items" : "volunteer_roles";
   const requestFk = type === "item" ? "item_request_id" : "volunteer_request_id";
@@ -154,51 +149,13 @@ export async function preApprovalEditability(
     ),
   );
   const row = rows[0];
-  if (!row) {
-    return {
-      editable: false,
-      reason: "Request not found.",
-      unapprovable: false,
-      unapprovalReason: "Request not found.",
-    };
-  }
-  if (row.status === "active") {
-    const activityReason = "This request has donor or volunteer activity and cannot be unapproved or edited.";
-    return {
-      editable: false,
-      reason: row.hasActivity ? activityReason : "Unapprove this request before editing it.",
-      unapprovable: !row.hasActivity,
-      unapprovalReason: row.hasActivity ? activityReason : null,
-    };
-  }
-  if (row.approvedAt !== null || row.status === "archived") {
-    return {
-      editable: false,
-      reason: "Approved or archived requests cannot be edited.",
-      unapprovable: false,
-      unapprovalReason: "Only an active request can be unapproved.",
-    };
+  if (!row) return { editable: false, reason: "Request not found." };
+  if (row.approvedAt !== null || row.status === "active" || row.status === "archived") {
+    return { editable: false, reason: "Approved or archived requests cannot be edited." };
   }
   if (row.status === "draft" && !row.isReturnedDraft) {
-    return {
-      editable: false,
-      reason: "Only drafts previously returned for changes can be edited by staff.",
-      unapprovable: false,
-      unapprovalReason: "Only an active request can be unapproved.",
-    };
+    return { editable: false, reason: "Only drafts previously returned for changes can be edited by staff." };
   }
-  if (row.hasActivity) {
-    return {
-      editable: false,
-      reason: "This request has donor or volunteer activity and cannot be edited.",
-      unapprovable: false,
-      unapprovalReason: "Only an active request can be unapproved.",
-    };
-  }
-  return {
-    editable: true,
-    reason: null,
-    unapprovable: false,
-    unapprovalReason: "Only an active request can be unapproved.",
-  };
+  if (row.hasActivity) return { editable: false, reason: "This request has donor or volunteer activity and cannot be edited." };
+  return { editable: true, reason: null };
 }

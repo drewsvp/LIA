@@ -493,8 +493,8 @@ export function ItemDetailPage(): ReactElement {
                         />
                         {fieldErrors.phone != null && <p className="pb2-field-error">{fieldErrors.phone}</p>}
                       </div>
-                      {/* 21px bold labels with unchanged 26px checkbox controls. */}
-                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, lineHeight: 1.3, marginBottom: 16 }}>
+                      {/* Doubled sizing: 28px labels, 26px boxes (2x the previous 14px/13px). */}
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 16 }}>
                         <input
                           type="checkbox"
                           checked={agree}
@@ -503,7 +503,7 @@ export function ItemDetailPage(): ReactElement {
                         />
                         I agree to fulfill this request within the next 2 weeks.
                       </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, lineHeight: 1.3, marginBottom: 16 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 16 }}>
                         <input
                           type="checkbox"
                           checked={createProfile}
@@ -512,7 +512,7 @@ export function ItemDetailPage(): ReactElement {
                         />
                         Create a Donor Profile so I can track all my donations.
                       </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, lineHeight: 1.3, marginBottom: 20 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 20 }}>
                         <input
                           type="checkbox"
                           checked={subscribeDigest}

@@ -9,7 +9,7 @@
  */
 import { buildPrompt, type RequestKind } from "../server/services/need-image";
 
-const [kindArg, title, description = "", subNamesArg = "", requestId = "preview"] = process.argv.slice(2);
+const [kindArg, title, description = "", subNamesArg = ""] = process.argv.slice(2);
 
 if (kindArg !== "item" && kindArg !== "volunteer") {
   console.error('First argument must be "item" or "volunteer".');
@@ -29,7 +29,7 @@ const subNames = subNamesArg
 console.log(
   buildPrompt(
     kind,
-    { id: requestId, title, description: description === "" ? null : description, imageUrl: null, imageGenerated: false },
+    { id: "preview", title, description: description === "" ? null : description, imageUrl: null, imageGenerated: false },
     subNames,
   ),
 );

@@ -462,47 +462,6 @@ export async function transitionStatus(ctx: DbContext, input: VolunteerTransitio
 }
 
 /**
- * ADMIN-02 staff correction only; deliberately excluded from the member-facing
- * ALLOWED_TRANSITIONS map. The service locks and checks activity first, while
- * this DAL rechecks active state and atomically clears the live approval stamp
- * with the active -> pending audit event.
- */
-export async function unapproveForCorrectionInTx(
-  c: PoolClient,
-  requestId: string,
-  actorUserId: string,
-): Promise<VolunteerRequest> {
-  const current = await q<{ status: RequestStatus }>(
-    c,
-    `select status from volunteer_requests where id = $1 for update`,
-    [requestId],
-  );
-  const from = current[0]?.status;
-  if (!from) throw new Error(`volunteerRequests.unapproveForCorrection: request not found: ${requestId}`);
-  if (from !== "active") {
-    throw new Error(`volunteerRequests.unapproveForCorrection: only active requests can be unapproved (status: ${from})`);
-  }
-  await c.query(
-    `update volunteer_requests
-        set status = 'pending', approved_at = null, approved_by = null
-      where id = $1`,
-    [requestId],
-  );
-  await insertInTx(c, {
-    entityType: "volunteer_request",
-    entityId: requestId,
-    fromStatus: "active",
-    toStatus: "pending",
-    actorUserId,
-    note: "staff correction",
-  });
-  const rows = await q<VolunteerRequest>(c, `select ${COLS} from volunteer_requests r where r.id = $1`, [requestId]);
-  const request = rows[0];
-  if (!request) throw new Error(`volunteerRequests.unapproveForCorrection: reload failed: ${requestId}`);
-  return request;
-}
-
-/**
  * ADMIN-02 Reinstate: archived -> active, staff-only. Deliberately NOT an
  * edge in ALLOWED_TRANSITIONS — the generic map keeps the member lane honest
  * (archived reopens only to pending, MP-09 D2). Reinstating is not a

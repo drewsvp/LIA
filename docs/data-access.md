@@ -136,18 +136,8 @@ when missing; mutations throw on missing rows.
   — FOR UPDATE; stamps submitted/approved/archived timestamps; **approval event same-tx**.
   Legal edges only (`ALLOWED_TRANSITIONS`): `draft → pending` (submit), `pending → draft`
   (return for edits), `pending → active` (approve), `draft|pending|active → archived`
-  (`archivedReason` **required**). Archived staff reinstatement uses its dedicated DAL function rather
-  than this generic map.
+  (`archivedReason` **required**). Archived is terminal — resurrecting means a new draft.
   Same-status and every other edge throw.
-- `unapproveForCorrectionInTx(client, requestId, actorUserId): …Request` — ADMIN-02-only
-  `active → pending` correction transition. It is deliberately absent from `ALLOWED_TRANSITIONS`
-  so member flows cannot call it. The staff service locks the request, rechecks all activity through
-  `dal.items.assertNoItemActivityInTx` / `dal.volunteerRoles.assertNoVolunteerActivityInTx`, then this
-  function clears `approved_at`/`approved_by` and writes the acting user's approval event atomically.
-- Member receipt and confirmation saves use the same request-first, child-second lock order. A
-  `quantity_received` or `quantity_confirmed` change rechecks `status = 'active'` while holding the
-  request lock. Therefore either the activity write commits first and blocks unapproval, or
-  unapproval commits first and the stale activity write is rejected; activity cannot land on Pending.
 - `archive(ctx, requestId, reason, actorUserId?, note?): …Request` — convenience for the above.
 
 ### dal.items / dal.volunteerRoles (mirrored)
@@ -188,9 +178,6 @@ when missing; mutations throw on missing rows.
   `{ duplicate: false, entry } | { duplicate: true }` — the once-only index
   (`email_log_once_idx`) makes repeat entity-bound sends a readable outcome, not an error.
 - `markSent(ctx, emailLogId, providerMessageId)` / `markFailed(ctx, emailLogId, error)`
-- `existsForRecipientInTx(client, { templateKey, entityType, entityId, toEmail }): boolean` — matches
-  the once-only index inside a composed approval transaction. Non-failed/non-skipped rows suppress a
-  duplicate; failed and disabled/skipped attempts remain eligible for a later approval send.
 - `listWithFilters(ctx, { status?, templateKey?, toEmail?, limit? }): EmailLogEntry[]` (ADMIN-09)
 - `countFailuresLastSevenDays(ctx): number`
 - Surfaces should not call these directly — use `sendEmail()` (§5), which owns the discipline.

@@ -3,8 +3,6 @@
  *
  * Staff may fully correct a pending request, or a draft that staff previously
  * returned, only before approval and before any donor/volunteer activity.
- * An active request with no activity can first take the audited, staff-only
- * unapprove-to-Pending correction transition.
  * Request fields, contact attachment, and the complete ordered child structure
  * commit together. Activity counters are not present in the input types and the
  * child DALs reject the transaction if any activity exists.
@@ -82,12 +80,13 @@ type LockedRequest = {
   contactPersonId: string | null;
 };
 
-async function lockRequest(
+async function lockEditableRequest(
   c: PoolClient,
   kind: RequestKind,
   requestId: string,
 ): Promise<LockedRequest> {
   const requestTable = kind === "item" ? "item_requests" : "volunteer_requests";
+  const entityType = kind === "item" ? "item_request" : "volunteer_request";
   const locked = await c.query<LockedRequest>(
     `select status, approved_at as "approvedAt", org_id as "orgId",
             contact_person_id as "contactPersonId"
@@ -98,16 +97,6 @@ async function lockRequest(
   );
   const request = locked.rows[0];
   if (!request) throw new RequestNotFoundError(requestId);
-  return request;
-}
-
-async function lockEditableRequest(
-  c: PoolClient,
-  kind: RequestKind,
-  requestId: string,
-): Promise<LockedRequest> {
-  const request = await lockRequest(c, kind, requestId);
-  const entityType = kind === "item" ? "item_request" : "volunteer_request";
   if (request.approvedAt !== null || (request.status !== "pending" && request.status !== "draft")) {
     throw new StaffRequestEditConflictError("Approved or archived requests cannot be edited.");
   }
@@ -162,15 +151,12 @@ async function resolveContactInTx(
   );
 }
 
-function mapActivityError(
-  err: unknown,
-  reason = "This request has donor or volunteer activity and cannot be edited.",
-): never {
+function mapActivityError(err: unknown): never {
   if (
     err instanceof dal.items.RequestHasItemActivityError ||
     err instanceof dal.volunteerRoles.RequestHasVolunteerActivityError
   ) {
-    throw new StaffRequestEditConflictError(reason);
+    throw new StaffRequestEditConflictError("This request has donor or volunteer activity and cannot be edited.");
   }
   if (
     err instanceof dal.items.UnknownItemOnRequestError ||
@@ -261,37 +247,6 @@ export async function moveReturnedRequestToPending(input: {
     });
   } catch (err) {
     mapActivityError(err);
-  }
-}
-
-/**
- * Active -> pending correction lane. Lock order is request then child rows,
- * matching public activity writes; status and activity are both rechecked in
- * the transaction before the current approval stamp is cleared.
- */
-export async function unapproveRequestForCorrection(input: {
-  kind: RequestKind;
-  requestId: string;
-  staffUserId: string;
-}): Promise<ItemRequest | VolunteerRequest> {
-  const staff: DbContext = { kind: "staff", userId: input.staffUserId };
-  try {
-    return await withDbContext(staff, async (c) => {
-      const locked = await lockRequest(c, input.kind, input.requestId);
-      if (locked.status !== "active") {
-        throw new StaffRequestEditConflictError(
-          `Only an active request can be unapproved. This one is ${locked.status}.`,
-        );
-      }
-      if (input.kind === "item") {
-        await dal.items.assertNoItemActivityInTx(c, input.requestId);
-        return dal.itemRequests.unapproveForCorrectionInTx(c, input.requestId, input.staffUserId);
-      }
-      await dal.volunteerRoles.assertNoVolunteerActivityInTx(c, input.requestId);
-      return dal.volunteerRequests.unapproveForCorrectionInTx(c, input.requestId, input.staffUserId);
-    });
-  } catch (err) {
-    mapActivityError(err, "This request has donor or volunteer activity and cannot be unapproved or edited.");
   }
 }
 

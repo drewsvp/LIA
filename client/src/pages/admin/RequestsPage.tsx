@@ -10,8 +10,7 @@
  * child items or roles (add/edit/reorder/remove with quantities).
  * Approve confirms with the §8 copy naming the recipients; return-to-draft
  * demands a note and reminds the operator that no email goes out (D45);
- * archive confirms it stops public display; eligible active requests may be
- * unapproved to Pending for correction; reinstate is archived-tab only.
+ * archive confirms it stops public display; reinstate is archived-tab only.
  * Returned drafts can be moved back to pending without re-submission.
  * Every result lands in place, verbatim from §8 where the spec binds it.
  */
@@ -88,15 +87,10 @@ type Detail = {
   requestContact: { firstName: string; lastName: string; email: string; phone: string | null } | null;
   children: ItemChild[] | RoleChild[];
   latestReturn: { note: string; createdAt: string } | null;
-  editability: {
-    editable: boolean;
-    reason: string | null;
-    unapprovable: boolean;
-    unapprovalReason: string | null;
-  };
+  editability: { editable: boolean; reason: string | null };
 };
 
-type PendingConfirm = { kind: "approve" | "archive" | "unapprove" } | null;
+type PendingConfirm = { kind: "approve" | "archive" } | null;
 
 // ── Edit-form shape ─────────────────────────────────────────────────────────
 
@@ -501,7 +495,7 @@ export function RequestsPage() {
     }
   }
 
-  async function act(path: string, body?: unknown, onSuccess?: () => void) {
+  async function act(path: string, body?: unknown) {
     setBusy(true);
     setResult(null);
     try {
@@ -511,7 +505,6 @@ export function RequestsPage() {
         setConfirm(null);
         setReturning(false);
         setNote("");
-        onSuccess?.();
       }
     } catch {
       setResult({ kind: "error", text: FAILURE });
@@ -864,7 +857,7 @@ export function RequestsPage() {
                       }
                     >
                       <option value="date_specific">Date specific</option>
-                      <option value="until_fulfilled">Until fulfilled</option>
+                      {detail.type === "item" && <option value="until_fulfilled">Until fulfilled</option>}
                       <option value="ongoing">Ongoing</option>
                     </select>
                   </label>
@@ -1237,18 +1230,9 @@ export function RequestsPage() {
                   </>
                 )}
                 {request.status === "active" && (
-                  <>
-                    <button
-                      className="adm-btn adm-btn-primary"
-                      disabled={busy || !detail.editability.unapprovable}
-                      onClick={() => setConfirm({ kind: "unapprove" })}
-                    >
-                      Unapprove
-                    </button>
-                    <button className="adm-btn" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
-                      Archive
-                    </button>
-                  </>
+                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
+                    Archive
+                  </button>
                 )}
                 {request.status === "archived" && (
                   <button
@@ -1274,11 +1258,6 @@ export function RequestsPage() {
               {request.status === "pending" && approveBlockedReason && (
                 <p className="adm-alert">{approveBlockedReason}</p>
               )}
-              {request.status === "active" &&
-                !detail.editability.unapprovable &&
-                detail.editability.unapprovalReason && (
-                  <p className="adm-alert">{detail.editability.unapprovalReason}</p>
-                )}
 
               {/* Not editable reason */}
               {!isEditable && detail.editability.reason && (
@@ -1291,8 +1270,7 @@ export function RequestsPage() {
                 <div className="adm-confirm">
                   {/* §8 verbatim. */}
                   <p>
-                    Approve {request.title}? This publishes the request and sends any approval email not already
-                    delivered to {recipientsText}.
+                    Approve {request.title}? This publishes the request and emails {recipientsText}.
                   </p>
                   <button
                     className="adm-btn adm-btn-primary"
@@ -1300,31 +1278,6 @@ export function RequestsPage() {
                     onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/approve`)}
                   >
                     Approve
-                  </button>
-                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
-                    Cancel
-                  </button>
-                </div>
-              )}
-
-              {confirm?.kind === "unapprove" && (
-                <div className="adm-confirm">
-                  <p>
-                    Unapprove {request.title}? It will leave public view immediately, return to Pending, and become
-                    editable. No email is sent.
-                  </p>
-                  <button
-                    className="adm-btn adm-btn-primary"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(
-                        `/api/admin/requests/${detail.type}/${request.id}/unapprove`,
-                        undefined,
-                        () => setTab("pending"),
-                      )
-                    }
-                  >
-                    Unapprove
                   </button>
                   <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
                     Cancel
