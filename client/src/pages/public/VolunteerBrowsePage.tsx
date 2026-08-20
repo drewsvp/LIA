@@ -101,7 +101,6 @@ export function VolunteerBrowsePage(): ReactElement {
                 buttonText="Learn More / View Roles"
                 titleVariant="caps"
                 underlineLabels
-                iconPlacement="overlay"
               />
             ))}
           </div>
