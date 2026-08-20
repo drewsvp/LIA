@@ -252,11 +252,13 @@ export type TransitionInput = {
  * includes the legacy archive date and date-specific member deadlines, while
  * keeping a request live through its full LA calendar day.
  */
+const ITEM_REQUEST_CURRENT_LA_DATE = `(clock_timestamp() at time zone 'America/Los_Angeles')::date`;
+
 const ITEM_REQUEST_EXPIRED = `item_request_expired_on(
   r.deadline_type,
   r.deadline_date,
   r.expires_on,
-  item_request_current_la_date()
+  ${ITEM_REQUEST_CURRENT_LA_DATE}
 )`;
 
 /**

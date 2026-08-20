@@ -152,12 +152,18 @@ function laDateAndMinutes(now: Date): { date: string; minutesOfDay: number } {
 let lastRunLaDate: string | null = null;
 
 export function startExpiryScheduler(): void {
+  const startPass = (): void => {
+    void runExpiryOnce().catch((err) => {
+      console.error("[expiry] pass FAILED:", err);
+    });
+  };
+
   const tick = (): void => {
     const { date, minutesOfDay } = laDateAndMinutes(new Date());
     if (minutesOfDay >= RUN_AT_MINUTES_OF_DAY && lastRunLaDate !== date) {
       // Marked before the pass so the next tick cannot double-start it.
       lastRunLaDate = date;
-      void runExpiryOnce();
+      startPass();
     }
   };
   setInterval(tick, 60_000);

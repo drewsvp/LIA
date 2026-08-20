@@ -1353,6 +1353,14 @@ ALTER TABLE ONLY public.item_requests
 
 
 --
+-- Name: items items_id_item_request_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.items
+    ADD CONSTRAINT items_id_item_request_id_key UNIQUE (id, item_request_id);
+
+
+--
 -- Name: items items_legacy_wix_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1590,6 +1598,14 @@ ALTER TABLE ONLY public.volunteer_requests
 
 ALTER TABLE ONLY public.volunteer_requests
     ADD CONSTRAINT volunteer_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: volunteer_roles volunteer_roles_id_volunteer_request_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.volunteer_roles
+    ADD CONSTRAINT volunteer_roles_id_volunteer_request_id_key UNIQUE (id, volunteer_request_id);
 
 
 --
