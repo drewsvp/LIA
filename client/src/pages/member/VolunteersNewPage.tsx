@@ -24,11 +24,16 @@ const VOLUNTEER_DEADLINE_OPTIONS: ReadonlyArray<{ value: DeadlineTypeValue; labe
 ];
 
 type Overview = { org: { name: string } };
+type VolunteerCategory = { id: string; name: string; isActive: boolean };
 
 export function VolunteersNewPage() {
   const [, navigate] = useLocation();
   const overviewQuery = useQuery<Overview>({ queryKey: ["/api/dashboard/overview"] });
+  const categoriesQuery = useQuery<{ categories: VolunteerCategory[] }>({
+    queryKey: ["/api/dashboard/volunteer-categories"],
+  });
   const orgName = overviewQuery.data?.org.name ?? "";
+  const categories = categoriesQuery.data?.categories ?? [];
 
   const [contactFirstName, setContactFirstName] = useState("");
   const [contactLastName, setContactLastName] = useState("");
@@ -41,6 +46,7 @@ export function VolunteersNewPage() {
   const [description, setDescription] = useState("");
   const [eventLocation, setEventLocation] = useState("");
   const [peopleHelped, setPeopleHelped] = useState("");
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -58,6 +64,7 @@ export function VolunteersNewPage() {
     if (title.trim() === "") errs.title = REQUIRED_MSG;
     if (description.trim() === "") errs.description = REQUIRED_MSG;
     if (eventLocation.trim() === "") errs.eventLocation = REQUIRED_MSG;
+    if (categoryIds.length === 0) errs.categoryIds = "Select at least one volunteer category.";
     const ph = peopleHelped.trim();
     if (ph === "") errs.peopleHelped = REQUIRED_MSG;
     else if (!/^\d+$/.test(ph)) errs.peopleHelped = "Please enter a whole number of zero or more.";
@@ -87,6 +94,7 @@ export function VolunteersNewPage() {
           description: description.trim(),
           eventLocation: eventLocation.trim(),
           peopleHelped: Number(peopleHelped.trim()),
+          categoryIds,
         }),
       });
       if (res.ok) {
@@ -304,13 +312,54 @@ export function VolunteersNewPage() {
           />
           {fieldError("peopleHelped")}
 
+          <fieldset className="mp10-categories" aria-describedby={errors.categoryIds ? "mp10-categories-error" : undefined}>
+            <legend className="mp5-label">Volunteer Categories *</legend>
+            <p className="mp7-helper">Select every category that fits this opportunity.</p>
+            {categoriesQuery.isLoading ? (
+              <p className="mp7-helper">Loading categories…</p>
+            ) : categoriesQuery.isError ? (
+              <p className="mp3-field-error" role="alert">
+                Categories could not be loaded. Please refresh and try again.
+              </p>
+            ) : categories.length === 0 ? (
+              <p className="mp3-field-error" role="alert">
+                No volunteer categories are available yet. Please contact staff before posting this request.
+              </p>
+            ) : (
+              <div className="mp10-category-list">
+                {categories.map((category) => {
+                  const checked = categoryIds.includes(category.id);
+                  return (
+                    <label key={category.id} className="mp10-category-option">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setCategoryIds((current) =>
+                            checked ? current.filter((id) => id !== category.id) : [...current, category.id],
+                          )
+                        }
+                      />{" "}
+                      {category.name}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {errors.categoryIds ? (
+              <p id="mp10-categories-error" className="mp3-field-error">
+                {errors.categoryIds}
+              </p>
+            ) : null}
+          </fieldset>
+
           {failure ? (
             <p className="mp5-failure" role="alert">
               {failure}
             </p>
           ) : null}
 
-          <button type="submit" className="mp5-submit" disabled={submitting}>
+          <button type="submit" className="mp5-submit" disabled={submitting || categoriesQuery.isLoading}>
             {submitting ? "Saving…" : "Continue to Adding Roles ›"}
           </button>
         </form>

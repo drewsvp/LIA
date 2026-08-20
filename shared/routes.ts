@@ -44,6 +44,7 @@ export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   { id: "PB-05", path: "/subscribe", title: "Subscribe to the digest", area: "public" },
   { id: "PB-05", path: "/unsubscribe/:token", title: "Unsubscribe", area: "public" },
   { id: "PB-06", path: "/about", title: "About", area: "public" },
+  { id: "PB-07", path: "/volunteer-alerts/unsubscribe/:token", title: "Volunteer alert opt-out", area: "public" },
 
   // Staff admin
   { id: "ADMIN-01", path: "/admin/organizations", title: "Organizations", area: "admin" },
@@ -56,6 +57,7 @@ export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   { id: "ADMIN-08", path: "/admin/subscribers", title: "Subscribers", area: "admin" },
   { id: "ADMIN-09", path: "/admin/roles", title: "Roles", area: "admin" },
   { id: "ADMIN-10", path: "/admin/emails", title: "Automated emails", area: "admin" },
+  { id: "ADMIN-11", path: "/admin/volunteer-categories", title: "Volunteer categories", area: "admin" },
 ] as const;
 
 /**
@@ -74,4 +76,11 @@ export const LEGACY_ROUTES = {
  * the surface and no nav row, so it stays undiscoverable rather than
  * forbidden — same contract as the byte-identical API 404s.
  */
-export const STAFF_ADMIN_ONLY_SURFACES: ReadonlySet<string> = new Set(["ADMIN-04", "ADMIN-05", "ADMIN-08", "ADMIN-09", "ADMIN-10"]);
+export const STAFF_ADMIN_ONLY_SURFACES: ReadonlySet<string> = new Set([
+  "ADMIN-04",
+  "ADMIN-05",
+  "ADMIN-08",
+  "ADMIN-09",
+  "ADMIN-10",
+  "ADMIN-11",
+]);

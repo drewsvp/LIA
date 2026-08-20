@@ -190,6 +190,12 @@ export type Item = {
   updatedAt: string;
 };
 
+export type VolunteerCategory = {
+  id: string;
+  name: string;
+  isActive: boolean;
+};
+
 export type VolunteerRequest = {
   id: string;
   legacyWixId: string | null;

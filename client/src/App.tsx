@@ -40,6 +40,8 @@ import { ActivityPage as AdminActivityPage } from "./pages/admin/ActivityPage";
 import { SubscribersPage as AdminSubscribersPage } from "./pages/admin/SubscribersPage";
 import { RolesPage as AdminRolesPage } from "./pages/admin/RolesPage";
 import { EmailTemplatesPage as AdminEmailTemplatesPage } from "./pages/admin/EmailTemplatesPage";
+import { VolunteerCategoriesPage as AdminVolunteerCategoriesPage } from "./pages/admin/VolunteerCategoriesPage";
+import { VolunteerAlertOptOutPage } from "./pages/public/VolunteerAlertOptOutPage";
 
 /** Built surfaces, by surface ID. Everything else renders its placeholder. */
 const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
@@ -64,6 +66,7 @@ const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
   "PB-04": () => <VolunteerDetailPage />,
   "PB-05": () => <DigestPage />,
   "PB-06": () => <AboutPage />,
+  "PB-07": () => <VolunteerAlertOptOutPage />,
 };
 
 /** Built admin surfaces, by surface ID; the rest render placeholders inside the shell. */
@@ -78,6 +81,7 @@ const ADMIN_PAGES: Partial<Record<string, () => ReactElement>> = {
   "ADMIN-08": () => <AdminSubscribersPage />,
   "ADMIN-09": () => <AdminRolesPage />,
   "ADMIN-10": () => <AdminEmailTemplatesPage />,
+  "ADMIN-11": () => <AdminVolunteerCategoriesPage />,
 };
 
 /**

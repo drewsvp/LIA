@@ -316,6 +316,15 @@ export function registerMemberRoutes(app: Express): void {
     }
   });
 
+  // ---- MP-10: active volunteer category list for the new-request form.
+  app.get("/api/dashboard/volunteer-categories", requireOrganization, async (_req: Request, res: Response, next) => {
+    try {
+      res.json({ categories: await dal.volunteerRequests.listActiveCategories(SYSTEM) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ---- MP-10: create a volunteer request draft. Same shape as MP-07 —
   // one transaction for the contact person and the request together (§6),
   // no approval_events row, no email (§3). Volunteer deadline types are two
@@ -353,6 +362,15 @@ export function registerMemberRoutes(app: Express): void {
           typeof peopleHelpedRaw === "number" && Number.isInteger(peopleHelpedRaw) && peopleHelpedRaw >= 0
             ? peopleHelpedRaw
             : null;
+        const rawCategoryIds = body.categoryIds;
+        const categoryIds =
+          Array.isArray(rawCategoryIds) &&
+          rawCategoryIds.length > 0 &&
+          rawCategoryIds.length <= 100 &&
+          rawCategoryIds.every((id) => typeof id === "string" && UUID_RE.test(id)) &&
+          new Set(rawCategoryIds).size === rawCategoryIds.length
+            ? (rawCategoryIds as string[])
+            : null;
         if (
           contactFirstName === "" ||
           contactLastName === "" ||
@@ -364,6 +382,7 @@ export function registerMemberRoutes(app: Express): void {
           eventLocation === "" ||
           deadlineType === null ||
           peopleHelped === null ||
+          categoryIds === null ||
           (deadlineType === "date_specific" && deadlineDate === null)
         ) {
           res.status(400).json({ message: ITEM_SAVE_FAILURE });
@@ -387,7 +406,7 @@ export function registerMemberRoutes(app: Express): void {
               phone: contactPhone,
               sourceNote: "volunteer request contact (MP-10)",
             }));
-          return dal.volunteerRequests.createDraftInTx(c, orgId, {
+          const req2 = await dal.volunteerRequests.createDraftInTx(c, orgId, {
             title,
             description,
             details,
@@ -398,10 +417,17 @@ export function registerMemberRoutes(app: Express): void {
             contactPersonId: person.id,
             createdBy: userId,
           });
+          await dal.volunteerRequests.replaceCategoriesInTx(c, req2.id, categoryIds);
+          return req2;
         });
         res.json({ id: request.id });
       } catch (err) {
-        if (err instanceof dal.people.ContactNotVisibleError) {
+        if (
+          err instanceof dal.people.ContactNotVisibleError ||
+          err instanceof dal.volunteerRequests.VolunteerRequestCategoryNotFoundError ||
+          err instanceof dal.volunteerRequests.DuplicateVolunteerRequestCategoryError ||
+          err instanceof dal.volunteerRequests.InactiveVolunteerRequestCategoryError
+        ) {
           res.status(400).json({ message: ITEM_SAVE_FAILURE });
           return;
         }
@@ -527,9 +553,13 @@ export function registerMemberRoutes(app: Express): void {
           await dispatchQueuedEmails(result.dispatches);
           res.json({ ok: true });
         } catch (err) {
-          // Zero roles, or a request no longer at draft (illegal transition):
+          // Zero roles, no active categories, or a request no longer at draft (illegal transition):
           // the request is untouched — surface the form's failure voice.
-          if (err instanceof NoRolesError || (err instanceof Error && /not a legal edge|already/.test(err.message))) {
+          if (
+            err instanceof NoRolesError ||
+            err instanceof dal.volunteerRequests.NoActiveVolunteerRequestCategoriesError ||
+            (err instanceof Error && /not a legal edge|already/.test(err.message))
+          ) {
             res.status(400).json({ message: ITEM_SAVE_FAILURE });
             return;
           }
@@ -683,6 +713,7 @@ export function registerMemberRoutes(app: Express): void {
             err instanceof NoRolesError ||
             err instanceof IllegalStatusMoveError ||
             err instanceof dal.people.ContactNotVisibleError ||
+            err instanceof dal.volunteerRequests.NoActiveVolunteerRequestCategoriesError ||
             (err instanceof Error && /not a legal edge|already/.test(err.message))
           ) {
             res.status(400).json({ message: SAVE_FAILURE });

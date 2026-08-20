@@ -502,9 +502,12 @@ export function registerRoutes(app: Express): void {
         return;
       }
       const personId = session.user.personId;
-      const [pledges, signups] = await Promise.all([
+      const memberCtx = { kind: "member" as const, userId: session.user.id };
+      const [pledges, signups, volunteerInterests, matchingVolunteerAlerts] = await Promise.all([
         dal.pledges.listByPerson(SYSTEM, personId),
         dal.signups.listByPerson(SYSTEM, personId),
+        dal.volunteerInterests.listOptionsForPerson(memberCtx, personId),
+        dal.volunteerAlerts.getForUser(memberCtx, session.user.id),
       ]);
       res.json({
         firstName: session.user.firstName,
@@ -512,8 +515,65 @@ export function registerRoutes(app: Express): void {
         email: session.user.email,
         pledges,
         signups,
+        volunteerInterests,
+        matchingVolunteerAlertsEnabled: matchingVolunteerAlerts.enabled,
+        matchingVolunteerAlertsEligible: session.user.kind === "supporter" && session.user.status === "active",
       });
     } catch (err) {
+      next(err);
+    }
+  });
+
+  // The person id is always resolved from the authenticated session. The
+  // request body carries category ids only, so it cannot target another human.
+  app.put("/api/supporter/profile/volunteer-interests", async (req: Request, res: Response, next) => {
+    try {
+      const session = await resolveSessionInfo(req);
+      if (!session.authenticated || session.user === null) {
+        res.status(401).json({ message: "Authentication required" });
+        return;
+      }
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const rawIds: unknown = req.body?.categoryIds;
+      if (
+        !Array.isArray(rawIds) ||
+        rawIds.length > 100 ||
+        rawIds.some((id) => typeof id !== "string" || !UUID_RE.test(id)) ||
+        new Set(rawIds).size !== rawIds.length
+      ) {
+        res.status(400).json({ message: "Choose each available volunteer interest at most once." });
+        return;
+      }
+      const ctx = { kind: "member" as const, userId: session.user.id };
+      const rawMatchingAlertsEnabled: unknown = req.body?.matchingVolunteerAlertsEnabled;
+      if (rawMatchingAlertsEnabled !== undefined && typeof rawMatchingAlertsEnabled !== "boolean") {
+        res.status(400).json({ message: "Choose whether matching volunteer alerts are on or off." });
+        return;
+      }
+      const matchingVolunteerAlerts = await dal.volunteerAlerts.saveSupporterPreferences(ctx, {
+        userId: session.user.id,
+        personId: session.user.personId,
+        categoryIds: rawIds as string[],
+        matchingAlertsEnabled: rawMatchingAlertsEnabled as boolean | undefined,
+      });
+      const volunteerInterests = await dal.volunteerInterests.listOptionsForPerson(ctx, session.user.personId);
+      res.json({
+        message: "Volunteer interests and alert preference saved.",
+        volunteerInterests,
+        matchingVolunteerAlertsEnabled: matchingVolunteerAlerts.enabled,
+      });
+    } catch (err) {
+      if (
+        err instanceof dal.volunteerInterests.VolunteerCategoryNotFoundError ||
+        err instanceof dal.volunteerInterests.InactiveVolunteerCategoryError
+      ) {
+        res.status(409).json({ message: "The volunteer interest choices changed. Refresh the page and try again." });
+        return;
+      }
+      if (err instanceof dal.volunteerAlerts.VolunteerAlertSupporterOnlyError) {
+        res.status(403).json({ message: "Matching volunteer alerts are available only for supporter profiles." });
+        return;
+      }
       next(err);
     }
   });
