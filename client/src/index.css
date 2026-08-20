@@ -241,7 +241,7 @@ h3 {
   color: #0b3a5d;
   font-size: 15px;
   line-height: 1.65;
-  margin: 0 0 18px;
+  margin: 30px 0 18px;
 }
 .pb0-tiles {
   display: grid;
@@ -284,6 +284,9 @@ h3 {
   font-size: 15px;
   line-height: 1.6;
   margin: 0 0 18px;
+}
+.pb0-callout-regular {
+  font-weight: 400;
 }
 .btn-navy {
   display: inline-block;
@@ -428,18 +431,26 @@ h3 {
   text-align: center;
 }
 .pb6-section p {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.75;
-  color: var(--color-text);
+  color: #0b3a5d;
+  text-align: center;
   margin: 0 0 14px;
 }
 .pb6-section ul {
   list-style: disc;
   padding-left: 1.4em;
   margin: 0 0 20px;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.75;
-  color: var(--color-text);
+  color: #0b3a5d;
+  text-align: left;
+}
+.pb6-section-pair {
+  padding-bottom: 16px;
+}
+.pb6-section-pair + .pb6-section {
+  padding-top: 16px;
 }
 .pb6-section li {
   margin-bottom: 10px;
@@ -658,7 +669,7 @@ h3 {
   align-items: flex-end;
   flex: 1 1 0;
   min-width: 0;
-  gap: 8px;
+  gap: 15px;
 }
 .site-nav-top {
   display: flex;
@@ -713,9 +724,10 @@ a.site-nav-btn {
 }
 .site-nav-link {
   color: var(--color-navy);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.1em;
+  text-decoration: none;
   white-space: nowrap;
 }
 .site-nav-switcher {

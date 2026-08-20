@@ -519,8 +519,8 @@ export function VolunteerDetailPage(): ReactElement {
                           accomodations needed.
                         </p>
                       </div>
-                      {/* Doubled sizing to match the claim form: 28px labels, 26px boxes. */}
-                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 16 }}>
+                      {/* 21px bold labels with unchanged 26px checkbox controls. */}
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, lineHeight: 1.3, marginBottom: 16 }}>
                         <input
                           type="checkbox"
                           checked={createProfile}
@@ -529,7 +529,7 @@ export function VolunteerDetailPage(): ReactElement {
                         />
                         Create a Donor Profile so I can track all my volunteering.
                       </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 20 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, lineHeight: 1.3, marginBottom: 20 }}>
                         <input
                           type="checkbox"
                           checked={subscribeDigest}

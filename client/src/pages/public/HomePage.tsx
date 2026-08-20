@@ -47,9 +47,10 @@ export function HomePage(): ReactElement {
           </Link>
         </div>
 
-        {/* Digest callout */}
+        {/* Digest callout — the question carries the emphasis, the answer below
+            it reads as ordinary body copy. */}
         <p className="pb0-callout">Want to hear when new needs or volunteers are posted?</p>
-        <p className="pb0-callout">
+        <p className="pb0-callout pb0-callout-regular">
           We've got you covered. Click the button below to sign up for our weekly Love in Action email digest!
         </p>
         <p style={{ textAlign: "center", margin: "0 0 48px" }}>

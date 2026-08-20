@@ -18,7 +18,7 @@ type ListPayload = {
     title: string;
     description: string | null;
     imageUrl: string | null;
-    organization: { name: string; city: string | null };
+    organization: { name: string; city: string | null; logoUrl: string | null };
   }[];
 };
 
@@ -95,13 +95,11 @@ export function ItemsBrowsePage(): ReactElement {
                 description={r.description}
                 imageUrl={r.imageUrl}
                 orgName={r.organization.name}
-                orgLogoUrl={null}
+                orgLogoUrl={r.organization.logoUrl}
                 locationLabel="City"
                 locationValue={r.organization.city}
                 buttonText="Learn More / View Details"
                 titleVariant="bar"
-                iconPlacement="above"
-                imageShape="square"
               />
             ))}
           </div>
