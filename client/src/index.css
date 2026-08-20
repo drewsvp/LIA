@@ -26,17 +26,6 @@ a {
   /* Links are styled deliberately — never default blue (known Wix bug). */
   color: var(--color-teal);
 }
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
 
 h1,
 h2,
@@ -195,125 +184,6 @@ h3 {
   font-weight: 700;
   color: var(--color-navy);
 }
-
-/* ---- SP-01 volunteer interests ---- */
-.supporter-profile-page {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 24px 16px 64px;
-}
-.supporter-interests {
-  margin: 32px 0 40px;
-  padding: 4px 0 22px;
-  border-bottom: 1px solid #d7dde4;
-}
-.supporter-interests-intro {
-  margin: 0 auto 14px;
-  max-width: 620px;
-  text-align: center;
-  font-size: 15px;
-}
-.supporter-interest-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 18px;
-  margin: 0;
-  padding: 14px;
-  border: 1px solid #c6d2dc;
-  border-radius: 6px;
-  background: #fbfcfd;
-}
-.supporter-interest-option {
-  display: flex;
-  min-height: 52px;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  font-size: 15px;
-  padding: 8px 10px;
-  border-radius: 5px;
-  transition: background-color 0.15s ease;
-}
-.supporter-interest-option:hover,
-.supporter-interest-option.is-selected {
-  background: rgba(2, 146, 143, 0.09);
-}
-.supporter-interest-option input {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  accent-color: var(--color-teal);
-}
-.supporter-interest-option input:focus-visible {
-  outline: 3px solid rgba(2, 146, 143, 0.35);
-  outline-offset: 2px;
-}
-.supporter-interest-count {
-  min-height: 20px;
-  margin: 0 0 8px;
-  color: var(--color-muted);
-  text-align: center;
-  font-size: 13px;
-}
-.supporter-interest-inactive {
-  display: block;
-  color: #5f6670;
-  font-size: 12px;
-}
-.supporter-interests-save {
-  display: block;
-  margin: 14px auto 0;
-  min-height: 46px;
-  padding-inline: 24px;
-}
-.supporter-alert-preference {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 14px 0 0;
-  padding: 14px;
-  border: 1px solid #c6d2dc;
-  border-radius: 6px;
-  background: #fbfcfd;
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1.45;
-}
-.supporter-alert-preference input {
-  width: 22px;
-  height: 22px;
-  margin: 1px 0 0;
-  flex: 0 0 auto;
-  accent-color: var(--color-teal);
-}
-.supporter-alert-preference small {
-  display: block;
-  margin-top: 3px;
-  color: var(--color-muted);
-  font-size: 13px;
-}
-.supporter-interest-success,
-.supporter-interest-error {
-  margin: 10px 0 0;
-  text-align: center;
-  font-size: 14px;
-  font-weight: 700;
-}
-.supporter-interest-success { color: #1d6f42; }
-.supporter-interest-error { color: #9a201a; }
-@media (max-width: 600px) {
-  .supporter-profile-page {
-    padding: 18px 12px 48px;
-  }
-  .supporter-interest-options {
-    grid-template-columns: 1fr;
-    padding: 10px 12px;
-  }
-  .supporter-interests-save {
-    width: 100%;
-    margin-top: 12px;
-  }
-}
 .pb2-item-row {
   display: flex;
   justify-content: space-between;
@@ -371,9 +241,7 @@ h3 {
   color: #0b3a5d;
   font-size: 15px;
   line-height: 1.65;
-  /* Same 30px of breathing room the tiles below already have, so the intro
-     does not sit flush against the hero image. */
-  margin: 30px 0 18px;
+  margin: 0 0 18px;
 }
 .pb0-tiles {
   display: grid;
@@ -416,9 +284,6 @@ h3 {
   font-size: 15px;
   line-height: 1.6;
   margin: 0 0 18px;
-}
-.pb0-callout-regular {
-  font-weight: 400;
 }
 .btn-navy {
   display: inline-block;
@@ -562,36 +427,22 @@ h3 {
   margin: 0 0 20px;
   text-align: center;
 }
-/* Body copy matches the homepage intro: same navy, same size, centered like
-   the headings above it. */
 .pb6-section p {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.75;
-  color: #0b3a5d;
-  text-align: center;
+  color: var(--color-text);
   margin: 0 0 14px;
 }
-/* The bullets stay left-aligned even between centered paragraphs — centered
-   list items read as ragged against their markers. */
 .pb6-section ul {
   list-style: disc;
   padding-left: 1.4em;
   margin: 0 0 20px;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.75;
-  color: #0b3a5d;
-  text-align: left;
+  color: var(--color-text);
 }
 .pb6-section li {
   margin-bottom: 10px;
-}
-/* "Meet Real Needs in Real Time" and the section that follows it read as one
-   thought; two full 52px bands between them left an obvious hole. */
-.pb6-section-pair {
-  padding-bottom: 16px;
-}
-.pb6-section-pair + .pb6-section {
-  padding-top: 16px;
 }
 /* CTA row: the buttons are inline <Link>s centered by an inline style on the
    wrapping <p>, so they need inline-block to honor .btn-teal's padding. */
@@ -807,8 +658,7 @@ h3 {
   align-items: flex-end;
   flex: 1 1 0;
   min-width: 0;
-  /* The two rows read as separate bands rather than one crowded block. */
-  gap: 15px;
+  gap: 8px;
 }
 .site-nav-top {
   display: flex;
@@ -863,13 +713,10 @@ a.site-nav-btn {
 }
 .site-nav-link {
   color: var(--color-navy);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.1em;
   white-space: nowrap;
-  /* Stated explicitly: these are the only plain text links in the header and
-     the global anchor underline made the row look like body copy. */
-  text-decoration: none;
 }
 .site-nav-switcher {
   font-family: inherit;
@@ -2099,37 +1946,6 @@ a.site-nav-btn {
   min-height: 96px;
   resize: vertical;
 }
-.mp10-categories {
-  margin: 18px 0 10px;
-  padding: 0;
-  border: 0;
-}
-.mp10-categories .mp7-helper {
-  margin: 0 0 8px;
-  padding-left: 0;
-}
-.mp10-category-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 18px;
-}
-.mp10-category-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  font-size: 13px;
-  line-height: 1.35;
-  cursor: pointer;
-}
-.mp10-category-option input {
-  margin-top: 2px;
-  accent-color: var(--color-teal);
-}
-@media (max-width: 520px) {
-  .mp10-category-list {
-    grid-template-columns: 1fr;
-  }
-}
 
 /* ---- MP-11 — add volunteer roles ---- */
 .mp11-band {
@@ -2474,15 +2290,6 @@ a.site-nav-btn {
   background: var(--color-surface);
   border: 1px solid #dddddd;
 }
-.adm-table-wrap {
-  overflow-x: auto;
-  margin-top: 20px;
-  -webkit-overflow-scrolling: touch;
-}
-.adm-table-wrap .adm-table {
-  margin-top: 0;
-  min-width: 640px;
-}
 
 .adm-table th {
   text-align: left;
@@ -2647,41 +2454,6 @@ a.site-nav-btn {
 .adm-form-row { display: flex; gap: 12px; margin: 10px 0; flex-wrap: wrap; }
 .adm-form-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5a6b7c; }
 .adm-form-row input { padding: 6px 8px; border: 1px solid #d7dde4; font-size: 14px; min-width: 200px; }
-.adm-form-row input:focus,
-.adm-table input:focus {
-  outline: 3px solid rgba(2, 146, 143, 0.25);
-  outline-offset: 1px;
-  border-color: var(--color-teal);
-}
-.adm-category-add {
-  margin-top: 28px;
-  padding: 4px 16px 16px;
-  border-left: 4px solid var(--color-teal);
-  background: #f4f8f9;
-}
-.adm-category-add .adm-subheading {
-  margin-top: 12px;
-}
-.adm-loading-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 20px;
-}
-.adm-loading-list span {
-  display: block;
-  height: 42px;
-  background: #eef2f4;
-  animation: adm-pulse 1.2s ease-in-out infinite alternate;
-}
-@keyframes adm-pulse {
-  from { opacity: 0.55; }
-  to { opacity: 1; }
-}
-.adm-empty-cell {
-  padding: 28px 16px !important;
-  color: var(--color-muted);
-  text-align: center;
-}
 .adm-record-list { margin: 4px 0 10px; padding-left: 20px; font-size: 13px; }
 .adm-record-list li { margin: 2px 0; }
 .adm-list-label { margin: 10px 0 2px; font-size: 13px; color: #163a5f; }
@@ -2916,276 +2688,3 @@ a.site-nav-btn {
 .adm-sub-counts { font-weight: 600; margin: 0.75rem 0 0.5rem; }
 .adm-sub-person { color: #555; }
 .adm-action-msg { font-weight: 600; margin: 0.5rem 0; }
-
-/* ---- ADMIN-09 analytics (anl-*) ---------------------------------------- */
-
-/* Summary cards */
-.anl-summary-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 12px 0 20px;
-}
-.anl-summary-card {
-  flex: 1 1 140px;
-  max-width: 200px;
-  border: 1px solid #dddddd;
-  background: var(--color-surface);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.anl-summary-val {
-  font-size: 1.6rem;
-  font-weight: 800;
-  color: var(--color-navy);
-  line-height: 1;
-}
-.anl-summary-label {
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-muted);
-}
-
-/* Bar chart */
-.anl-chart-wrap {
-  margin-bottom: 8px;
-}
-.anl-chart-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-bottom: 8px;
-  font-size: 0.82rem;
-}
-.anl-chart-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--color-navy);
-}
-.anl-legend-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-}
-.anl-chart-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.anl-chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  height: 160px;
-  min-width: max-content;
-  padding-bottom: 24px;
-  border-bottom: 2px solid #dddddd;
-  border-left: 2px solid #dddddd;
-  position: relative;
-}
-.anl-chart-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-}
-.anl-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 136px;
-}
-.anl-bar {
-  width: 10px;
-  min-height: 2px;
-  transition: opacity 0.1s;
-}
-.anl-bar:hover {
-  opacity: 0.75;
-}
-.anl-chart-label {
-  font-size: 0.68rem;
-  color: var(--color-muted);
-  text-align: center;
-  margin-top: 4px;
-  white-space: nowrap;
-}
-
-/* Performance table sort buttons */
-.anl-sort-btn {
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-navy);
-  cursor: pointer;
-  padding: 0;
-  text-align: left;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  white-space: nowrap;
-}
-.anl-sort-btn:hover {
-  color: var(--color-teal);
-}
-.anl-sort-btn:focus-visible {
-  outline: 3px solid rgba(2, 146, 143, 0.35);
-  outline-offset: 2px;
-}
-.anl-sort-arrow {
-  font-size: 11px;
-  color: var(--color-teal);
-}
-
-/* Numeric cells right-aligned */
-.anl-perf-table td.anl-num,
-.anl-audience-table td.anl-num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.anl-perf-table th:has(.anl-sort-btn[aria-label*="Conv"]),
-.anl-perf-table th:has(.anl-sort-btn[aria-label*="Click"]),
-.anl-perf-table th:has(.anl-sort-btn[aria-label*="View"]),
-.anl-perf-table th:has(.anl-sort-btn[aria-label*="Form"]),
-.anl-perf-table th:has(.anl-sort-btn[aria-label*="Select"]) {
-  text-align: right;
-}
-.anl-kind-cell { color: var(--color-muted); font-size: 0.85rem; }
-
-/* Audience table cells */
-.anl-email-cell {
-  font-size: 0.85rem;
-  color: var(--color-muted);
-  word-break: break-word;
-}
-.anl-ts-cell {
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
-
-.anl-outreach-intro {
-  margin-bottom: 14px;
-}
-.anl-outreach-panel,
-.anl-outreach-confirm {
-  border: 1px solid #d5d9dd;
-  background: var(--color-surface);
-  margin-top: 18px;
-  padding: 18px;
-  max-width: 760px;
-}
-.anl-outreach-panel h3,
-.anl-outreach-confirm h3 {
-  margin: 0 0 8px;
-  color: var(--color-navy);
-}
-.anl-outreach-field {
-  display: grid;
-  gap: 6px;
-  color: var(--color-navy);
-  font-weight: 700;
-  margin: 12px 0;
-}
-.anl-outreach-field input,
-.anl-outreach-field textarea {
-  color: var(--color-ink);
-  font: inherit;
-  font-weight: 400;
-  padding: 8px;
-}
-.anl-email-preview {
-  border-left: 4px solid var(--color-teal);
-  padding: 4px 0 4px 12px;
-  white-space: pre-wrap;
-}
-.anl-recipient-preview {
-  max-height: 190px;
-  overflow: auto;
-  padding-left: 20px;
-}
-.anl-recipient-preview li {
-  margin: 5px 0;
-  word-break: break-word;
-}
-
-/* Pagination */
-.anl-pagination {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 14px;
-}
-.anl-page-btn {
-  font-size: 14px;
-  padding: 5px 14px;
-}
-.anl-page-info {
-  font-size: 14px;
-  color: var(--color-navy);
-}
-
-/* Section divider */
-.anl-divider {
-  border: none;
-  border-top: 2px solid #dddddd;
-  margin: 32px 0 24px;
-}
-
-.mp4-engagement-region {
-  margin-top: 3rem;
-}
-
-.supporter-recent-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2.5rem;
-}
-
-.supporter-recent-request {
-  border: 1px solid #d5d9dd;
-  padding: 1rem;
-  background: var(--color-surface);
-}
-
-.supporter-recent-request h3,
-.supporter-recent-request p {
-  margin: 0 0 0.5rem;
-}
-
-.supporter-recent-kind {
-  color: var(--color-teal);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-/* Responsive adjustments */
-@media (max-width: 800px) {
-  .anl-summary-card {
-    flex-basis: calc(50% - 6px);
-    max-width: none;
-  }
-  .anl-chart {
-    height: 120px;
-  }
-  .anl-bars {
-    height: 96px;
-  }
-  .anl-email-detail {
-    flex: none;
-    width: 100%;
-    max-width: none;
-  }
-}

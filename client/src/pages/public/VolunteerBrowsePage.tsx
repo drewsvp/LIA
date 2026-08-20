@@ -90,8 +90,6 @@ export function VolunteerBrowsePage(): ReactElement {
             {filtered.map((r) => (
               <RequestCard
                 key={r.id}
-                requestId={r.id}
-                requestKind="volunteer"
                 href={`/volunteer/${r.id}`}
                 title={r.title}
                 description={r.description}

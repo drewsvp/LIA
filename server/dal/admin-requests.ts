@@ -15,11 +15,6 @@ export type AdminQueueRow = {
   status: RequestStatus;
   submittedAt: string | null;
   createdAt: string;
-  deadlineType: "date_specific" | "until_fulfilled" | "ongoing";
-  /** Calendar date stored by the current request form. */
-  deadlineDate: string | null;
-  /** Calendar date imported from the legacy Archive On field. */
-  expiresOn: string | null;
   orgId: string;
   orgName: string;
   orgCity: string | null;
@@ -32,8 +27,7 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
   return withDbContext(ctx, (c) =>
     q<AdminQueueRow>(
       c,
-       `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
-               r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
+      `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
               o.id as "orgId", o.name as "orgName", o.city as "orgCity", o.status as "orgStatus",
               (select count(*)::int from items i where i.item_request_id = r.id) as "childCount"
          from item_requests r
@@ -41,7 +35,6 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
         where r.status = $1
         union all
        select 'volunteer', v.id, v.title, v.status, v.submitted_at, v.created_at,
-               v.deadline_type, v.deadline_date, v.expires_on,
               o.id, o.name, o.city, o.status,
               (select count(*)::int from volunteer_roles vr where vr.volunteer_request_id = v.id)
          from volunteer_requests v
@@ -58,8 +51,7 @@ export async function listReturnedDrafts(ctx: DbContext): Promise<AdminQueueRow[
   return withDbContext(ctx, (c) =>
     q<AdminQueueRow>(
       c,
-       `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
-               r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
+      `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
               o.id as "orgId", o.name as "orgName", o.city as "orgCity", o.status as "orgStatus",
               (select count(*)::int from items i where i.item_request_id = r.id) as "childCount",
               latest.created_at as "returnedAt"
@@ -76,7 +68,6 @@ export async function listReturnedDrafts(ctx: DbContext): Promise<AdminQueueRow[
         where r.status = 'draft'
         union all
        select 'volunteer', v.id, v.title, v.status, v.submitted_at, v.created_at,
-               v.deadline_type, v.deadline_date, v.expires_on,
               o.id, o.name, o.city, o.status,
               (select count(*)::int from volunteer_roles vr where vr.volunteer_request_id = v.id),
               latest.created_at
@@ -172,13 +163,12 @@ export async function preApprovalEditability(
     };
   }
   if (row.status === "active") {
+    const activityReason = "This request has donor or volunteer activity and cannot be unapproved or edited.";
     return {
-      editable: true,
-      reason: null,
+      editable: false,
+      reason: row.hasActivity ? activityReason : "Unapprove this request before editing it.",
       unapprovable: !row.hasActivity,
-      unapprovalReason: row.hasActivity
-        ? "This request has donor or volunteer activity and cannot be unapproved."
-        : null,
+      unapprovalReason: row.hasActivity ? activityReason : null,
     };
   }
   if (row.approvedAt !== null || row.status === "archived") {

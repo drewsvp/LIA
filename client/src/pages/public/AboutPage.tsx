@@ -31,12 +31,11 @@ export function AboutPage(): ReactElement {
       </div>
 
       {/* ── 2. Origin story ── */}
-      <section className="pb6-section pb6-section-pair">
+      <section className="pb6-section">
         <h2>Meet Real Needs in Real Time</h2>
         <p>
-          The Love in Action Program began ten years ago with a simple idea:{" "}
-          <strong>make it easy for caring people to connect with kids and families who need support right now.</strong>{" "}
-          Whether it's purchasing a new car seat,
+          The Love in Action Program began ten years ago with a simple idea: make it easy for caring people to
+          connect with kids and families who need support right now. Whether it's purchasing a new car seat,
           donating diapers, or volunteering time, every act of generosity can help meet an immediate need and
           create greater stability for a child or family. This platform connects you directly to real-time
           opportunities, making it simple to choose how you'll put your love into action.
@@ -47,8 +46,7 @@ export function AboutPage(): ReactElement {
       <section className="pb6-section">
         <h2>A Powerful Tool for Local Organizations</h2>
         <p>
-          The Love in Action Database is a resource for our <strong>Alliance Members</strong>—including nonprofits,
-          agencies and
+          The Love in Action Database is a resource for our Alliance Members—including nonprofits, agencies and
           ministries serving local kids and families. Instead of spending hours searching for donations or
           coordinating resources, Members can post needs, allowing our community to respond. By sharing
           technology, resources and relationships, we reduce costs and administrative burdens, giving staff more
@@ -61,30 +59,23 @@ export function AboutPage(): ReactElement {
       {/* ── 4. Impact list + calls to action ── */}
       <section className="pb6-section">
         <h2>One Part of a Larger Program</h2>
-        <p>
-          The Love in Action Program makes it simple for our community to meet real needs in three powerful ways:
-        </p>
         <ul>
+          <li>Annual Donation Drives that collect thousands of essential items.</li>
           <li>
-            <strong>Annual Donation Drives</strong> that collect thousands of essential items.
+            Our Emergency Supply Closet which allows us to distribute critical resources when urgent needs arise.
           </li>
           <li>
-            Our <strong>Emergency Supply Closet</strong> which allows us to distribute critical resources when
-            urgent needs arise.
-          </li>
-          <li>
-            This fully custom <strong>Love in Action Database</strong> where unique needs are posted by our
-            Alliance Member network throughout the year.
+            This fully custom Love in Action Database where unique needs are posted by our Alliance Member
+            network throughout the year.
           </li>
         </ul>
         <p>
           This program gives individuals, community groups, churches, and businesses easy ways to turn generosity
-          into <strong>real support for kids and families</strong>.
+          into real support for kids and families.
         </p>
         <p>
-          And it works! In 2025, Love in Action provided <strong>33,394 donated items</strong> to meet the needs of{" "}
-          <strong>10,553 children and families</strong> through{" "}
-          <strong>72 Alliance Member agencies and nonprofits</strong>.
+          And it works! In 2025, Love in Action provided 33,394 donated items to meet the needs of 10,553
+          children and families through 72 Alliance Member agencies and nonprofits.
         </p>
         <p style={{ textAlign: "center" }}>
           <Link href="/items" className="btn-teal">

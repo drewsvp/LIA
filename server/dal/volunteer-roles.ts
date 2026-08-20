@@ -28,7 +28,7 @@ export type UpdateVolunteerRolePatch = Partial<{
   sortOrder: number;
 }>;
 
-/** Complete staff-edit row used by the request correction flow. */
+/** Complete pre-approval edit row used by the staff correction flow. */
 export type ReplaceVolunteerRoleInput = {
   /** Omit for a new row. Existing ids must belong to this request. */
   id?: string;
@@ -48,27 +48,6 @@ export class UnknownRoleOnRequestError extends Error {
   constructor() {
     super("one or more roles do not belong to this request");
     this.name = "UnknownRoleOnRequestError";
-  }
-}
-
-export class RequestMustRetainARoleError extends Error {
-  constructor() {
-    super("Add at least one role before saving this request.");
-    this.name = "RequestMustRetainARoleError";
-  }
-}
-
-export class RoleWithActivityCannotBeRemovedError extends Error {
-  constructor(roleName: string) {
-    super(`"${roleName}" cannot be removed because volunteers have already participated in it.`);
-    this.name = "RoleWithActivityCannotBeRemovedError";
-  }
-}
-
-export class RoleQuantityBelowParticipationError extends Error {
-  constructor(roleName: string, floor: number) {
-    super(`"${roleName}" must need at least ${floor} because ${floor} volunteers are already interested or confirmed.`);
-    this.name = "RoleQuantityBelowParticipationError";
   }
 }
 
@@ -190,64 +169,20 @@ export async function update(
 }
 
 /**
- * Reconcile a request's editable role structure in a request-first,
- * child-second locked transaction. Existing signup history and counters stay
- * attached to their role; activity-bearing roles cannot be removed and their
- * needed quantity cannot fall below current participation.
+ * Replace a request's editable role structure in one locked transaction.
+ * Interest/confirmation counters and their signup history are never editable.
  */
-export async function replaceForStaffEditInTx(
+export async function replaceForPreApprovalEditInTx(
   c: PoolClient,
   requestId: string,
   rows: ReplaceVolunteerRoleInput[],
 ): Promise<VolunteerRole[]> {
-  const existing = await q<VolunteerRole>(
-    c,
-    `select ${COLS}
-       from volunteer_roles
-      where volunteer_request_id = $1
-      order by id
-      for update`,
-    [requestId],
-  );
-  if (rows.length === 0) throw new RequestMustRetainARoleError();
+  const existing = await assertNoVolunteerActivityInTx(c, requestId);
 
   const existingIds = new Set(existing.map((role) => role.id));
   const suppliedIds = rows.flatMap((row) => (row.id ? [row.id] : []));
   if (new Set(suppliedIds).size !== suppliedIds.length || suppliedIds.some((id) => !existingIds.has(id))) {
     throw new UnknownRoleOnRequestError();
-  }
-
-  const suppliedIdSet = new Set(suppliedIds);
-  for (const role of existing) {
-    if (!suppliedIdSet.has(role.id)) {
-      const hasHistory = (
-        await q<{ exists: boolean }>(
-          c,
-          `select (
-             $2::int > 0
-             or $3::int > 0
-             or exists(
-               select 1
-                 from volunteer_signup_roles signup_role
-                where signup_role.volunteer_role_id = $1
-             )
-           ) as exists`,
-          [role.id, role.quantityInterested, role.quantityConfirmed],
-        )
-      )[0]?.exists;
-      if (hasHistory) throw new RoleWithActivityCannotBeRemovedError(role.name);
-    }
-  }
-
-  const existingById = new Map(existing.map((role) => [role.id, role]));
-  for (const row of rows) {
-    if (!row.id) continue;
-    const role = existingById.get(row.id);
-    if (!role) throw new UnknownRoleOnRequestError();
-    const floor = Math.max(role.quantityInterested, role.quantityConfirmed);
-    if (row.quantityNeeded < floor) {
-      throw new RoleQuantityBelowParticipationError(role.name, floor);
-    }
   }
 
   await q(c, `delete from volunteer_roles where volunteer_request_id = $1 and not (id = any($2::uuid[]))`, [

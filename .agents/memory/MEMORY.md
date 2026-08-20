@@ -16,11 +16,9 @@
 - [SPA identity switch](spa-identity-switch.md) — logout/quick-login must end in a full page reload; queryClient.clear() with mounted queries leaves stale session UI.
 - [Email copy overrides](email-copy-overrides.md) — only free-text copy is editable, all-or-nothing override with defaultCopy fallback; disabled templates write visible skipped log rows, never silent drops.
 - [Policy migrations vs bootstrap](policy-migration-bootstrap.md) — migrations run before apply-rls on fresh DBs: policy drops need 'if exists'; rls-policies.sql must mirror policy changes.
-- [Digest run guard](digest-run-guard.md) — scheduled email jobs need occurrence claims, cross-process serialization, catch-up, and run-bound once-only fan-out; date-only guards lose same-day sends.
+- [Digest run guard](digest-run-guard.md) — scheduled email jobs need a durable run-date claim + run-bound once-only fan-out, not the in-memory expiry guard; skipped weeks write visible rows.
 - [Supporter accounts](supporter-accounts.md) — users.kind='supporter', zero memberships is valid; login routes them to /profile; provisioning never rolls back the public submission.
 - [Need auto-image sourcing](need-image-sourcing.md) — AI-generation only for item + volunteer, fixed per-kind guardrail prompt; uploaded-wins enforced in SQL; gpt-image-1 rejects response_format.
 - [Public image asset sets](public-image-asset-sets.md) — one photo backs several graphics with different baked-in wording/crops; match new art by its words + surface, never by photo or filename.
 - [Polymorphic trigger rows](plpgsql-trigger-row-branches.md) — shared PL/pgSQL triggers must branch before referencing table-specific NEW/OLD fields; an AND guard does not prevent field-resolution errors.
 - [Responsive preview isolation](responsive-preview-isolation.md) — exact-width iframe previews exercise real media queries; run authenticated screenshot states sequentially because the preview cookie jar is shared.
-- [Matching-alert once-only rule](matching-alert-once-only.md) — first-approval claims survive failed or disabled sends; only explicit failed-email resend may retry delivery.
-- [Engagement privacy boundary](engagement-privacy-boundary.md) — anonymous request events stay aggregate-only; signed-in views may be attributed; pledges/signups remain the only conversion source.

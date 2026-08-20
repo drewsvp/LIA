@@ -1,7 +1,7 @@
 /**
  * digest_new_needs — the weekly "New Needs" digest (task 58).
  *
- * Sent on the configured weekly or one-time schedule to every subscribed digest_subscribers row, one email
+ * Sent every Thursday to every subscribed digest_subscribers row, one email
  * per recipient, entity-bound to the digest_runs row (once per recipient per
  * run — the restart dedup). The needs list and the per-recipient unsubscribe
  * link are structural, not editable copy; the intro and closing are.
@@ -72,7 +72,7 @@ export const digestNewNeeds: ProductTemplate<DigestNewNeedsVars> = {
   key: "digest_new_needs",
   entityType: "digest_run",
   required: ["needs", "unsubscribeUrl"],
-  trigger: "Sent automatically on its configured schedule when needs went live since the previous digest",
+  trigger: "Sent automatically every Thursday when needs went live since the previous digest",
   recipients: "Everyone on the digest subscriber list with status subscribed",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,

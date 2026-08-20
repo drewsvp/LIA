@@ -39,13 +39,6 @@ type ListResponse = {
   counts: { subscribed: number; unsubscribed: number; bounced: number };
   anyExist: boolean;
   lastRun: DigestRun | null;
-  schedule: {
-    active: boolean;
-    weeklyWeekday: number;
-    weeklyMinutes: number;
-    oneTimeAt: string | null;
-    nextSendAt: string | null;
-  } | null;
 };
 
 type UpcomingNeed = {
@@ -62,19 +55,13 @@ type UpcomingResponse = {
   needs: UpcomingNeed[];
 };
 
-function digestRunLine(run: DigestRun | null, schedule: ListResponse["schedule"]): string {
-  const scheduleText =
-    schedule === null
-      ? "The weekly digest schedule is loading."
-      : !schedule.active
-        ? "The weekly digest is paused. Needs that accumulate will be included after it resumes."
-        : `The weekly digest is scheduled for ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][schedule.weeklyWeekday]} at ${String(Math.floor(schedule.weeklyMinutes / 60)).padStart(2, "0")}:${String(schedule.weeklyMinutes % 60).padStart(2, "0")} Pacific.`;
-  if (run === null) return `${scheduleText} No digest has been sent yet.`;
+function digestRunLine(run: DigestRun | null): string {
+  if (run === null) return "The weekly digest goes out Thursday mornings. No digest has been sent yet.";
   if (run.status === "running") return `The digest for ${run.runDate} is being sent right now.`;
   if (run.status === "skipped_empty") {
     return `Last digest (${run.runDate}): skipped — no new needs since the previous digest. Nothing was sent.`;
   }
-  return `${scheduleText} Last digest (${run.runDate}): ${run.needsCount ?? 0} need(s) sent to ${run.recipientsCount ?? 0} subscriber(s).${
+  return `Last digest (${run.runDate}): ${run.needsCount ?? 0} need(s) sent to ${run.recipientsCount ?? 0} subscriber(s).${
     run.note ? ` Note: ${run.note}` : ""
   }`;
 }
@@ -280,10 +267,7 @@ export function SubscribersPage(): ReactElement {
     <div className="adm-page">
       <h1 className="adm-heading">Subscribers</h1>
 
-      <p className="adm-sub-note">{data ? digestRunLine(data.lastRun, data.schedule) : "Loading the weekly digest schedule…"}</p>
-      {data?.schedule?.active && data.schedule.nextSendAt && (
-        <p className="adm-sub-note">Next expected digest: {fmtDateTime(data.schedule.nextSendAt)} (Pacific).</p>
-      )}
+      <p className="adm-sub-note">{data ? digestRunLine(data.lastRun) : "The weekly digest goes out Thursday mornings."}</p>
 
       {data && (
         <p className="adm-sub-counts">

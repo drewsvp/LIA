@@ -62,7 +62,6 @@ import {
   AlreadyActiveError,
   IllegalStateError,
   NoChildrenError,
-  NoVolunteerCategoriesError,
   OrgNotApprovedError,
   RequestNotFoundError,
   type RequestKind,
@@ -95,12 +94,6 @@ const ORG_STATUSES = new Set(["pending", "approved", "disabled"]);
 const REQUEST_STATUSES = new Set(["pending", "returned", "active", "archived"]);
 /** ADMIN-01/ADMIN-02 §8 failure copy, verbatim. */
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
-
-function isVolunteerCategoryNameConflict(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const pgError = err as { code?: string; constraint?: string };
-  return pgError.code === "23505" && pgError.constraint === "volunteer_categories_name_ci_key";
-}
 
 /** ADMIN-09: the full membership-role enum and its display names. */
 const ROLE_VALUES: ReadonlySet<string> = new Set(["owner", "member", "staff_admin", "staff_approver"]);
@@ -261,16 +254,6 @@ function parseStaffRequestEdit(
 
   const details = requiredText("details", "Volunteer details", 4000);
   const eventLocation = requiredText("eventLocation", "Event location", 300);
-  const categoryIdsRaw = body.categoryIds;
-  if (
-    !Array.isArray(categoryIdsRaw) ||
-    categoryIdsRaw.length > 100 ||
-    categoryIdsRaw.some((id) => typeof id !== "string" || !UUID_RE.test(id)) ||
-    new Set(categoryIdsRaw).size !== categoryIdsRaw.length
-  ) {
-    invalid("Volunteer categories must be a list of unique category identifiers.");
-  }
-  const categoryIds = categoryIdsRaw as string[];
   const children: StaffRequestEditInput & { kind: "volunteer" } extends { children: infer C } ? C : never = [];
   for (const [index, raw] of childrenRaw.entries()) {
     const label = `Role ${index + 1}`;
@@ -304,7 +287,6 @@ function parseStaffRequestEdit(
     requestId,
     staffUserId,
     fields: { ...common, details, eventLocation },
-    categoryIds,
     children,
   };
 }
@@ -507,11 +489,10 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      const [children, latestReturn, editability, categories] = await Promise.all([
+      const [children, latestReturn, editability] = await Promise.all([
         kind === "item" ? dal.items.listByRequest(ctx, id) : dal.volunteerRoles.listByRequest(ctx, id),
         dal.adminRequests.latestReturn(ctx, kind, id),
         dal.adminRequests.preApprovalEditability(ctx, kind, id),
-        kind === "volunteer" ? dal.volunteerRequests.listCategoryOptions(ctx, id) : Promise.resolve([]),
       ]);
       const orgContactPerson = organization.primaryContactPersonId
         ? await dal.people.getById(ctx, organization.primaryContactPersonId)
@@ -548,7 +529,6 @@ export function registerAdminRoutes(app: Express): void {
             }
           : null,
         children,
-        categories,
         latestReturn,
         editability,
       });
@@ -557,8 +537,8 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ---- Complete staff correction. Status is deliberately preserved, including
-  // an active request's approval stamp and public visibility.
+  // ---- Complete pre-approval correction. Status is deliberately preserved;
+  // return and recovery are explicit, separately recorded actions.
   app.post("/api/admin/requests/:type/:id/edit", requireStaff, async (req: Request, res: Response) => {
     const kind = parseKind(req.params.type);
     const id = req.params.id ?? "";
@@ -590,14 +570,6 @@ export function registerAdminRoutes(app: Express): void {
       }
       if (err instanceof dal.people.ContactNotVisibleError) {
         res.status(400).json({ message: "That contact cannot be attached to this organization. Nothing was changed." });
-        return;
-      }
-      if (
-        err instanceof dal.volunteerRequests.VolunteerRequestCategoryNotFoundError ||
-        err instanceof dal.volunteerRequests.DuplicateVolunteerRequestCategoryError ||
-        err instanceof dal.volunteerRequests.InactiveVolunteerRequestCategoryError
-      ) {
-        res.status(409).json({ message: `${err.message} Nothing was changed.` });
         return;
       }
       console.error(`[admin] staff edit failed for ${kind} request ${id}:`, err);
@@ -723,33 +695,7 @@ export function registerAdminRoutes(app: Express): void {
           message += ` Approval email was already sent previously to ${alreadySentEmails.join(" and ")}, so no duplicate was queued.`;
         }
       }
-      const matchingDispatches = result.matchingVolunteerAlerts
-        .filter(
-          (alert): alert is Extract<(typeof result.matchingVolunteerAlerts)[number], { outcome: "queued" }> =>
-            alert.outcome === "queued",
-        )
-        .map((alert) => alert.dispatch);
-      const matchingSkipped = result.matchingVolunteerAlerts.filter(
-        (alert) => alert.outcome === "skipped_disabled",
-      ).length;
-      const matchingBlocked = result.matchingVolunteerAlerts.filter((alert) => alert.outcome === "blocked").length;
-      if (matchingDispatches.length > 0) {
-        message += ` ${matchingDispatches.length} matching volunteer alert${matchingDispatches.length === 1 ? "" : "s"} queued.`;
-      }
-      if (matchingSkipped > 0) {
-        message += ` ${matchingSkipped} matching volunteer alert${matchingSkipped === 1 ? " was" : "s were"} skipped because that automated email is disabled; the skipped ${matchingSkipped === 1 ? "row is" : "rows are"} in the Email log.`;
-      }
-      if (matchingBlocked > 0) {
-        message += ` ${matchingBlocked} matching volunteer alert${matchingBlocked === 1 ? "" : "s"} could not be rendered; ${matchingBlocked === 1 ? "the failure is" : "the failures are"} in the Email log.`;
-      }
-
       res.json({ request: result.request, message });
-      // Fan-out can be large. Respond as soon as every row and once-only claim
-      // is durably committed, then dispatch; the stranded-email sweep recovers
-      // any queued row left by a process stop in this window.
-      if (matchingDispatches.length > 0) {
-        void dispatchQueuedEmails(matchingDispatches);
-      }
     } catch (err) {
       if (err instanceof RequestNotFoundError) {
         sendNotFound(res);
@@ -780,10 +726,6 @@ export function registerAdminRoutes(app: Express): void {
               ? "This request has no items and cannot be approved."
               : "This request has no roles and cannot be approved.",
         });
-        return;
-      }
-      if (err instanceof NoVolunteerCategoriesError) {
-        res.status(409).json({ message: err.message });
         return;
       }
       if (err instanceof IllegalStateError) {
@@ -956,18 +898,12 @@ export function registerAdminRoutes(app: Express): void {
       const stored = await storeImage({ data: req.file.buffer, filename: req.file.originalname });
       let updated: AdminRequest;
       try {
-        const saved = await saveStaffRequestImage({
+        updated = await saveStaffRequestImage({
           kind,
           requestId: id,
           staffUserId: staffContext(req).userId,
           imageUrl: stored.url,
         });
-        updated = saved.request;
-        if (saved.previousImageUrl && saved.previousImageUrl !== stored.url) {
-          await deleteImage(saved.previousImageUrl).catch((deleteErr) => {
-            console.error(`[admin] orphaned request image ${saved.previousImageUrl} after replacement:`, deleteErr);
-          });
-        }
       } catch (err) {
         await deleteImage(stored.url).catch(() => undefined);
         throw err;
@@ -1007,7 +943,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
+            "Only pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -1052,7 +988,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
+            "Only pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -1095,7 +1031,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(409).json({
           message:
             editability.reason ??
-            "Only active or pending requests and drafts previously returned by staff can have their image changed.",
+            "Only pending requests and drafts previously returned by staff can have their image changed.",
         });
         return;
       }
@@ -1143,7 +1079,7 @@ export function registerAdminRoutes(app: Express): void {
           res.status(409).json({
             message:
               editability.reason ??
-              "Only active or pending requests and drafts previously returned by staff can have their image changed.",
+              "Only pending requests and drafts previously returned by staff can have their image changed.",
           });
           return;
         }
@@ -1679,125 +1615,6 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   // --------------------------------------------------------------------------
-  // ADMIN-11 — Volunteer categories. Staff admin only. Labels are always
-  // alphabetized by the DAL; deactivation preserves person-interest links.
-  // --------------------------------------------------------------------------
-
-  app.get("/api/admin/volunteer-categories", requireStaffAdmin, async (req: Request, res: Response, next) => {
-    try {
-      const categories = await dal.volunteerInterests.listWithUsage(staffCtx(req));
-      res.json({ categories });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post("/api/admin/volunteer-categories", requireStaffAdmin, async (req: Request, res: Response) => {
-    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
-    if (name === "") {
-      res.status(400).json({ message: "Name is required." });
-      return;
-    }
-    if (name.length > 120) {
-      res.status(400).json({ message: "Name must be 120 characters or fewer." });
-      return;
-    }
-    try {
-      const ctx = staffCtx(req);
-      const existing = await dal.volunteerInterests.listAll(ctx);
-      if (existing.some((category) => category.name.trim().toLowerCase() === name.toLowerCase())) {
-        res.status(409).json({ message: `A volunteer category named "${name}" already exists.` });
-        return;
-      }
-      const category = await dal.volunteerInterests.create(ctx, name);
-      res.json({ message: `${category.name} added.`, category });
-    } catch (err) {
-      if (isVolunteerCategoryNameConflict(err)) {
-        res.status(409).json({ message: `A volunteer category named "${name}" already exists.` });
-        return;
-      }
-      console.error(`[admin] volunteer category add failed (${name}):`, err);
-      res.status(500).json({ message: SAVE_FAILURE });
-    }
-  });
-
-  app.post("/api/admin/volunteer-categories/:id/rename", requireStaffAdmin, async (req: Request, res: Response) => {
-    const id = req.params.id ?? "";
-    if (!UUID_RE.test(id)) {
-      sendNotFound(res);
-      return;
-    }
-    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
-    if (name === "") {
-      res.status(400).json({ message: "Name is required." });
-      return;
-    }
-    if (name.length > 120) {
-      res.status(400).json({ message: "Name must be 120 characters or fewer." });
-      return;
-    }
-    try {
-      const ctx = staffCtx(req);
-      const existing = await dal.volunteerInterests.listAll(ctx);
-      if (!existing.some((category) => category.id === id)) {
-        sendNotFound(res);
-        return;
-      }
-      if (
-        existing.some(
-          (category) => category.id !== id && category.name.trim().toLowerCase() === name.toLowerCase(),
-        )
-      ) {
-        res.status(409).json({ message: `A volunteer category named "${name}" already exists.` });
-        return;
-      }
-      const category = await dal.volunteerInterests.rename(ctx, id, name);
-      res.json({ message: "Volunteer category renamed.", category });
-    } catch (err) {
-      if (isVolunteerCategoryNameConflict(err)) {
-        res.status(409).json({ message: `A volunteer category named "${name}" already exists.` });
-        return;
-      }
-      console.error(`[admin] volunteer category rename failed (${id}):`, err);
-      res.status(500).json({ message: SAVE_FAILURE });
-    }
-  });
-
-  for (const action of ["deactivate", "reactivate"] as const) {
-    app.post(
-      `/api/admin/volunteer-categories/:id/${action}`,
-      requireStaffAdmin,
-      async (req: Request, res: Response) => {
-        const id = req.params.id ?? "";
-        if (!UUID_RE.test(id)) {
-          sendNotFound(res);
-          return;
-        }
-        try {
-          const ctx = staffCtx(req);
-          const existing = await dal.volunteerInterests.listAll(ctx);
-          const row = existing.find((category) => category.id === id);
-          if (!row) {
-            sendNotFound(res);
-            return;
-          }
-          const category =
-            action === "deactivate"
-              ? await dal.volunteerInterests.deactivate(ctx, id)
-              : await dal.volunteerInterests.reactivate(ctx, id);
-          res.json({
-            message: `${category.name} ${action === "deactivate" ? "deactivated" : "reactivated"}.`,
-            category,
-          });
-        } catch (err) {
-          console.error(`[admin] volunteer category ${action} failed (${id}):`, err);
-          res.status(500).json({ message: SAVE_FAILURE });
-        }
-      },
-    );
-  }
-
-  // --------------------------------------------------------------------------
   // ADMIN-06 — Email log (docs/specs/ADMIN-06.md). Staff admin AND staff
   // approver read it (§11: requireStaff, unlike 04/05) — payloads are
   // reachable only behind this gate.
@@ -2087,14 +1904,10 @@ export function registerAdminRoutes(app: Express): void {
         dal.digestSubscribers.counts(ctx),
         dal.digestRuns.latest(ctx),
       ]);
-      const schedule = await dal.emailSchedules.getSchedule(ctx, "digest_new_needs");
-      const scheduleWithNext = schedule
-        ? { ...schedule, nextSendAt: await dal.emailSchedules.nextSendAt(ctx, schedule) }
-        : null;
       const anyExist = counts.subscribed + counts.unsubscribed + counts.bounced > 0;
       // lastRun makes the digest job's last decision visible here — including
       // the skipped_empty weeks, which send nothing but are never silent.
-       res.json({ rows, counts, anyExist, lastRun, schedule: scheduleWithNext });
+      res.json({ rows, counts, anyExist, lastRun });
     } catch (err) {
       next(err);
     }

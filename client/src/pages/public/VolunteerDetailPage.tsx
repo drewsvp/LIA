@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { PublicLayout } from "../../components/public/PublicLayout";
-import { beginEngagementLifecycle, reportEngagement } from "../../lib/engagement";
 
 /**
  * PB-04 — Volunteer request detail and interest (docs/specs/PB-04.md).
@@ -67,10 +66,6 @@ type FieldErrors = {
 export function VolunteerDetailPage(): ReactElement {
   const params = useParams<{ id: string }>();
   const requestId = params.id ?? "";
-  const formStarted = useRef(false);
-  useEffect(() => {
-    formStarted.current = false;
-  }, [requestId]);
   const { data, isLoading, isError, error } = useQuery<DetailPayload>({
     queryKey: [`/api/public/volunteer-requests/${requestId}`],
     enabled: requestId !== "",
@@ -81,14 +76,6 @@ export function VolunteerDetailPage(): ReactElement {
   const [roles, setRoles] = useState<PublicRole[] | null>(null);
   useEffect(() => {
     if (data) setRoles(data.roles);
-  }, [data]);
-  useEffect(() => {
-    if (!data) return;
-    return beginEngagementLifecycle(`detail:volunteer:${data.request.id}`, {
-      eventType: "detail_view",
-      requestKind: "volunteer",
-      requestId: data.request.id,
-    });
   }, [data]);
 
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -390,17 +377,7 @@ export function VolunteerDetailPage(): ReactElement {
                               type="checkbox"
                               disabled={full}
                               checked={selected[role.id] === true}
-                              onChange={(e) => {
-                                setSelected((prev) => ({ ...prev, [role.id]: e.target.checked }));
-                                if (e.target.checked) {
-                                  reportEngagement({
-                                    eventType: "role_selected",
-                                    requestKind: "volunteer",
-                                    requestId,
-                                    targetId: role.id,
-                                  });
-                                }
-                              }}
+                              onChange={(e) => setSelected((prev) => ({ ...prev, [role.id]: e.target.checked }))}
                             />
                           </label>
                         </div>
@@ -465,15 +442,6 @@ export function VolunteerDetailPage(): ReactElement {
                       organization will be reaching out to you within 1-3 business days with more details.
                     </p>
                     <form
-                      onFocusCapture={() => {
-                        if (formStarted.current) return;
-                        formStarted.current = true;
-                        reportEngagement({
-                          eventType: "form_start",
-                          requestKind: "volunteer",
-                          requestId,
-                        });
-                      }}
                       onSubmit={(e) => {
                         e.preventDefault();
                         void submit();
@@ -551,8 +519,8 @@ export function VolunteerDetailPage(): ReactElement {
                           accomodations needed.
                         </p>
                       </div>
-                      {/* 21px bold labels with unchanged 26px checkbox controls. */}
-                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, lineHeight: 1.3, marginBottom: 16 }}>
+                      {/* Doubled sizing to match the claim form: 28px labels, 26px boxes. */}
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 16 }}>
                         <input
                           type="checkbox"
                           checked={createProfile}
@@ -561,7 +529,7 @@ export function VolunteerDetailPage(): ReactElement {
                         />
                         Create a Donor Profile so I can track all my volunteering.
                       </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, lineHeight: 1.3, marginBottom: 20 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 28, lineHeight: 1.3, marginBottom: 20 }}>
                         <input
                           type="checkbox"
                           checked={subscribeDigest}

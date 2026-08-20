@@ -114,28 +114,7 @@ async function main(): Promise<void> {
   console.log("Seeding Love in Action …");
 
   // -------------------------------------------------------------------------
-  // 1. Volunteer categories — reviewed initial vocabulary, alphabetical.
-  // Once staff has configured the list, rerunning seed must not undo it.
-  // -------------------------------------------------------------------------
-  const VOLUNTEER_CATEGORIES = [
-    "Administrative Support",
-    "Child Care & Family Support",
-    "Event & Outreach Support",
-    "Foster Care & Respite",
-    "Hands-On Projects & General Help",
-    "Kids' Camp Counselor / Help",
-    "Mentoring & Relationship Building",
-    "Ranch Help",
-    "Skilled & Professional Services",
-    "Sorting, Organizing & Distribution",
-    "Technology & Digital Support",
-    "Transportation & Delivery",
-  ] as const;
-  const volunteerCategories = await dal.volunteerInterests.seedInitial(ctx, VOLUNTEER_CATEGORIES);
-  if (volunteerCategories.length === 0) fail("expected volunteer categories to be initialized");
-
-  // -------------------------------------------------------------------------
-  // 2. Populations — the exact eleven from the work order.
+  // 1. Populations — the exact eleven from the work order.
   // -------------------------------------------------------------------------
   const POPULATIONS: { name: string; slug: string }[] = [
     { name: "At-Risk Kids/Teens", slug: "at-risk-kids-teens" },
@@ -160,7 +139,7 @@ async function main(): Promise<void> {
   if (allPops.length !== 11) fail(`expected exactly 11 populations, found ${allPops.length}`);
 
   // -------------------------------------------------------------------------
-  // 3. Staff people + users (needed before any approval can be recorded).
+  // 2. Staff people + users (needed before any approval can be recorded).
   // -------------------------------------------------------------------------
   const tiffanyP = await ensurePerson({ firstName: "Tiffany", lastName: "Loeffler", email: "tiffany@defendingthecause.org" });
   const christinaP = await ensurePerson({ firstName: "Christina", lastName: "Moe", email: "christina@defendingthecause.org" });

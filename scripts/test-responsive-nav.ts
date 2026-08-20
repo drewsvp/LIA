@@ -1,9 +1,8 @@
 /**
  * Browser regression checks for the responsive global navigation.
  *
- * Covers signed-out, staff-admin and ordinary-member states at the two mobile
- * widths used for manual verification plus one pixel above the desktop
- * breakpoint.
+ * Covers signed-out and staff-admin states at the two mobile widths used for
+ * manual verification plus one pixel above the desktop breakpoint.
  *
  * Usage:
  *   npm run test:responsive-nav
@@ -31,10 +30,6 @@ const BASE_URL =
   process.env.TEST_BASE_URL ??
   (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://127.0.0.1:5000");
 const STAFF_EMAIL = "tiffany@defendingthecause.org";
-// A seeded organization owner: authenticated, one membership, no staff role —
-// the ordinary member header (DASHBOARD and the user menu, no ADMIN, no
-// switcher) that the staff-admin case cannot exercise.
-const MEMBER_EMAIL = "dana@heartsandhands.example.org";
 const ALLIANCE_HOMEPAGE = "https://www.defendingthecause.org";
 const VIEWPORT_HEIGHT = 900;
 const WIDTHS = [390, 719, 721] as const;
@@ -48,17 +43,6 @@ const PUBLIC_SIGNED_OUT = [
 const PUBLIC_AUTHENTICATED = PUBLIC_SIGNED_OUT.filter(({ text }) => text !== "MEMBER LOGIN");
 
 type AuthState = Awaited<ReturnType<BrowserContext["storageState"]>>;
-type SessionExpectation =
-  | { authenticated: false }
-  | { authenticated: true; staffRole: string | null; memberships: number };
-/** What the header must offer a given session. */
-type NavExpectation = {
-  /** Staff sessions get the ADMIN link; ordinary members must not. */
-  admin: boolean;
-  /** The organization name the switcher must list, or null when a single
-   *  membership means no switcher renders at all. */
-  switcherName: string | null;
-};
 type BrowserCookie = Parameters<BrowserContext["addCookies"]>[0][number];
 type Fixture = {
   organizationId: string;
@@ -181,7 +165,7 @@ async function createSwitcherFixture(): Promise<Fixture> {
   });
 }
 
-async function waitForSession(page: Page, expected: SessionExpectation): Promise<void> {
+async function waitForSession(page: Page, authenticated: boolean): Promise<void> {
   const sessionResponsePromise = page.waitForResponse((response) => {
     try {
       return new URL(response.url()).pathname === "/api/session";
@@ -202,18 +186,14 @@ async function waitForSession(page: Page, expected: SessionExpectation): Promise
   };
 
   assertThat(
-    session.authenticated === expected.authenticated,
-    `Expected authenticated=${expected.authenticated}, got ${JSON.stringify(session.authenticated)}.`,
+    session.authenticated === authenticated,
+    `Expected authenticated=${authenticated}, got ${JSON.stringify(session.authenticated)}.`,
   );
-  if (expected.authenticated) {
+  if (authenticated) {
+    assertThat(session.staffRole === "staff_admin", `Expected a staff_admin session, got ${session.staffRole ?? "none"}.`);
     assertThat(
-      (session.staffRole ?? null) === expected.staffRole,
-      `Expected staffRole=${expected.staffRole ?? "none"}, got ${session.staffRole ?? "none"}.`,
-    );
-    const memberships = Array.isArray(session.memberships) ? session.memberships.length : 0;
-    assertThat(
-      memberships === expected.memberships,
-      `Expected ${expected.memberships} membership(s) for this fixture, got ${memberships}.`,
+      Array.isArray(session.memberships) && session.memberships.length >= 2,
+      "The staff-admin fixture did not produce the two memberships required for the switcher.",
     );
     await page.waitForSelector(".site-nav-user-trigger", { state: "attached" });
   } else {
@@ -338,22 +318,17 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
     return;
   }
 
-  const topOrder = (await page.locator(".site-nav-top > a.site-nav-btn-cta:visible").allTextContents()).map((item) =>
-    item.trim(),
-  );
-  const expectedTopOrder = authenticated ? [] : ["PROVIDE AN ITEM", "VOLUNTEER"];
+  const topOrder = (await page.locator(".site-nav-top > a:visible").allTextContents()).map((item) => item.trim());
   assertThat(
-    JSON.stringify(topOrder) === JSON.stringify(expectedTopOrder),
+    JSON.stringify(topOrder) === JSON.stringify(["PROVIDE AN ITEM", "VOLUNTEER"]),
     "Desktop primary public destinations are in the wrong order.",
-    `Expected ${JSON.stringify(expectedTopOrder)}, got ${JSON.stringify(topOrder)}.`,
+    `Got ${JSON.stringify(topOrder)}.`,
   );
   const rightOrder = (await page.locator(".site-nav-right > a.site-nav-link:visible").allTextContents()).map((item) =>
     item.trim(),
   );
-  // Authenticated, the two public destinations move down into this row as
-  // plain links because the floating row above now carries portal controls.
   const expectedRightOrder = authenticated
-    ? ["ABOUT", "ALLIANCE HOMEPAGE", "PROVIDE AN ITEM", "VOLUNTEER"]
+    ? ["ABOUT", "ALLIANCE HOMEPAGE"]
     : ["ABOUT", "ALLIANCE HOMEPAGE", "MEMBER LOGIN"];
   assertThat(
     JSON.stringify(rightOrder) === JSON.stringify(expectedRightOrder),
@@ -391,7 +366,7 @@ async function assertSignedOutNavigation(page: Page, width: number): Promise<voi
   await assertPublicDestinations(page, false, mobile);
 }
 
-async function assertAuthenticatedNavigation(page: Page, width: number, expected: NavExpectation): Promise<void> {
+async function assertAuthenticatedNavigation(page: Page, width: number, fixtureName: string): Promise<void> {
   const mobile = width <= 720;
   const memberLoginCount = await page
     .locator(".site-nav a")
@@ -406,18 +381,14 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
       "DASHBOARD is not in the mobile control row.",
     );
     assertThat(
-      (await page.locator(".site-nav-mobile-controls > a:visible").filter({ hasText: exactText("ADMIN") }).count()) ===
-        (expected.admin ? 1 : 0),
-      expected.admin ? "ADMIN is not in the mobile control row." : "ADMIN is offered to a non-staff member.",
+      (await page.locator(".site-nav-mobile-controls > a:visible").filter({ hasText: exactText("ADMIN") }).count()) === 1,
+      "ADMIN is not in the mobile control row.",
     );
 
     await openMobileMenu(page);
     assertThat(
-      (await page.locator(".site-nav-panel > .site-nav-switcher-mobile:visible").count()) ===
-        (expected.switcherName === null ? 0 : 1),
-      expected.switcherName === null
-        ? "A single-membership session renders an organization switcher."
-        : "Organization switcher is not in the mobile panel.",
+      (await page.locator(".site-nav-panel > .site-nav-switcher-mobile:visible").count()) === 1,
+      "Organization switcher is not in the mobile panel.",
     );
     assertThat(
       (await page.locator(".site-nav-panel > .site-nav-user:visible").count()) === 1,
@@ -430,52 +401,30 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
       "Mobile controls are visible above the breakpoint.",
     );
     assertThat(
-      (await page.locator(".site-nav-right > .site-nav-switcher:visible").count()) ===
-        (expected.switcherName === null ? 0 : 1),
-      expected.switcherName === null
-        ? "A single-membership session renders an organization switcher."
-        : "Organization switcher is not in the desktop utility row.",
-    );
-    // Authenticated, the portal controls live in the floating top row — the
-    // same place the two public CTAs occupy when signed out.
-    assertThat(
-      (await page.locator(".site-nav-top > a:visible").filter({ hasText: exactText("DASHBOARD") }).count()) === 1,
-      "DASHBOARD is not in the desktop top row.",
+      (await page.locator(".site-nav-right > .site-nav-switcher:visible").count()) === 1,
+      "Organization switcher is not in the desktop utility row.",
     );
     assertThat(
-      (await page.locator(".site-nav-top > a:visible").filter({ hasText: exactText("ADMIN") }).count()) ===
-        (expected.admin ? 1 : 0),
-      expected.admin ? "ADMIN is not in the desktop top row." : "ADMIN is offered to a non-staff member.",
+      (await page.locator(".site-nav-right > a:visible").filter({ hasText: exactText("DASHBOARD") }).count()) === 1,
+      "DASHBOARD is not in the desktop utility row.",
     );
     assertThat(
-      (await page.locator(".site-nav-top > .site-nav-user:visible").count()) === 1,
-      "User menu is not in the desktop top row.",
+      (await page.locator(".site-nav-right > a:visible").filter({ hasText: exactText("ADMIN") }).count()) === 1,
+      "ADMIN is not in the desktop utility row.",
     );
     assertThat(
-      (await page.locator(".site-nav-right > a:visible").filter({ hasText: exactText("DASHBOARD") }).count()) === 0,
-      "DASHBOARD is still duplicated in the desktop utility row.",
-    );
-    assertThat(
-      (await page.locator(".site-nav-right > a:visible").filter({ hasText: exactText("ADMIN") }).count()) === 0,
-      "ADMIN is still duplicated in the desktop utility row.",
-    );
-    assertThat(
-      (await page.locator(".site-nav-right > .site-nav-user:visible").count()) === 0,
-      "The user menu is still duplicated in the desktop utility row.",
+      (await page.locator(".site-nav-right > .site-nav-user:visible").count()) === 1,
+      "User menu is not in the desktop utility row.",
     );
   }
 
   const switcher = page.locator(".site-nav-switcher:visible");
-  if (expected.switcherName === null) {
-    assertThat((await switcher.count()) === 0, "A single-membership session renders an organization switcher.");
-  } else {
-    assertThat((await switcher.count()) === 1, "Expected exactly one visible organization switcher.");
-    const optionLabels = await switcher.locator("option").allTextContents();
-    assertThat(
-      optionLabels.some((label) => label.trim() === expected.switcherName),
-      `Organization switcher does not contain ${expected.switcherName}.`,
-    );
-  }
+  assertThat((await switcher.count()) === 1, "Expected exactly one visible organization switcher.");
+  const optionLabels = await switcher.locator("option").allTextContents();
+  assertThat(
+    optionLabels.some((label) => label.trim() === fixtureName),
+    `Organization switcher does not contain ${fixtureName}.`,
+  );
   assertThat((await page.locator(".site-nav-user-trigger:visible").count()) === 1, "Expected exactly one visible user menu.");
   await assertPublicDestinations(page, true, mobile);
   const dashboard = page.locator('.site-nav a:visible[href="/dashboard"]').filter({ hasText: exactText("DASHBOARD") });
@@ -483,14 +432,9 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
   const admin = page
     .locator('.site-nav a:visible[href="/admin/organizations"]')
     .filter({ hasText: exactText("ADMIN") });
-  assertThat(
-    (await admin.count()) === (expected.admin ? 1 : 0),
-    expected.admin
-      ? "ADMIN must appear exactly once and target /admin/organizations."
-      : "ADMIN is offered to a non-staff member.",
-  );
+  assertThat((await admin.count()) === 1, "ADMIN must appear exactly once and target /admin/organizations.");
   await assertExactlyOneVisible(page, "DASHBOARD");
-  if (expected.admin) await assertExactlyOneVisible(page, "ADMIN");
+  await assertExactlyOneVisible(page, "ADMIN");
 }
 
 function parseSetCookie(setCookie: string): BrowserCookie {
@@ -530,7 +474,7 @@ function parseSetCookie(setCookie: string): BrowserCookie {
   return cookie;
 }
 
-async function mintSessionState(browser: Browser, email: string): Promise<AuthState> {
+async function mintStaffAdminState(browser: Browser): Promise<AuthState> {
   // Mint through Better Auth's own provider API, not the HTTP quick-login
   // route. This preserves real session cookies and hooks without consuming the
   // app-wide IP rate-limit bucket shared by parallel validation workflows.
@@ -538,7 +482,7 @@ async function mintSessionState(browser: Browser, email: string): Promise<AuthSt
   await pool.query(
     `insert into verification (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
      values (gen_random_uuid(), $1, $2, now() + interval '2 minutes', now(), now())`,
-    [token, JSON.stringify({ email })],
+    [token, JSON.stringify({ email: STAFF_EMAIL })],
   );
 
   type MagicLinkApi = {
@@ -558,7 +502,7 @@ async function mintSessionState(browser: Browser, email: string): Promise<AuthSt
     });
     assertThat(
       response.ok || response.status === 302,
-      `Better Auth session minting for ${email} failed with ${response.status}: ${await response.text()}`,
+      `Better Auth session minting failed with ${response.status}: ${await response.text()}`,
     );
     const headers = response.headers as Headers & { getSetCookie?: () => string[] };
     setCookies = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [];
@@ -582,20 +526,12 @@ async function mintSessionState(browser: Browser, email: string): Promise<AuthSt
 
 async function runCase(
   browser: Browser,
-  state: "signed out" | "staff admin" | "member",
+  state: "signed out" | "staff admin",
   width: number,
   authState: AuthState | null,
   fixtureName: string,
 ): Promise<void> {
   const label = `${state} at ${width}px`;
-  // The staff admin holds the seeded membership plus the switcher fixture; the
-  // ordinary member holds one membership and no staff role.
-  const session: SessionExpectation =
-    state === "signed out"
-      ? { authenticated: false }
-      : state === "staff admin"
-        ? { authenticated: true, staffRole: "staff_admin", memberships: 2 }
-        : { authenticated: true, staffRole: null, memberships: 1 };
   let context: BrowserContext | null = null;
   try {
     context = await browser.newContext({
@@ -603,7 +539,7 @@ async function runCase(
       storageState: authState ?? undefined,
     });
     const page = await context.newPage();
-    await waitForSession(page, session);
+    await waitForSession(page, state === "staff admin");
 
     if (state === "signed out") {
       const sessionCookies = (await context.cookies()).filter((cookie) =>
@@ -611,10 +547,8 @@ async function runCase(
       );
       assertThat(sessionCookies.length === 0, "Signed-out context inherited an authenticated session cookie.");
       await assertSignedOutNavigation(page, width);
-    } else if (state === "staff admin") {
-      await assertAuthenticatedNavigation(page, width, { admin: true, switcherName: fixtureName });
     } else {
-      await assertAuthenticatedNavigation(page, width, { admin: false, switcherName: null });
+      await assertAuthenticatedNavigation(page, width, fixtureName);
     }
 
     await assertNoHorizontalOverflow(page, label);
@@ -642,17 +576,13 @@ async function main(): Promise<void> {
     console.log(`Fixture ready: ${fixture.organizationId}/${fixture.membershipId}`);
 
     browser = await chromium.launch({ headless: true, executablePath: chromiumExecutable() });
-    const staffState = await mintSessionState(browser, STAFF_EMAIL);
-    const memberState = await mintSessionState(browser, MEMBER_EMAIL);
+    const authState = await mintStaffAdminState(browser);
 
     for (const width of WIDTHS) {
       await runCase(browser, "signed out", width, null, fixture.name);
     }
     for (const width of WIDTHS) {
-      await runCase(browser, "staff admin", width, staffState, fixture.name);
-    }
-    for (const width of WIDTHS) {
-      await runCase(browser, "member", width, memberState, fixture.name);
+      await runCase(browser, "staff admin", width, authState, fixture.name);
     }
   } finally {
     await browser?.close();

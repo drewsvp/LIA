@@ -1,6 +1,5 @@
 import { useState, type ReactElement } from "react";
 import { Link } from "wouter";
-import { reportEngagement, type EngagementRequestKind } from "../../lib/engagement";
 
 /**
  * Public browse card, shared by PB-01 and PB-03. Both surfaces use a square
@@ -20,8 +19,6 @@ export type RequestCardProps = {
   buttonText: string;
   titleVariant: "bar" | "caps";
   underlineLabels?: boolean;
-  requestId: string;
-  requestKind: EngagementRequestKind;
 };
 
 /** Standard placeholder graphic for requests without an image (PB-01 §7). */
@@ -146,18 +143,7 @@ export function RequestCard(props: RequestCardProps): ReactElement {
         )}
       </div>
       <div style={{ padding: "0 16px 16px" }}>
-        <Link
-          href={props.href}
-          className="btn-teal"
-          style={{ display: "block", textAlign: "center" }}
-          onClick={() =>
-            reportEngagement({
-              eventType: "card_click",
-              requestKind: props.requestKind,
-              requestId: props.requestId,
-            })
-          }
-        >
+        <Link href={props.href} className="btn-teal" style={{ display: "block", textAlign: "center" }}>
           {props.buttonText}
         </Link>
       </div>

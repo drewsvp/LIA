@@ -63,13 +63,6 @@ export class NoChildrenError extends Error {
   }
 }
 
-export class NoVolunteerCategoriesError extends Error {
-  constructor() {
-    super("Assign at least one active volunteer category before approving this request.");
-    this.name = "NoVolunteerCategoriesError";
-  }
-}
-
 /** §7: approving under an unapproved org would publish nothing. */
 export class OrgNotApprovedError extends Error {
   constructor(public readonly orgName: string) {
@@ -84,15 +77,9 @@ export type RequestApprovalEmail =
   | { outcome: "skipped_disabled"; toEmail: string }
   | { outcome: "blocked"; toEmail: string; reason: string };
 
-export type MatchingVolunteerAlert =
-  | { outcome: "queued"; toEmail: string; dispatch: PendingDispatch }
-  | { outcome: "already_claimed"; toEmail: string }
-  | { outcome: "skipped_disabled"; toEmail: string }
-  | { outcome: "blocked"; toEmail: string; reason: string };
 export type ApproveRequestResult = {
   request: AdminRequest;
   emails: RequestApprovalEmail[];
-  matchingVolunteerAlerts: MatchingVolunteerAlert[];
   /** True when contact and creator resolved to the same address (§6). */
   samePerson: boolean;
   /** True when neither a contact nor a creator email exists. */
@@ -175,16 +162,6 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
 
   try {
     return await withDbContext(staff, async (c: PoolClient) => {
-      if (kind === "volunteer") {
-        try {
-          await dal.volunteerRequests.assertHasActiveCategoriesInTx(c, requestId);
-        } catch (err) {
-          if (err instanceof dal.volunteerRequests.NoActiveVolunteerRequestCategoriesError) {
-            throw new NoVolunteerCategoriesError();
-          }
-          throw err;
-        }
-      }
       const updated =
         kind === "item"
           ? await dal.itemRequests.transitionStatusInTx(c, { requestId, to: "active", actorUserId: staffUserId })
@@ -241,65 +218,7 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
           emails.push({ outcome: "blocked", toEmail: person.email, reason: err.message });
         }
       }
-
-      const matchingVolunteerAlerts: MatchingVolunteerAlert[] = [];
-      if (kind === "volunteer") {
-        const matchingRecipients = await dal.volunteerAlerts.listMatchingRecipientsInTx(c, updated.id);
-        for (const recipient of matchingRecipients) {
-          const claimed = await dal.volunteerAlerts.claimRecipientInTx(c, {
-            volunteerRequestId: updated.id,
-            userId: recipient.userId,
-            toEmail: recipient.email,
-          });
-          if (!claimed) {
-            matchingVolunteerAlerts.push({ outcome: "already_claimed", toEmail: recipient.email });
-            continue;
-          }
-
-          const vars = {
-            supporterFirstName: recipient.firstName,
-            opportunityName: updated.title,
-            organizationName: org.name,
-            matchingCategories: recipient.matchingCategoryNames,
-            opportunityUrl: absoluteUrl(`/volunteer/${updated.id}`),
-            unsubscribeUrl: absoluteUrl(`/volunteer-alerts/unsubscribe/${recipient.unsubscribeToken}`),
-          };
-          try {
-            const dispatch = await queueProductEmailInTx(c, {
-              key: "supporter_volunteer_match",
-              entityType: "volunteer_request",
-              entityId: updated.id,
-              toEmail: recipient.email,
-              toPersonId: recipient.personId,
-              vars,
-            });
-            if (dispatch) matchingVolunteerAlerts.push({ outcome: "queued", toEmail: recipient.email, dispatch });
-            else matchingVolunteerAlerts.push({ outcome: "skipped_disabled", toEmail: recipient.email });
-          } catch (err) {
-            if (!(err instanceof EmailConfigError)) throw err;
-            const row = await dal.emailLog.insertQueuedInTx(c, {
-              templateKey: "supporter_volunteer_match",
-              toEmail: recipient.email,
-              toPersonId: recipient.personId,
-              entityType: "volunteer_request",
-              entityId: updated.id,
-              payload: { vars },
-            });
-            await dal.emailLog.markFailedInTx(c, row.id, err.message, "render");
-            console.error(
-              `[admin] volunteer request ${updated.id} approved but supporter_volunteer_match blocked: ${err.message}`,
-            );
-            matchingVolunteerAlerts.push({ outcome: "blocked", toEmail: recipient.email, reason: err.message });
-          }
-        }
-      }
-      return {
-        request: updated,
-        emails,
-        matchingVolunteerAlerts,
-        samePerson,
-        noRecipients: recipients.length === 0,
-      };
+      return { request: updated, emails, samePerson, noRecipients: recipients.length === 0 };
     });
   } catch (err) {
     if (
@@ -307,7 +226,6 @@ export async function approveRequest(input: ApproveRequestInput): Promise<Approv
       err instanceof AlreadyActiveError ||
       err instanceof IllegalStateError ||
       err instanceof NoChildrenError ||
-      err instanceof NoVolunteerCategoriesError ||
       err instanceof OrgNotApprovedError
     ) {
       throw err;

@@ -90,8 +90,6 @@ export function ItemsBrowsePage(): ReactElement {
             {filtered.map((r) => (
               <RequestCard
                 key={r.id}
-                requestId={r.id}
-                requestKind="item"
                 href={`/items/${r.id}`}
                 title={r.title}
                 description={r.description}

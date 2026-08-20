@@ -43,7 +43,6 @@ export type MergeMovedCounts = {
   emailLogEntries: number;
   itemRequestContacts: number;
   volunteerRequestContacts: number;
-  volunteerInterests: number;
 };
 
 export type MergeResult = {
@@ -73,7 +72,6 @@ export function summarizeMoved(moved: MergeMovedCounts): string {
     "request contact reference",
     "request contact references",
   );
-  add(moved.volunteerInterests, "volunteer interest", "volunteer interests");
   return parts.length === 0 ? "no attached records" : parts.join(", ");
 }
 

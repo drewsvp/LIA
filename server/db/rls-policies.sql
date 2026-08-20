@@ -1,5 +1,5 @@
 -- rls-policies.sql
--- Row-level security for the application tables (Handbook §6: permission
+-- Row-level security for the 18 application tables (Handbook §6: permission
 -- checks enforced with row-level security in addition to the server-side
 -- guards). This file is AUTH INFRASTRUCTURE, applied idempotently at setup by
 -- `npm run db:apply-rls`. It is not a numbered schema migration and it does
@@ -215,125 +215,6 @@ create policy organization_populations_public_member_select on organization_popu
     )
   );
 
--- ---------------------------------------------------------------- volunteer_categories
-
-alter table volunteer_categories enable row level security;
-alter table volunteer_categories force row level security;
-
-drop policy if exists volunteer_categories_system_staff_all on volunteer_categories;
-create policy volunteer_categories_system_staff_all on volunteer_categories
-  using (current_setting('app.context', true) in ('system','staff'))
-  with check (current_setting('app.context', true) in ('system','staff'));
-
-drop policy if exists volunteer_categories_member_select on volunteer_categories;
-create policy volunteer_categories_member_select on volunteer_categories for select
-  using (
-    current_setting('app.context', true) = 'member'
-  );
-
--- -------------------------------------------------------- person_volunteer_interests
-
-alter table person_volunteer_interests enable row level security;
-alter table person_volunteer_interests force row level security;
-
-drop policy if exists person_volunteer_interests_system_staff_all on person_volunteer_interests;
-create policy person_volunteer_interests_system_staff_all on person_volunteer_interests
-  using (current_setting('app.context', true) in ('system','staff'))
-  with check (current_setting('app.context', true) in ('system','staff'));
-
-drop policy if exists person_volunteer_interests_member_select on person_volunteer_interests;
-create policy person_volunteer_interests_member_select on person_volunteer_interests for select
-  using (
-    current_setting('app.context', true) = 'member'
-    and exists (
-      select 1 from users u
-       where u.person_id = person_volunteer_interests.person_id
-         and u.id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
-  );
-
-drop policy if exists person_volunteer_interests_member_insert on person_volunteer_interests;
-create policy person_volunteer_interests_member_insert on person_volunteer_interests for insert
-  with check (
-    current_setting('app.context', true) = 'member'
-    and exists (
-      select 1 from users u
-       where u.person_id = person_volunteer_interests.person_id
-         and u.id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
-    and exists (
-      select 1 from volunteer_categories vc
-       where vc.id = person_volunteer_interests.category_id
-         and vc.is_active
-    )
-  );
-
-drop policy if exists person_volunteer_interests_member_delete on person_volunteer_interests;
-create policy person_volunteer_interests_member_delete on person_volunteer_interests for delete
-  using (
-    current_setting('app.context', true) = 'member'
-    and exists (
-      select 1 from users u
-       where u.person_id = person_volunteer_interests.person_id
-         and u.id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
-  );
-
--- ---------------------------------------------------------- volunteer alert consent
-
-alter table volunteer_alert_preferences enable row level security;
-alter table volunteer_alert_preferences force row level security;
-
-drop policy if exists volunteer_alert_preferences_system_staff_all on volunteer_alert_preferences;
-create policy volunteer_alert_preferences_system_staff_all on volunteer_alert_preferences
-  using (current_setting('app.context', true) in ('system','staff'))
-  with check (current_setting('app.context', true) in ('system','staff'));
-
-drop policy if exists volunteer_alert_preferences_member_select on volunteer_alert_preferences;
-create policy volunteer_alert_preferences_member_select on volunteer_alert_preferences for select
-  using (
-    current_setting('app.context', true) = 'member'
-    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
-  );
-
-drop policy if exists volunteer_alert_preferences_member_insert on volunteer_alert_preferences;
-create policy volunteer_alert_preferences_member_insert on volunteer_alert_preferences for insert
-  with check (
-    current_setting('app.context', true) = 'member'
-    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
-    and exists (
-      select 1 from users u
-       where u.id = volunteer_alert_preferences.user_id
-         and u.kind = 'supporter'
-         and u.status = 'active'
-    )
-  );
-
-drop policy if exists volunteer_alert_preferences_member_update on volunteer_alert_preferences;
-create policy volunteer_alert_preferences_member_update on volunteer_alert_preferences for update
-  using (
-    current_setting('app.context', true) = 'member'
-    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
-  )
-  with check (
-    current_setting('app.context', true) = 'member'
-    and user_id = nullif(current_setting('app.user_id', true), '')::uuid
-    and exists (
-      select 1 from users u
-       where u.id = volunteer_alert_preferences.user_id
-         and u.kind = 'supporter'
-         and u.status = 'active'
-    )
-  );
-
-alter table volunteer_match_alert_claims enable row level security;
-alter table volunteer_match_alert_claims force row level security;
-
-drop policy if exists volunteer_match_alert_claims_system_staff_all on volunteer_match_alert_claims;
-create policy volunteer_match_alert_claims_system_staff_all on volunteer_match_alert_claims
-  using (current_setting('app.context', true) in ('system','staff'))
-  with check (current_setting('app.context', true) in ('system','staff'));
-
 -- ---------------------------------------------------------------- item_requests
 
 alter table item_requests enable row level security;
@@ -544,43 +425,6 @@ create policy volunteer_roles_member_all on volunteer_roles
           and om.status = 'active'))
   );
 
--- ------------------------------------------------------ volunteer_request_categories
-
-alter table volunteer_request_categories enable row level security;
-alter table volunteer_request_categories force row level security;
-
-drop policy if exists volunteer_request_categories_system_staff_all on volunteer_request_categories;
-create policy volunteer_request_categories_system_staff_all on volunteer_request_categories
-  using (current_setting('app.context', true) in ('system','staff'))
-  with check (current_setting('app.context', true) in ('system','staff'));
-
-drop policy if exists volunteer_request_categories_member_all on volunteer_request_categories;
-create policy volunteer_request_categories_member_all on volunteer_request_categories
-  using (
-    current_setting('app.context', true) = 'member'
-    and exists (
-      select 1 from volunteer_requests r
-       where r.id = volunteer_request_categories.volunteer_request_id
-         and r.org_id in (
-           select om.org_id from org_memberships om
-            where om.user_id = nullif(current_setting('app.user_id', true), '')::uuid
-              and om.status = 'active'
-         )
-    )
-  )
-  with check (
-    current_setting('app.context', true) = 'member'
-    and exists (
-      select 1 from volunteer_requests r
-       where r.id = volunteer_request_categories.volunteer_request_id
-         and r.org_id in (
-           select om.org_id from org_memberships om
-            where om.user_id = nullif(current_setting('app.user_id', true), '')::uuid
-              and om.status = 'active'
-         )
-    )
-  );
-
 -- ---------------------------------------------------------------- item_pledges
 
 alter table item_pledges enable row level security;
@@ -674,16 +518,6 @@ create policy volunteer_signup_roles_member_select on volunteer_signup_roles for
 
 -- ---------------------------------------------------------------- approval_events
 
--- --------------------------------------------------------- request engagement
-
-alter table request_engagement_events enable row level security;
-alter table request_engagement_events force row level security;
-
-drop policy if exists request_engagement_events_system_staff_all on request_engagement_events;
-create policy request_engagement_events_system_staff_all on request_engagement_events
-  using (current_setting('app.context', true) in ('system','staff'))
-  with check (current_setting('app.context', true) in ('system','staff'));
-
 alter table approval_events enable row level security;
 alter table approval_events force row level security;
 
@@ -711,16 +545,6 @@ alter table email_template_overrides force row level security;
 
 drop policy if exists email_template_overrides_system_staff_all on email_template_overrides;
 create policy email_template_overrides_system_staff_all on email_template_overrides
-  using (current_setting('app.context', true) in ('system','staff'))
-  with check (current_setting('app.context', true) in ('system','staff'));
-
--- ---------------------------------------------------------------- email_schedules
-
-alter table email_schedules enable row level security;
-alter table email_schedules force row level security;
-
-drop policy if exists email_schedules_system_staff_all on email_schedules;
-create policy email_schedules_system_staff_all on email_schedules
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 

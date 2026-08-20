@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict ES15r1ueHIbQaYdbkD7C8lzvb6fG1esGTKVhmAemeNfEG2rwGKsugpprQi6vJMg
+\restrict LUdF4o5cXHpgB963LvubKgfYt6bpgLQGZy4TwnfxcxJP9zXnEzPudqlAvQdYlQf
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -112,34 +112,6 @@ $$;
 
 
 --
--- Name: item_request_current_la_date(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.item_request_current_la_date() RETURNS date
-    LANGUAGE sql
-    AS $$
-  select (clock_timestamp() at time zone 'America/Los_Angeles')::date;
-$$;
-
-
---
--- Name: item_request_expired_on(text, date, date, date); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.item_request_expired_on(p_deadline_type text, p_deadline_date date, p_expires_on date, p_today date) RETURNS boolean
-    LANGUAGE sql IMMUTABLE
-    AS $$
-  select
-    (p_expires_on is not null and p_expires_on < p_today)
-    or (
-      p_deadline_type = 'date_specific'
-      and p_deadline_date is not null
-      and p_deadline_date < p_today
-    );
-$$;
-
-
---
 -- Name: merge_people(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -155,7 +127,6 @@ declare
   n_email int;
   n_item_req_contacts int;
   n_vol_req_contacts int;
-  n_volunteer_interests int;
   v_actor uuid;
   v_note text;
 begin
@@ -180,6 +151,8 @@ begin
     raise exception 'merge_people: both records have login accounts';
   end if;
 
+  -- Capture identifying detail before the row is gone, so the audit row still
+  -- means something once the person no longer exists.
   select format('Merged %s %s <%s> (%s) into %s.',
                 first_name, last_name, email, id, p_survivor)
     into v_note
@@ -212,18 +185,8 @@ begin
   update volunteer_requests set contact_person_id = p_survivor where contact_person_id = p_duplicate;
   get diagnostics n_vol_req_contacts = row_count;
 
-  select count(*)::int into n_volunteer_interests
-    from person_volunteer_interests
-   where person_id = p_duplicate;
-
-  insert into person_volunteer_interests (person_id, category_id)
-  select p_survivor, category_id
-    from person_volunteer_interests
-   where person_id = p_duplicate
-  on conflict do nothing;
-
-  delete from person_volunteer_interests where person_id = p_duplicate;
-
+  -- Written before the delete: approval_events.entity_id is not a foreign key,
+  -- but ordering keeps the row correct even if that ever changes.
   insert into approval_events
     (entity_type, entity_id, from_status, to_status, actor_user_id, note)
   values
@@ -239,8 +202,7 @@ begin
     'orgPrimaryContacts', n_org_contacts,
     'emailLogEntries', n_email,
     'itemRequestContacts', n_item_req_contacts,
-    'volunteerRequestContacts', n_vol_req_contacts,
-    'volunteerInterests', n_volunteer_interests);
+    'volunteerRequestContacts', n_vol_req_contacts);
 end;
 $$;
 
@@ -490,32 +452,6 @@ $$;
 
 
 --
--- Name: reject_expired_item_pledge(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.reject_expired_item_pledge() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-begin
-  if exists (
-    select 1
-      from item_requests r
-     where r.id = new.item_request_id
-       and item_request_expired_on(
-         r.deadline_type,
-         r.deadline_date,
-         r.expires_on,
-         item_request_current_la_date()
-       )
-  ) then
-    raise exception 'request_not_active';
-  end if;
-  return new;
-end;
-$$;
-
-
---
 -- Name: set_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -719,7 +655,6 @@ CREATE TABLE public.digest_runs (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
     needs_payload jsonb,
-    occurrence_key text NOT NULL,
     CONSTRAINT digest_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'sent'::text, 'skipped_empty'::text])))
 );
 
@@ -731,13 +666,6 @@ ALTER TABLE ONLY public.digest_runs FORCE ROW LEVEL SECURITY;
 --
 
 COMMENT ON COLUMN public.digest_runs.needs_payload IS 'Canonical DigestNeed[] snapshot for this run; set once after selection, reused verbatim on resume.';
-
-
---
--- Name: COLUMN digest_runs.occurrence_key; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.digest_runs.occurrence_key IS 'Durable schedule occurrence claim: weekly:YYYY-MM-DD, once:<ISO instant>, or date:<YYYY-MM-DD> for direct verification passes.';
 
 
 --
@@ -806,25 +734,6 @@ ALTER TABLE ONLY public.email_log FORCE ROW LEVEL SECURITY;
 --
 
 COMMENT ON COLUMN public.email_log.status IS 'queued -> sending (dispatch claim) -> sent | failed. skipped = template disabled by staff; never dispatched.';
-
-
---
--- Name: email_schedules; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.email_schedules (
-    template_key text NOT NULL,
-    active boolean DEFAULT true NOT NULL,
-    weekly_weekday smallint NOT NULL,
-    weekly_minutes smallint NOT NULL,
-    one_time_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_by uuid,
-    CONSTRAINT email_schedules_weekly_minutes_check CHECK (((weekly_minutes >= 0) AND (weekly_minutes <= 1439))),
-    CONSTRAINT email_schedules_weekly_weekday_check CHECK (((weekly_weekday >= 0) AND (weekly_weekday <= 6)))
-);
-
-ALTER TABLE ONLY public.email_schedules FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -994,17 +903,6 @@ ALTER TABLE ONLY public.people FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: person_volunteer_interests; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.person_volunteer_interests (
-    person_id uuid NOT NULL,
-    category_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
 -- Name: populations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1017,42 +915,6 @@ CREATE TABLE public.populations (
 );
 
 ALTER TABLE ONLY public.populations FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: request_engagement_events; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.request_engagement_events (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    client_event_id uuid NOT NULL,
-    event_type text NOT NULL,
-    request_kind text NOT NULL,
-    item_request_id uuid,
-    volunteer_request_id uuid,
-    item_id uuid,
-    volunteer_role_id uuid,
-    user_id uuid,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT request_engagement_child_target CHECK ((((event_type = ANY (ARRAY['product_link_click'::text, 'item_selected'::text])) AND (request_kind = 'item'::text) AND (item_id IS NOT NULL) AND (volunteer_role_id IS NULL)) OR ((event_type = 'role_selected'::text) AND (request_kind = 'volunteer'::text) AND (volunteer_role_id IS NOT NULL) AND (item_id IS NULL)) OR ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'form_start'::text])) AND (item_id IS NULL) AND (volunteer_role_id IS NULL)))),
-    CONSTRAINT request_engagement_events_event_type_check CHECK ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'product_link_click'::text, 'form_start'::text, 'item_selected'::text, 'role_selected'::text]))),
-    CONSTRAINT request_engagement_events_request_kind_check CHECK ((request_kind = ANY (ARRAY['item'::text, 'volunteer'::text]))),
-    CONSTRAINT request_engagement_request_target CHECK ((((request_kind = 'item'::text) AND (item_request_id IS NOT NULL) AND (volunteer_request_id IS NULL)) OR ((request_kind = 'volunteer'::text) AND (volunteer_request_id IS NOT NULL) AND (item_request_id IS NULL))))
-);
-
-
---
--- Name: TABLE request_engagement_events; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.request_engagement_events IS 'Allowlisted public request interactions. Anonymous rows have no persistent visitor identity; pledges/signups remain authoritative conversions.';
-
-
---
--- Name: COLUMN request_engagement_events.client_event_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.request_engagement_events.client_event_id IS 'Fresh UUID for one client interaction, used only to make duplicate delivery idempotent.';
 
 
 --
@@ -1128,77 +990,6 @@ CREATE TABLE public.verification (
     "expiresAt" timestamp without time zone NOT NULL,
     "createdAt" timestamp without time zone DEFAULT now() NOT NULL,
     "updatedAt" timestamp without time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: volunteer_alert_preferences; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.volunteer_alert_preferences (
-    user_id uuid NOT NULL,
-    enabled boolean DEFAULT false NOT NULL,
-    unsubscribe_token uuid DEFAULT gen_random_uuid() NOT NULL,
-    enabled_at timestamp with time zone,
-    disabled_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: TABLE volunteer_alert_preferences; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.volunteer_alert_preferences IS 'Explicit per-supporter consent for immediate matching-volunteer email alerts. No row is equivalent to enabled=false.';
-
-
---
--- Name: COLUMN volunteer_alert_preferences.unsubscribe_token; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.volunteer_alert_preferences.unsubscribe_token IS 'Opaque one-way capability used only to disable future matching alerts.';
-
-
---
--- Name: volunteer_categories; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.volunteer_categories (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    name text NOT NULL,
-    is_active boolean DEFAULT true NOT NULL,
-    CONSTRAINT volunteer_categories_name_check CHECK ((btrim(name) <> ''::text))
-);
-
-
---
--- Name: volunteer_match_alert_claims; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.volunteer_match_alert_claims (
-    volunteer_request_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    to_email text NOT NULL,
-    claimed_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT volunteer_match_alert_claims_to_email_check CHECK ((btrim(to_email) <> ''::text))
-);
-
-
---
--- Name: TABLE volunteer_match_alert_claims; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.volunteer_match_alert_claims IS 'Durable once-only claim for approval-triggered matching alerts, independent of retryable email_log status.';
-
-
---
--- Name: volunteer_request_categories; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.volunteer_request_categories (
-    volunteer_request_id uuid NOT NULL,
-    category_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1293,19 +1084,19 @@ ALTER TABLE ONLY public.digest_exclusions
 
 
 --
--- Name: digest_runs digest_runs_occurrence_key_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.digest_runs
-    ADD CONSTRAINT digest_runs_occurrence_key_key UNIQUE (occurrence_key);
-
-
---
 -- Name: digest_runs digest_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.digest_runs
     ADD CONSTRAINT digest_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: digest_runs digest_runs_run_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digest_runs
+    ADD CONSTRAINT digest_runs_run_date_key UNIQUE (run_date);
 
 
 --
@@ -1322,14 +1113,6 @@ ALTER TABLE ONLY public.digest_subscribers
 
 ALTER TABLE ONLY public.email_log
     ADD CONSTRAINT email_log_pkey PRIMARY KEY (id);
-
-
---
--- Name: email_schedules email_schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.email_schedules
-    ADD CONSTRAINT email_schedules_pkey PRIMARY KEY (template_key);
 
 
 --
@@ -1386,14 +1169,6 @@ ALTER TABLE ONLY public.item_requests
 
 ALTER TABLE ONLY public.item_requests
     ADD CONSTRAINT item_requests_pkey PRIMARY KEY (id);
-
-
---
--- Name: items items_id_request_ownership_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.items
-    ADD CONSTRAINT items_id_request_ownership_key UNIQUE (id, item_request_id);
 
 
 --
@@ -1477,14 +1252,6 @@ ALTER TABLE ONLY public.people
 
 
 --
--- Name: person_volunteer_interests person_volunteer_interests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.person_volunteer_interests
-    ADD CONSTRAINT person_volunteer_interests_pkey PRIMARY KEY (person_id, category_id);
-
-
---
 -- Name: populations populations_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1506,22 +1273,6 @@ ALTER TABLE ONLY public.populations
 
 ALTER TABLE ONLY public.populations
     ADD CONSTRAINT populations_slug_key UNIQUE (slug);
-
-
---
--- Name: request_engagement_events request_engagement_events_client_event_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_client_event_id_key UNIQUE (client_event_id);
-
-
---
--- Name: request_engagement_events request_engagement_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -1597,46 +1348,6 @@ ALTER TABLE ONLY public.verification
 
 
 --
--- Name: volunteer_alert_preferences volunteer_alert_preferences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_alert_preferences
-    ADD CONSTRAINT volunteer_alert_preferences_pkey PRIMARY KEY (user_id);
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_unsubscribe_token_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_alert_preferences
-    ADD CONSTRAINT volunteer_alert_preferences_unsubscribe_token_key UNIQUE (unsubscribe_token);
-
-
---
--- Name: volunteer_categories volunteer_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_categories
-    ADD CONSTRAINT volunteer_categories_pkey PRIMARY KEY (id);
-
-
---
--- Name: volunteer_match_alert_claims volunteer_match_alert_claims_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_match_alert_claims
-    ADD CONSTRAINT volunteer_match_alert_claims_pkey PRIMARY KEY (volunteer_request_id, user_id);
-
-
---
--- Name: volunteer_request_categories volunteer_request_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_request_categories
-    ADD CONSTRAINT volunteer_request_categories_pkey PRIMARY KEY (volunteer_request_id, category_id);
-
-
---
 -- Name: volunteer_requests volunteer_requests_legacy_wix_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1650,14 +1361,6 @@ ALTER TABLE ONLY public.volunteer_requests
 
 ALTER TABLE ONLY public.volunteer_requests
     ADD CONSTRAINT volunteer_requests_pkey PRIMARY KEY (id);
-
-
---
--- Name: volunteer_roles volunteer_roles_id_request_ownership_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_roles
-    ADD CONSTRAINT volunteer_roles_id_request_ownership_key UNIQUE (id, volunteer_request_id);
 
 
 --
@@ -1849,41 +1552,6 @@ CREATE INDEX people_needs_review_idx ON public.people USING btree (needs_review)
 
 
 --
--- Name: person_volunteer_interests_category_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX person_volunteer_interests_category_idx ON public.person_volunteer_interests USING btree (category_id);
-
-
---
--- Name: request_engagement_item_reporting_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_item_reporting_idx ON public.request_engagement_events USING btree (item_request_id, created_at DESC) WHERE (item_request_id IS NOT NULL);
-
-
---
--- Name: request_engagement_type_created_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_type_created_idx ON public.request_engagement_events USING btree (event_type, created_at DESC);
-
-
---
--- Name: request_engagement_user_history_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_user_history_idx ON public.request_engagement_events USING btree (user_id, created_at DESC) WHERE ((user_id IS NOT NULL) AND (event_type = 'detail_view'::text));
-
-
---
--- Name: request_engagement_volunteer_reporting_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX request_engagement_volunteer_reporting_idx ON public.request_engagement_events USING btree (volunteer_request_id, created_at DESC) WHERE (volunteer_request_id IS NOT NULL);
-
-
---
 -- Name: session_userId_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1895,27 +1563,6 @@ CREATE INDEX "session_userId_idx" ON public.session USING btree ("userId");
 --
 
 CREATE INDEX verification_identifier_idx ON public.verification USING btree (identifier);
-
-
---
--- Name: volunteer_categories_name_ci_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX volunteer_categories_name_ci_key ON public.volunteer_categories USING btree (lower(btrim(name)));
-
-
---
--- Name: volunteer_match_alert_claims_email_once_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX volunteer_match_alert_claims_email_once_idx ON public.volunteer_match_alert_claims USING btree (volunteer_request_id, lower(btrim(to_email)));
-
-
---
--- Name: volunteer_request_categories_category_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX volunteer_request_categories_category_idx ON public.volunteer_request_categories USING btree (category_id);
 
 
 --
@@ -1958,13 +1605,6 @@ CREATE INDEX volunteer_signups_person_idx ON public.volunteer_signups USING btre
 --
 
 CREATE INDEX volunteer_signups_request_idx ON public.volunteer_signups USING btree (volunteer_request_id);
-
-
---
--- Name: item_pledges item_pledges_reject_expired_request; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER item_pledges_reject_expired_request BEFORE INSERT ON public.item_pledges FOR EACH ROW EXECUTE FUNCTION public.reject_expired_item_pledge();
 
 
 --
@@ -2028,13 +1668,6 @@ CREATE TRIGGER people_set_updated_at BEFORE UPDATE ON public.people FOR EACH ROW
 --
 
 CREATE TRIGGER users_set_updated_at BEFORE UPDATE ON public.users FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER volunteer_alert_preferences_set_updated_at BEFORE UPDATE ON public.volunteer_alert_preferences FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -2118,14 +1751,6 @@ ALTER TABLE ONLY public.email_log
 
 ALTER TABLE ONLY public.email_log
     ADD CONSTRAINT email_log_to_person_id_fkey FOREIGN KEY (to_person_id) REFERENCES public.people(id);
-
-
---
--- Name: email_schedules email_schedules_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.email_schedules
-    ADD CONSTRAINT email_schedules_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id);
 
 
 --
@@ -2273,78 +1898,6 @@ ALTER TABLE ONLY public.organizations
 
 
 --
--- Name: person_volunteer_interests person_volunteer_interests_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.person_volunteer_interests
-    ADD CONSTRAINT person_volunteer_interests_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.volunteer_categories(id);
-
-
---
--- Name: person_volunteer_interests person_volunteer_interests_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.person_volunteer_interests
-    ADD CONSTRAINT person_volunteer_interests_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.items(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_item_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_item_request_id_fkey FOREIGN KEY (item_request_id) REFERENCES public.item_requests(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
-
-
---
--- Name: request_engagement_events request_engagement_events_volunteer_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_volunteer_request_id_fkey FOREIGN KEY (volunteer_request_id) REFERENCES public.volunteer_requests(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_events_volunteer_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_events_volunteer_role_id_fkey FOREIGN KEY (volunteer_role_id) REFERENCES public.volunteer_roles(id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_item_ownership_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_item_ownership_fk FOREIGN KEY (item_id, item_request_id) REFERENCES public.items(id, item_request_id) ON DELETE CASCADE;
-
-
---
--- Name: request_engagement_events request_engagement_role_ownership_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.request_engagement_events
-    ADD CONSTRAINT request_engagement_role_ownership_fk FOREIGN KEY (volunteer_role_id, volunteer_request_id) REFERENCES public.volunteer_roles(id, volunteer_request_id) ON DELETE CASCADE;
-
-
---
 -- Name: session session_userId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2358,46 +1911,6 @@ ALTER TABLE ONLY public.session
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id);
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_alert_preferences
-    ADD CONSTRAINT volunteer_alert_preferences_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- Name: volunteer_match_alert_claims volunteer_match_alert_claims_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_match_alert_claims
-    ADD CONSTRAINT volunteer_match_alert_claims_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- Name: volunteer_match_alert_claims volunteer_match_alert_claims_volunteer_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_match_alert_claims
-    ADD CONSTRAINT volunteer_match_alert_claims_volunteer_request_id_fkey FOREIGN KEY (volunteer_request_id) REFERENCES public.volunteer_requests(id) ON DELETE CASCADE;
-
-
---
--- Name: volunteer_request_categories volunteer_request_categories_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_request_categories
-    ADD CONSTRAINT volunteer_request_categories_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.volunteer_categories(id);
-
-
---
--- Name: volunteer_request_categories volunteer_request_categories_volunteer_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.volunteer_request_categories
-    ADD CONSTRAINT volunteer_request_categories_volunteer_request_id_fkey FOREIGN KEY (volunteer_request_id) REFERENCES public.volunteer_requests(id) ON DELETE CASCADE;
 
 
 --
@@ -2542,19 +2055,6 @@ ALTER TABLE public.email_log ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY email_log_system_staff_all ON public.email_log USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: email_schedules; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.email_schedules ENABLE ROW LEVEL SECURITY;
-
---
--- Name: email_schedules email_schedules_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY email_schedules_system_staff_all ON public.email_schedules USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3008,5 +2508,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ES15r1ueHIbQaYdbkD7C8lzvb6fG1esGTKVhmAemeNfEG2rwGKsugpprQi6vJMg
+\unrestrict LUdF4o5cXHpgB963LvubKgfYt6bpgLQGZy4TwnfxcxJP9zXnEzPudqlAvQdYlQf
 

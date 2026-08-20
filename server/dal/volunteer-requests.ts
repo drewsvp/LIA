@@ -13,7 +13,6 @@ import type {
   PublicOrganization,
   PublicVolunteerRequest,
   RequestStatus,
-  VolunteerCategory,
   VolunteerRequest,
 } from "../../shared/types";
 import { insertInTx } from "./approval-events";
@@ -44,36 +43,6 @@ export type CreateVolunteerRequestInput = {
   contactPersonId?: string | null;
   createdBy?: string | null;
 };
-
-export type VolunteerRequestCategoryOption = VolunteerCategory & { selected: boolean };
-
-export class VolunteerRequestCategoryNotFoundError extends Error {
-  constructor() {
-    super("One or more volunteer categories no longer exist.");
-    this.name = "VolunteerRequestCategoryNotFoundError";
-  }
-}
-
-export class DuplicateVolunteerRequestCategoryError extends Error {
-  constructor() {
-    super("Each volunteer category can only be selected once.");
-    this.name = "DuplicateVolunteerRequestCategoryError";
-  }
-}
-
-export class InactiveVolunteerRequestCategoryError extends Error {
-  constructor() {
-    super("An inactive volunteer category cannot be newly selected.");
-    this.name = "InactiveVolunteerRequestCategoryError";
-  }
-}
-
-export class NoActiveVolunteerRequestCategoriesError extends Error {
-  constructor() {
-    super("Assign at least one active volunteer category before approving this request.");
-    this.name = "NoActiveVolunteerRequestCategoriesError";
-  }
-}
 
 export type UpdateVolunteerRequestPatch = Partial<{
   title: string;
@@ -123,8 +92,13 @@ export async function markImageGenPending(ctx: DbContext, requestId: string): Pr
       c,
       `update volunteer_requests set image_gen_status = 'pending', image_gen_error = null
        where id = $1
-          and status in ('draft', 'pending', 'active')
-           and (image_url is null or image_generated)
+         and status in ('draft', 'pending')
+         and approved_at is null
+         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = volunteer_requests.id)
+         and not exists(
+           select 1 from volunteer_roles vr where vr.volunteer_request_id = volunteer_requests.id
+             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
+         )
        returning id`,
       [requestId],
     );
@@ -148,8 +122,14 @@ export async function recordGeneratedImage(
       c,
       `update volunteer_requests r
        set image_url = $2, image_generated = true, image_gen_status = 'succeeded', image_gen_error = null
-        where r.id = $1 and ${guard}
-          and r.status in ('draft', 'pending', 'active')
+       where r.id = $1 and ${guard}
+         and r.status in ('draft', 'pending')
+         and r.approved_at is null
+         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
+         and not exists(
+           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
+             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
+         )
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId, imageUrl],
     );
@@ -161,8 +141,7 @@ export async function recordGeneratedImage(
 export async function recordImageGenFailure(ctx: DbContext, requestId: string, message: string): Promise<void> {
   await withDbContext(ctx, (c) =>
     q(c, `update volunteer_requests set image_gen_status = 'failed', image_gen_error = $2
-           where id = $1 and status in ('draft', 'pending', 'active')
-             and (image_url is null or image_generated)`, [
+          where id = $1 and status in ('draft', 'pending') and approved_at is null`, [
       requestId,
       message.slice(0, 500),
     ]),
@@ -240,8 +219,14 @@ export async function clearGeneratedImage(ctx: DbContext, requestId: string): Pr
       c,
       `update volunteer_requests r
        set image_url = null, image_generated = false, image_gen_status = null, image_gen_error = null
-        where r.id = $1 and r.image_generated
-          and r.status in ('draft', 'pending', 'active')
+       where r.id = $1 and r.image_generated
+         and r.status in ('draft', 'pending')
+         and r.approved_at is null
+         and not exists(select 1 from volunteer_signups vs where vs.volunteer_request_id = r.id)
+         and not exists(
+           select 1 from volunteer_roles vr where vr.volunteer_request_id = r.id
+             and (vr.quantity_interested > 0 or vr.quantity_confirmed > 0)
+         )
        returning ${COLS.replaceAll("r.", "")}`,
       [requestId],
     );
@@ -302,112 +287,6 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
       status,
     ]),
   );
-}
-
-/** Active choices, plus an assigned inactive choice when reviewing a request. */
-export async function listCategoryOptions(
-  ctx: DbContext,
-  requestId: string,
-): Promise<VolunteerRequestCategoryOption[]> {
-  return withDbContext(ctx, (c) =>
-    q<VolunteerRequestCategoryOption>(
-      c,
-      `select vc.id, vc.name, vc.is_active as "isActive",
-              (vrc.volunteer_request_id is not null) as selected
-         from volunteer_categories vc
-         left join volunteer_request_categories vrc
-           on vrc.category_id = vc.id and vrc.volunteer_request_id = $1
-        where vc.is_active or vrc.volunteer_request_id is not null
-        order by lower(vc.name), vc.name`,
-      [requestId],
-    ),
-  );
-}
-
-/** The active shared vocabulary for a member posting a new volunteer request. */
-export async function listActiveCategories(ctx: DbContext): Promise<VolunteerCategory[]> {
-  return withDbContext(ctx, (c) =>
-    q<VolunteerCategory>(
-      c,
-      `select id, name, is_active as "isActive"
-         from volunteer_categories
-        where is_active
-        order by lower(name), name`,
-    ),
-  );
-}
-
-/**
- * Replace request categories as part of a caller-owned transaction. Existing
- * inactive assignments may stay until deliberately removed; inactive categories
- * can never be added back. Validation occurs before the diff, so a bad payload
- * cannot leave a partially rewritten set.
- */
-export async function replaceCategoriesInTx(
-  c: PoolClient,
-  requestId: string,
-  categoryIds: string[],
-): Promise<void> {
-  if (new Set(categoryIds).size !== categoryIds.length) throw new DuplicateVolunteerRequestCategoryError();
-  await c.query(`select id from volunteer_requests where id = $1 for update`, [requestId]);
-  const currentRows = await q<{ categoryId: string }>(
-    c,
-    `select category_id as "categoryId"
-       from volunteer_request_categories
-      where volunteer_request_id = $1
-      for update`,
-    [requestId],
-  );
-  const current = new Set(currentRows.map((row) => row.categoryId));
-  const categories =
-    categoryIds.length === 0
-      ? []
-      : await q<{ id: string; isActive: boolean }>(
-          c,
-          `select id, is_active as "isActive"
-             from volunteer_categories
-            where id = any($1::uuid[])
-            for share`,
-          [categoryIds],
-        );
-  if (categories.length !== categoryIds.length) throw new VolunteerRequestCategoryNotFoundError();
-  if (categories.some((category) => !category.isActive && !current.has(category.id))) {
-    throw new InactiveVolunteerRequestCategoryError();
-  }
-
-  if (categoryIds.length === 0) {
-    await c.query(`delete from volunteer_request_categories where volunteer_request_id = $1`, [requestId]);
-    return;
-  }
-  await c.query(
-    `delete from volunteer_request_categories
-      where volunteer_request_id = $1 and category_id <> all($2::uuid[])`,
-    [requestId, categoryIds],
-  );
-  const toAdd = categoryIds.filter((categoryId) => !current.has(categoryId));
-  if (toAdd.length > 0) {
-    await c.query(
-      `insert into volunteer_request_categories (volunteer_request_id, category_id)
-       select $1, unnest($2::uuid[])
-       on conflict do nothing`,
-      [requestId, toAdd],
-    );
-  }
-}
-
-/** Guard a status transition under the same transaction that makes it public. */
-export async function assertHasActiveCategoriesInTx(c: PoolClient, requestId: string): Promise<void> {
-  await c.query(`select id from volunteer_requests where id = $1 for update`, [requestId]);
-  const rows = await q<{ id: string }>(
-    c,
-    `select vc.id
-       from volunteer_request_categories vrc
-       join volunteer_categories vc on vc.id = vrc.category_id
-      where vrc.volunteer_request_id = $1 and vc.is_active
-      for share of vc`,
-    [requestId],
-  );
-  if (rows.length === 0) throw new NoActiveVolunteerRequestCategoriesError();
 }
 
 /** Active volunteer requests of approved orgs with public org fields (PB-03). */

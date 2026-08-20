@@ -145,7 +145,6 @@ export const RESENDABLE_TEMPLATE_KEYS: ReadonlySet<string> = new Set<string>([
   "donor_item_confirmation",
   "org_new_volunteer",
   "donor_volunteer_confirmation",
-  "supporter_volunteer_match",
 ]);
 
 const REBUILDERS: Record<string, (ctx: DbContext, row: EmailLogEntry) => Promise<Rebuilt>> = {
@@ -397,37 +396,6 @@ const REBUILDERS: Record<string, (ctx: DbContext, row: EmailLogEntry) => Promise
         requestUrl: absoluteUrl(`/volunteer/${signup.request.id}`),
         roles: signup.roleNames,
         followUpWindow: "1-3 business days",
-      },
-    };
-  },
-
-  async supporter_volunteer_match(ctx, row) {
-    if (!row.entityId || !row.toPersonId) {
-      throw new ResendBlockedError(
-        "This matching alert is missing its volunteer request or supporter link. Nothing was sent.",
-      );
-    }
-    const [request, matchingRecipients] = await Promise.all([
-      requestCtx(ctx, "volunteer", row),
-      dal.volunteerAlerts.listMatchingRecipients(ctx, row.entityId),
-    ]);
-    const recipient = matchingRecipients.find((candidate) => candidate.personId === row.toPersonId);
-    if (!recipient) {
-      throw new ResendBlockedError(
-        "This supporter is no longer eligible for this matching alert. They may have opted out, changed interests, been disabled, or the opportunity may no longer be active. Nothing was sent.",
-      );
-    }
-    return {
-      toEmail: recipient.email,
-      toPersonId: recipient.personId,
-      entityType: "volunteer_request",
-      vars: {
-        supporterFirstName: recipient.firstName,
-        opportunityName: request.title,
-        organizationName: request.orgName,
-        matchingCategories: recipient.matchingCategoryNames,
-        opportunityUrl: absoluteUrl(`/volunteer/${request.id}`),
-        unsubscribeUrl: absoluteUrl(`/volunteer-alerts/unsubscribe/${recipient.unsubscribeToken}`),
       },
     };
   },

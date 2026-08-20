@@ -142,15 +142,6 @@ export type Population = {
   isActive: boolean;
 };
 
-// ---------------------------------------------------------------- volunteer interests
-
-/** Shared, staff-managed vocabulary used by supporter profile preferences. */
-export type VolunteerCategory = {
-  id: string;
-  name: string;
-  isActive: boolean;
-};
-
 // ---------------------------------------------------------------- requests
 
 export type ItemRequest = {

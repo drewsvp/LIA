@@ -10,7 +10,6 @@ import { ItemsBrowsePage } from "./pages/public/ItemsBrowsePage";
 import { ItemDetailPage } from "./pages/public/ItemDetailPage";
 import { VolunteerBrowsePage } from "./pages/public/VolunteerBrowsePage";
 import { VolunteerDetailPage } from "./pages/public/VolunteerDetailPage";
-import { VolunteerAlertOptOutPage } from "./pages/public/VolunteerAlertOptOutPage";
 import { AboutPage } from "./pages/public/AboutPage";
 import { DigestPage } from "./pages/public/DigestPage";
 import { HomePage } from "./pages/public/HomePage";
@@ -41,8 +40,6 @@ import { ActivityPage as AdminActivityPage } from "./pages/admin/ActivityPage";
 import { SubscribersPage as AdminSubscribersPage } from "./pages/admin/SubscribersPage";
 import { RolesPage as AdminRolesPage } from "./pages/admin/RolesPage";
 import { EmailTemplatesPage as AdminEmailTemplatesPage } from "./pages/admin/EmailTemplatesPage";
-import { VolunteerCategoriesPage as AdminVolunteerCategoriesPage } from "./pages/admin/VolunteerCategoriesPage";
-import { AnalyticsPage as AdminAnalyticsPage } from "./pages/admin/AnalyticsPage";
 
 /** Built surfaces, by surface ID. Everything else renders its placeholder. */
 const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
@@ -81,8 +78,6 @@ const ADMIN_PAGES: Partial<Record<string, () => ReactElement>> = {
   "ADMIN-08": () => <AdminSubscribersPage />,
   "ADMIN-09": () => <AdminRolesPage />,
   "ADMIN-10": () => <AdminEmailTemplatesPage />,
-  "ADMIN-11": () => <AdminVolunteerCategoriesPage />,
-  "ADMIN-12": () => <AdminAnalyticsPage />,
 };
 
 /**
@@ -103,9 +98,6 @@ function AdminGate({ route }: { route: SurfaceRoute }): ReactElement | null {
 function AppRoutes(): ReactElement {
   return (
     <Switch>
-      <Route path="/volunteer-alerts/unsubscribe/:token">
-        <VolunteerAlertOptOutPage />
-      </Route>
       {SURFACE_ROUTES.map((route) => (
         <Route key={`${route.id}-${route.path}`} path={route.path}>
           {route.area === "admin" ? (

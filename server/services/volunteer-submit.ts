@@ -144,7 +144,6 @@ export async function submitVolunteerRequest(input: SubmitVolunteerRequestInput)
     : null;
 
   return withDbContext(SYSTEM, async (c) => {
-    await volunteerRequests.assertHasActiveCategoriesInTx(c, input.request.id);
     const updated = await volunteerRequests.transitionStatusInTx(c, {
       requestId: input.request.id,
       to: "pending",
