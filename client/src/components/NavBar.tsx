@@ -159,21 +159,21 @@ function OrgSwitcher({ className }: { className: string }): ReactElement | null 
 }
 
 export function NavBar(): ReactElement {
-  const { session } = useSession();
+  const { session, isLoading } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const showDashboard = session?.authenticated === true && session.memberships.length >= 1;
+  const showDashboard = !isLoading && session?.authenticated === true && session.memberships.length >= 1;
   // The user menu (identity + log out) must be reachable for EVERY
   // authenticated session, membership or not — otherwise a member-less
   // login has no way to see who they are or sign out.
-  const showUserMenu = session?.authenticated === true;
+  const showUserMenu = !isLoading && session?.authenticated === true;
   // Member login is offered only to visitors without a session; an
   // authenticated visitor already has the user menu.
-  const showMemberLogin = session?.authenticated !== true;
+  const showMemberLogin = !isLoading && session?.authenticated !== true;
   const firstName = session?.user?.firstName ?? "";
   // Admin link: visible to any staff session (approver or admin); both roles
   // can reach /admin/organizations (the first non-staff-admin-only surface).
-  const showAdmin = session?.staffRole != null;
+  const showAdmin = !isLoading && session?.staffRole != null;
 
   return (
     <header className="site-nav">
