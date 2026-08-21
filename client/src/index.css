@@ -3148,6 +3148,29 @@ a.site-nav-btn {
 }
 .anl-kind-cell { color: var(--color-muted); font-size: 0.85rem; }
 
+/* CSV export button */
+.anl-export-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.anl-export-btn {
+  display: inline-block;
+  padding: 8px 18px;
+  background: var(--color-navy);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.anl-export-btn:hover {
+  background: var(--color-teal);
+  color: #fff;
+  text-decoration: none;
+}
+
 /* Audience table cells */
 .anl-email-cell {
   font-size: 0.85rem;

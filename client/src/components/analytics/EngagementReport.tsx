@@ -43,6 +43,7 @@ export type AnalyticsReport = {
 export type EngagementReportProps = {
   apiUrl: string;
   orgId?: string;
+  exportUrl?: string;
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -216,7 +217,7 @@ function PerformanceTable({ rows }: { rows: PerformanceRow[] }): ReactElement {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-export function EngagementReport({ apiUrl, orgId }: EngagementReportProps): ReactElement {
+export function EngagementReport({ apiUrl, orgId, exportUrl }: EngagementReportProps): ReactElement {
   const [from, setFrom] = useState(() => laDate(29));
   const [to, setTo] = useState(() => laDate(0));
   const [kind, setKind] = useState("");
@@ -335,6 +336,24 @@ export function EngagementReport({ apiUrl, orgId }: EngagementReportProps): Reac
             Click a column header to sort. Counts reflect the filtered date range.
           </p>
           <PerformanceTable rows={performance} />
+          {exportUrl && (
+            <div className="anl-export-row">
+              <a
+                className="anl-export-btn"
+                href={(() => {
+                  const params = new URLSearchParams();
+                  if (from) params.set("from", from);
+                  if (to) params.set("to", to);
+                  if (kind) params.set("kind", kind);
+                  const qs = params.toString();
+                  return qs ? `${exportUrl}?${qs}` : exportUrl;
+                })()}
+                download
+              >
+                Download CSV
+              </a>
+            </div>
+          )}
         </>
       )}
     </section>

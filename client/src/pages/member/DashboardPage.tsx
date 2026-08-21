@@ -225,7 +225,7 @@ export function DashboardPage() {
             describe public interactions; completed donations and volunteer signups come from the actual
             submission records.
           </p>
-          <EngagementReport apiUrl="/api/dashboard/engagement" />
+          <EngagementReport apiUrl="/api/dashboard/engagement" exportUrl="/api/dashboard/engagement/export" />
         </section>
       </div>
     </div>
