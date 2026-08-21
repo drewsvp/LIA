@@ -39,6 +39,10 @@ args = "test-quick-login"
 task = "workflow.run"
 args = "responsive-nav"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "nav-guard"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -72,6 +76,17 @@ args = "npm run test:responsive-nav"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "nav-guard"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run test:nav-guard"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [[ports]]
 localPort = 5000
