@@ -154,3 +154,17 @@ mtime_ms = 1787289160965
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/02a70f29-e6ce-43fc-b78b-b3e4e1c25e8f/cd483247-0248-4dea-9476-c1dd506f6275"
 storage_version_token = "1787289194745806"
 content_type = "image/gif"
+
+[[outputs]]
+id = "qAR7B5RVL_TwoLApDTUUf"
+uri = "file://attached_assets/generated_media/new-horizons-profile-scroll-iphone.gif"
+type = "image"
+title = "New Horizons profile — iPhone slow scroll"
+description = "The same organization page captured at iPhone 15 size (393×852, retina, mobile user agent): hamburger nav, stacked need cards, slow eased scroll from the top through all six needs to the footer. 278 frames at 12 fps, roughly 23 seconds."
+logical_id = "3733102b-84ca-4aff-8400-ddb5e82de4c9"
+content_hash = "sha256:a91e6b9825e3a77d9fb3c9d1942d5b538609e2701e4c34c41253ea4587937f12"
+size = 21824274
+mtime_ms = 1787291444865
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/3733102b-84ca-4aff-8400-ddb5e82de4c9/aa3d0783-3b1a-4a99-877a-86288e228c16"
+storage_version_token = "1787291473765195"
+content_type = "image/gif"
