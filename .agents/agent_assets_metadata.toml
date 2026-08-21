@@ -168,3 +168,17 @@ mtime_ms = 1787291444865
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/3733102b-84ca-4aff-8400-ddb5e82de4c9/aa3d0783-3b1a-4a99-877a-86288e228c16"
 storage_version_token = "1787291473765195"
 content_type = "image/gif"
+
+[[outputs]]
+id = "onY7NQk22k9OsL72AhDDq"
+uri = "file://attached_assets/generated_media/items-page-scroll-iphone.gif"
+type = "image"
+title = "Items page — iPhone slow scroll"
+description = "The /items browse page at iPhone 15 size (393x852, retina, mobile user agent): all seven need cards stacked, slow eased scroll from the top to the footer at about 155 pixels per second. 410 frames at 12 fps, roughly 34 seconds."
+logical_id = "68890ad8-b280-4b13-9414-4206c88e3d57"
+content_hash = "sha256:d0ae2974a122a2b43cfe4924c50a16a4a670b050bdf396eec6ae02e2f9f23115"
+size = 37550120
+mtime_ms = 1787292020282
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/68890ad8-b280-4b13-9414-4206c88e3d57/09a4b809-0003-47f4-aaf7-9f5484028bfc"
+storage_version_token = "1787292103184665"
+content_type = "image/gif"
