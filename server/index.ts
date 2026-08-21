@@ -12,6 +12,7 @@ import { startEmailSweep } from "./jobs/email-sweep";
 import { startDigestScheduler } from "./jobs/digest";
 import { startImageSweep } from "./jobs/image-sweep";
 import { setupVite, serveStatic } from "./vite";
+import { checkRequiredDbFunctions } from "./db/startup-checks";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -99,6 +100,13 @@ async function start(): Promise<void> {
   startEmailSweep();
   startDigestScheduler();
   startImageSweep();
+
+  // Startup check: warn if any required custom DB functions are absent (can
+  // happen after a clean publish that did not replay all migrations).
+  checkRequiredDbFunctions().catch(() => {
+    // Already handled inside checkRequiredDbFunctions; swallow so startup
+    // never aborts due to the check itself.
+  });
 
   // Startup check: warn if quick login is enabled but seed accounts are missing.
   if (process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true") {
