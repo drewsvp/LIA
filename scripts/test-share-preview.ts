@@ -116,8 +116,12 @@ async function main(): Promise<void> {
   const withImage = await pool.query<{ id: string; imageUrl: string }>(
     `select id, image_url as "imageUrl" from item_requests where status = 'active' and image_url is not null limit 1`,
   );
-  const withoutImage = await pool.query<{ id: string }>(
-    `select id from item_requests where status = 'active' and image_url is null limit 1`,
+  const withoutImage = await pool.query<{ id: string; orgLogoUrl: string | null }>(
+    `select ir.id, o.logo_url as "orgLogoUrl"
+     from item_requests ir
+     join organizations o on o.id = ir.org_id
+     where ir.status = 'active' and ir.image_url is null
+     limit 1`,
   );
   const volunteer = await pool.query<{ id: string }>(
     `select id from volunteer_requests where status = 'active' limit 1`,
@@ -167,18 +171,34 @@ async function main(): Promise<void> {
     if (!fallbackId) throw new Error("expected an active item request with no image in the seed data");
     const fallbackPage = await getPage(`/items/${fallbackId}`);
     checkSingleton(fallbackPage, "item without an image");
-    check(
-      (meta(fallbackPage.html, "og:image") ?? "").endsWith("/og-image.jpg"),
-      "item without an image: falls back to the stable site-wide share image",
-    );
-    check(
-      (meta(fallbackPage.html, "og:image") ?? "").startsWith("http"),
-      "item without an image: the fallback image URL is absolute",
-    );
-    check(
-      meta(fallbackPage.html, "og:image:width") === "1200" && meta(fallbackPage.html, "og:image:height") === "630",
-      "item without an image: keeps the dimension hints that describe og-image.jpg",
-    );
+    const seedOrgLogoUrl = withoutImage.rows[0]?.orgLogoUrl ?? null;
+    if (seedOrgLogoUrl) {
+      // Seed org already has a logo — the need should show it instead of the default.
+      check(
+        meta(fallbackPage.html, "og:image") === `${BASE}${seedOrgLogoUrl}`,
+        "item without an image: falls back to the organization logo when the org has one",
+      );
+      check(
+        metaValues(fallbackPage.html, "og:image:width").length === 0 &&
+          metaValues(fallbackPage.html, "og:image:height").length === 0 &&
+          metaValues(fallbackPage.html, "og:image:type").length === 0,
+        "item without an image (org logo): no dimension hints for logo of unknown size",
+      );
+    } else {
+      // Neither the need nor its org has an image — expect the site-wide fallback.
+      check(
+        (meta(fallbackPage.html, "og:image") ?? "").endsWith("/og-image.jpg"),
+        "item without an image: falls back to the stable site-wide share image",
+      );
+      check(
+        (meta(fallbackPage.html, "og:image") ?? "").startsWith("http"),
+        "item without an image: the fallback image URL is absolute",
+      );
+      check(
+        meta(fallbackPage.html, "og:image:width") === "1200" && meta(fallbackPage.html, "og:image:height") === "630",
+        "item without an image: keeps the dimension hints that describe og-image.jpg",
+      );
+    }
 
     const imageId = withImage.rows[0]?.id;
     const imageUrl = withImage.rows[0]?.imageUrl;
@@ -223,6 +243,40 @@ async function main(): Promise<void> {
       "escaping: the plain <title> is escaped too",
     );
 
+    console.log("\nOrg-logo fallback");
+    // requestId has no image_url. Give the org a logo and verify the need adopts it.
+    const FIXTURE_LOGO_PATH = "/storage/images/zz-fixture-test-logo.png";
+    await pool.query(`update organizations set logo_url = $1 where id = $2`, [FIXTURE_LOGO_PATH, org.id]);
+    const logoFallbackPage = await getPage(`/items/${requestId}`);
+    checkSingleton(logoFallbackPage, "item without image, org has logo");
+    check(
+      meta(logoFallbackPage.html, "og:image") ===
+        `${new URL(meta(logoFallbackPage.html, "og:url") ?? BASE).origin}${FIXTURE_LOGO_PATH}`,
+      "org-logo fallback: og:image uses the organization logo when the need has no image",
+    );
+    check(
+      (meta(logoFallbackPage.html, "og:image") ?? "").startsWith("http"),
+      "org-logo fallback: the logo image URL is absolute",
+    );
+    check(
+      metaValues(logoFallbackPage.html, "og:image:width").length === 0 &&
+        metaValues(logoFallbackPage.html, "og:image:height").length === 0 &&
+        metaValues(logoFallbackPage.html, "og:image:type").length === 0,
+      "org-logo fallback: no dimension hints for a logo of unknown size",
+    );
+    // Remove the logo — the need should revert to the site-wide fallback.
+    await pool.query(`update organizations set logo_url = null where id = $1`, [org.id]);
+    const pureFallbackPage = await getPage(`/items/${requestId}`);
+    check(
+      (meta(pureFallbackPage.html, "og:image") ?? "").endsWith("/og-image.jpg"),
+      "org-logo fallback: reverts to the site-wide image when neither need nor org has an image",
+    );
+    check(
+      meta(pureFallbackPage.html, "og:image:width") === "1200" &&
+        meta(pureFallbackPage.html, "og:image:height") === "630",
+      "org-logo fallback: site-wide dimension hints are restored when falling back to og-image.jpg",
+    );
+
     console.log("\nUnresolvable records and every other route keep the default HTML");
     await dal.itemRequests.transitionStatus(ctx, {
       requestId,
@@ -253,6 +307,8 @@ async function main(): Promise<void> {
       checkDefaults(page, why);
     }
   } finally {
+    // Reset any fixture logo that may have been set during the org-logo fallback tests.
+    await pool.query(`update organizations set logo_url = null where id = $1 and logo_url like '/storage/images/zz-%'`, [org.id]);
     if (requestId !== null) {
       await pool.query(`delete from approval_events where entity_type = 'item_request' and entity_id = $1`, [
         requestId,

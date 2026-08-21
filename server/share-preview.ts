@@ -88,10 +88,17 @@ export function truncateOnWord(text: string, max = DESCRIPTION_MAX): string {
 
 // ---------------------------------------------------------------- lookups
 
-/** Absolute URL for a stored image path, or the stable site-wide fallback. */
-function imageFor(storedPath: string | null): { image: string; imageIsDefault: boolean } {
-  const trimmed = (storedPath ?? "").trim();
-  if (trimmed.startsWith("/")) return { image: absoluteUrl(trimmed), imageIsDefault: false };
+/**
+ * Absolute URL for the first stored image path (among the candidates) that
+ * begins with "/", or the stable site-wide fallback. Pass candidates in
+ * priority order: the need's own image first, then the organization logo, so
+ * a shared need without a photo shows the org identity before the generic card.
+ */
+function imageFor(...storedPaths: (string | null | undefined)[]): { image: string; imageIsDefault: boolean } {
+  for (const storedPath of storedPaths) {
+    const trimmed = (storedPath ?? "").trim();
+    if (trimmed.startsWith("/")) return { image: absoluteUrl(trimmed), imageIsDefault: false };
+  }
   return { image: absoluteUrl(DEFAULT_IMAGE_PATH), imageIsDefault: true };
 }
 
@@ -145,7 +152,7 @@ async function itemPreview(id: string): Promise<SharePreview | null> {
     description: truncateOnWord(itemShareDescription(org.name)),
     url: absoluteUrl(itemRequestPath(request.id)),
     imageAlt: title,
-    ...imageFor(request.imageUrl),
+    ...imageFor(request.imageUrl, org.logoUrl),
   };
 }
 
@@ -162,7 +169,7 @@ async function volunteerPreview(id: string): Promise<SharePreview | null> {
     description: truncateOnWord(volunteerShareDescription(org.name)),
     url: absoluteUrl(volunteerRequestPath(request.id)),
     imageAlt: title,
-    ...imageFor(request.imageUrl),
+    ...imageFor(request.imageUrl, org.logoUrl),
   };
 }
 
