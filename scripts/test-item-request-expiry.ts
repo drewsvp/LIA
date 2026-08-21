@@ -342,6 +342,19 @@ async function main(): Promise<void> {
     "getActiveAvailableById returns the row immediately after the deadline extension",
   );
 
+  // HTTP-layer assertions: the public API must reflect the extension immediately,
+  // not just the DAL.  A caching or routing bug between the HTTP handlers and the
+  // DAL would pass the DAL tests above while still returning stale results to donors.
+  const httpBrowseIds = await publicBrowseIds();
+  assert(
+    httpBrowseIds.has(deadlineExtension.id),
+    "GET /api/public/item-requests includes the extended need immediately after deadline is pushed to tomorrow",
+  );
+  assert(
+    (await publicDetailStatus(deadlineExtension.id)) === 200,
+    "GET /api/public/item-requests/:id returns 200 immediately after deadline extension (not 404)",
+  );
+
   await runExpiryOnce();
   const rows = await pool.query<{ id: string; status: string; archivedReason: string | null }>(
     `select id, status, archived_reason as "archivedReason"
