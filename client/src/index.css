@@ -119,6 +119,22 @@ h3 {
   filter: brightness(1.05);
 }
 
+/* Request-card image and title link to the request, alongside the button.
+   They inherit the surrounding colour so the card looks unchanged until
+   hover; the organization name and logo keep their own link styling. */
+.pb-card-media-link {
+  display: block;
+  line-height: 0;
+}
+.pb-card-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+.pb-card-title-link:hover,
+.pb-card-title-link:focus-visible {
+  text-decoration: underline;
+}
+
 /* ---- PB-02 detail & claim ---- */
 .pub-label {
   color: var(--color-teal);

@@ -19,3 +19,5 @@ Provider quirks:
 - OpenAI `/v1/images/generations` REJECTS the old `response_format` parameter (`Unknown parameter`). Use `gpt-image-1`; it returns `b64_json` by default. Square 1024x1024 is a native generation size, not a crop.
 - The user's OpenAI account has been at "Billing hard limit has been reached" since Aug 2026 — generation fails visibly until they add credit; this is account-side, not code. Tests must treat it as SKIPPED, not a code failure, while still asserting the failure landed on the row.
 - Failures must land on the row (`image_gen_status='failed'` + message) so staff see them on the admin request panel; retry = staff Regenerate button or the sweep.
+
+- When the provider is down and a need still has to ship with a photo, route the substitute generator through the service's own prompt builder and its storage/record helpers. Writing an image onto the row by any other path silently opts it out of uploaded-wins and staff Regenerate, and the row then drifts from every other need.

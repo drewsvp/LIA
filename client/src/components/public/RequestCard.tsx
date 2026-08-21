@@ -77,16 +77,29 @@ export function RequestCard(props: RequestCardProps): ReactElement {
       }}
     >
       <div style={{ padding: "12px 12px 0", position: "relative" }}>
-        {showImage ? (
-          <img
-            src={props.imageUrl ?? undefined}
-            alt={props.title}
-            onError={() => setImageFailed(true)}
-            style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", display: "block" }}
-          />
-        ) : (
-          <PlaceholderGraphic />
-        )}
+        {/* Image and title link to the request, matching the button. The card
+            as a whole is deliberately NOT a link: the organization name and
+            logo must stay separately clickable. The image link is hidden from
+            assistive tech and the tab order because the title link that
+            follows carries the same destination with real text. */}
+        <Link
+          href={props.href}
+          className="pb-card-media-link"
+          onClick={reportCardClick}
+          aria-hidden
+          tabIndex={-1}
+        >
+          {showImage ? (
+            <img
+              src={props.imageUrl ?? undefined}
+              alt={props.title}
+              onError={() => setImageFailed(true)}
+              style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", display: "block" }}
+            />
+          ) : (
+            <PlaceholderGraphic />
+          )}
+        </Link>
         {hasLogo && (
           // Links to the organization, NOT the request: no engagement event.
           <Link
@@ -122,7 +135,9 @@ export function RequestCard(props: RequestCardProps): ReactElement {
             textAlign: "center",
           }}
         >
-          {props.title}
+          <Link href={props.href} className="pb-card-title-link" onClick={reportCardClick}>
+            {props.title}
+          </Link>
         </h3>
       ) : (
         <h3
@@ -136,7 +151,9 @@ export function RequestCard(props: RequestCardProps): ReactElement {
             textAlign: "center",
           }}
         >
-          {props.title}
+          <Link href={props.href} className="pb-card-title-link" onClick={reportCardClick}>
+            {props.title}
+          </Link>
         </h3>
       )}
       <div style={{ padding: "12px 16px 16px", fontSize: 15, lineHeight: 1.5, flex: 1 }}>
