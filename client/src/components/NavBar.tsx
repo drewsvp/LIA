@@ -2,21 +2,17 @@
  * MP-02 — Global navigation bar, present on every page.
  *
  * Desktop: logo left; the right side is a two-row stack inside one navigation
- * landmark, mirroring the main Alliance site's header. The floating top row is
- * session-dependent: unauthenticated it holds the two primary calls to action
- * PROVIDE AN ITEM and VOLUNTEER as teal buttons, authenticated it holds the
- * in-portal controls (DASHBOARD, ADMIN, user menu) in their place. The row
- * beneath it holds ABOUT, ALLIANCE HOMEPAGE (external, new tab) and MEMBER
- * LOGIN (unauthenticated only) as plain text links — plus PROVIDE AN ITEM and
- * VOLUNTEER once the top row has been handed to the portal controls, so those
- * two destinations never leave the header — followed by the org switcher when
- * the session carries one.
+ * landmark, mirroring the main Alliance site's header. The lower row holds
+ * ABOUT, ALLIANCE HOMEPAGE (external, new tab), MEMBER LOGIN (unauthenticated
+ * only), PROVIDE AN ITEM, and VOLUNTEER as plain text links, followed by the
+ * org switcher when the session carries one. The floating top row only renders
+ * when authenticated: it holds the in-portal controls (DASHBOARD, ADMIN, user
+ * menu). Unauthenticated visitors see no top row — both public destinations
+ * appear in the lower row alongside the other plain links.
  * Mobile (§10): logo, hamburger, DASHBOARD/ADMIN buttons when authenticated;
  * the remaining items collapse behind the hamburger.
  *
- * The CTAs read teal against the navy utility buttons so browsing needs is
- * visibly the primary action rather than the same weight as DASHBOARD. The
- * former main-site labels (ABOUT US, RESOURCES, OUR NETWORK, REGIONAL
+ * The former main-site labels (ABOUT US, RESOURCES, OUR NETWORK, REGIONAL
  * CALENDAR, GIVE, MEET NEEDS) pointed at the Alliance's primary website,
  * outside this system, and are gone rather than rendered dead.
  *
@@ -190,35 +186,23 @@ export function NavBar(): ReactElement {
         {/* One navigation landmark wraps BOTH rows — splitting it would drop
             the top-row destinations out of screen-reader landmark navigation. */}
         <nav className="site-nav-stack" aria-label="Main navigation">
-          {/* The floating row is session-dependent: visitors see the two public
-              CTAs there, members see their portal controls in the same place.
-              The gating flags are unchanged — only where they render moved. */}
-          <div className="site-nav-top">
-            {showMemberLogin ? (
-              <>
-                <Link href="/items" className="site-nav-btn site-nav-btn-cta">
-                  PROVIDE AN ITEM
+          {/* The floating top row only renders for authenticated sessions so it
+              never creates a blank gap in the flex stack for logged-out visitors. */}
+          {showMemberLogin ? null : (
+            <div className="site-nav-top">
+              {showDashboard ? (
+                <Link href="/dashboard" className="site-nav-btn">
+                  DASHBOARD
                 </Link>
-                <Link href="/volunteer" className="site-nav-btn site-nav-btn-cta">
-                  VOLUNTEER
+              ) : null}
+              {showAdmin ? (
+                <Link href="/admin/organizations" className="site-nav-btn">
+                  ADMIN
                 </Link>
-              </>
-            ) : (
-              <>
-                {showDashboard ? (
-                  <Link href="/dashboard" className="site-nav-btn">
-                    DASHBOARD
-                  </Link>
-                ) : null}
-                {showAdmin ? (
-                  <Link href="/admin/organizations" className="site-nav-btn">
-                    ADMIN
-                  </Link>
-                ) : null}
-                {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
-              </>
-            )}
-          </div>
+              ) : null}
+              {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
+            </div>
+          )}
 
           <div className="site-nav-right">
             <Link href="/about" className="site-nav-link">
@@ -237,20 +221,16 @@ export function NavBar(): ReactElement {
                 MEMBER LOGIN
               </Link>
             ) : null}
-            {/* The two public destinations keep a home in the header once the
-                floating row is given over to portal controls — a signed-in
-                member can still give or volunteer without going back to the
-                home page. Same order the mobile panel lists them in. */}
-            {!showMemberLogin ? (
-              <>
-                <Link href="/items" className="site-nav-link">
-                  PROVIDE AN ITEM
-                </Link>
-                <Link href="/volunteer" className="site-nav-link">
-                  VOLUNTEER
-                </Link>
-              </>
-            ) : null}
+            {/* The two public destinations are shown to all visitors — logged-out
+                and logged-in alike. Logged-out users no longer see them as
+                teal CTA buttons in the top row; they appear here as plain links
+                matching the rest of the lower nav row. */}
+            <Link href="/items" className="site-nav-link">
+              PROVIDE AN ITEM
+            </Link>
+            <Link href="/volunteer" className="site-nav-link">
+              VOLUNTEER
+            </Link>
             <OrgSwitcher className="site-nav-switcher" />
           </div>
         </nav>

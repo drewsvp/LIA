@@ -348,7 +348,10 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
   const topOrder = (await page.locator(".site-nav-top > a.site-nav-btn-cta:visible").allTextContents()).map((item) =>
     item.trim(),
   );
-  const expectedTopOrder = authenticated ? [] : ["PROVIDE AN ITEM", "VOLUNTEER"];
+  // The top row never holds teal CTA buttons: authenticated sessions see
+  // DASHBOARD / ADMIN / user menu there (none are site-nav-btn-cta); logged-out
+  // visitors see no top row at all — it is not rendered, so there is no gap.
+  const expectedTopOrder: string[] = [];
   assertThat(
     JSON.stringify(topOrder) === JSON.stringify(expectedTopOrder),
     "Desktop primary public destinations are in the wrong order.",
@@ -357,11 +360,13 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
   const rightOrder = (await page.locator(".site-nav-right > a.site-nav-link:visible").allTextContents()).map((item) =>
     item.trim(),
   );
-  // Authenticated, the two public destinations move down into this row as
-  // plain links because the floating row above now carries portal controls.
+  // PROVIDE AN ITEM and VOLUNTEER are plain links in the lower row for every
+  // visitor state. The top row is only rendered when authenticated (portal
+  // controls); logged-out visitors see the lower row only, with MEMBER LOGIN
+  // before the two public destinations.
   const expectedRightOrder = authenticated
     ? ["ABOUT", "ALLIANCE HOMEPAGE", "PROVIDE AN ITEM", "VOLUNTEER"]
-    : ["ABOUT", "ALLIANCE HOMEPAGE", "MEMBER LOGIN"];
+    : ["ABOUT", "ALLIANCE HOMEPAGE", "MEMBER LOGIN", "PROVIDE AN ITEM", "VOLUNTEER"];
   assertThat(
     JSON.stringify(rightOrder) === JSON.stringify(expectedRightOrder),
     "Desktop secondary public destinations are in the wrong order.",
@@ -694,11 +699,12 @@ async function runNavFlashCase(
 
     // ── Assert: nothing session-dependent is visible during loading ─────────
     //
-    // Public CTAs (PROVIDE AN ITEM, VOLUNTEER teal buttons):
+    // Teal CTA buttons no longer exist anywhere in the nav — but the check is
+    // kept to guard against a future regression that reintroduces them.
     //   showMemberLogin = !isLoading && !authenticated  →  false while loading
     assertThat(
       (await page.locator(".site-nav .site-nav-btn-cta:visible").count()) === 0,
-      `${label}: teal CTA buttons (PROVIDE AN ITEM / VOLUNTEER) are visible during the session loading window.`,
+      `${label}: teal CTA buttons are visible during the session loading window.`,
     );
     // MEMBER LOGIN link (unauthenticated-only):
     assertThat(
