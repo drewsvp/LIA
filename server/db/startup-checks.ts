@@ -27,6 +27,10 @@ const REQUIRED_FUNCTIONS: ReadonlyArray<{
   migration: string;
 }> = [
   {
+    name: "guard_counter_columns",
+    migration: "0034_split_counter_trigger_branches.sql",
+  },
+  {
     name: "item_request_expired_on",
     migration: "0044_repair_item_request_expiry_functions.sql",
   },
