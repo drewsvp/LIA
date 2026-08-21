@@ -1,12 +1,17 @@
 /**
  * Regression checks for the startup DB check utilities.
  *
- * Test 1 — connection-failure guard (no real DB access)
+ * Test 1 — connection-failure guard for checkRequiredDbFunctions (no real DB access)
  *   Stubs pool.connect to reject and asserts that checkRequiredDbFunctions()
  *   swallows the error, logs "[db-check] Could not connect", and returns
  *   normally without throwing.
  *
- * Test 2 — missing-function warning
+ * Test 2 — connection-failure guard for checkRequiredDbTriggers (no real DB access)
+ *   Stubs pool.connect to reject and asserts that checkRequiredDbTriggers()
+ *   swallows the error, logs "[db-check] Could not connect to database for trigger check:",
+ *   and returns normally without throwing.
+ *
+ * Test 3 — missing-function warning
  *   Temporarily drops item_request_expired_on from the database, runs
  *   checkRequiredDbFunctions(), and asserts that console.error was called with
  *   the function name and the repair migration filename. The function is
@@ -17,7 +22,7 @@
  * Exit 0 = pass.
  */
 import { pool } from "../server/db/client";
-import { checkRequiredDbFunctions } from "../server/db/startup-checks";
+import { checkRequiredDbFunctions, checkRequiredDbTriggers } from "../server/db/startup-checks";
 
 let passed = 0;
 let failed = 0;
@@ -112,8 +117,63 @@ async function testConnectionFailure(): Promise<void> {
   );
 }
 
+/**
+ * Test 2 — connection-failure guard for checkRequiredDbTriggers.
+ *
+ * Stubs pool.connect so it rejects immediately, then calls
+ * checkRequiredDbTriggers() and asserts:
+ *   - the function returns normally (does not throw)
+ *   - console.error was called with the "[db-check] Could not connect to database for trigger check:" message
+ *
+ * The real database is never contacted; no cleanup is needed.
+ */
+async function testTriggerConnectionFailure(): Promise<void> {
+  console.log("startup-db-check: trigger connection-failure guard\n");
+
+  const capturedErrors: string[] = [];
+  const realConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    capturedErrors.push(args.map(String).join(" "));
+  };
+
+  // Replace pool.connect with a stub that simulates an unreachable database.
+  const realConnect = pool.connect.bind(pool);
+  (pool as any).connect = (): Promise<never> =>
+    Promise.reject(new Error("ECONNREFUSED — simulated unreachable DB"));
+
+  let threw = false;
+  try {
+    await checkRequiredDbTriggers();
+  } catch {
+    threw = true;
+  } finally {
+    // Restore both before asserting so assert() output goes to real stderr.
+    (pool as any).connect = realConnect;
+    console.error = realConsoleError;
+  }
+
+  const combined = capturedErrors.join("\n");
+
+  console.log("--- warnings captured ---");
+  console.log(combined || "(none)");
+  console.log("-------------------------\n");
+
+  assert(
+    !threw,
+    "checkRequiredDbTriggers() does not throw when pool.connect rejects",
+  );
+  assert(
+    capturedErrors.some((m) =>
+      m.includes("[db-check] Could not connect to database for trigger check:"),
+    ),
+    'console.error includes "[db-check] Could not connect to database for trigger check:"',
+    combined,
+  );
+}
+
 async function main(): Promise<void> {
   await testConnectionFailure();
+  await testTriggerConnectionFailure();
 
   console.log("\nstartup-db-check: missing-function warning\n");
 
