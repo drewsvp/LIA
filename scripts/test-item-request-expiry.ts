@@ -254,6 +254,49 @@ async function main(): Promise<void> {
     "volunteer date-specific deadline behavior remains unchanged",
   );
 
+  // --- Direct DAL tests (no HTTP layer) ---
+  // These cover the three guarantees that must survive future refactors of the
+  // expiry expression in server/dal/item-requests.ts.
+
+  // listActivePublic: both expiry paths are excluded at the DAL level
+  const dalPublicList = await itemRequests.listActivePublic(SYSTEM);
+  const dalPublicIds = new Set(dalPublicList.map((r) => r.id));
+  assert(
+    !dalPublicIds.has(legacyArchive.id),
+    "listActivePublic (DAL) excludes a need whose expires_on is yesterday",
+  );
+  assert(
+    !dalPublicIds.has(pastDeadline.id),
+    "listActivePublic (DAL) excludes a date_specific need whose deadline_date is yesterday",
+  );
+
+  // getActiveAvailableById: returns null for expired needs, row for active ones
+  const expiredByExpiresOn = await itemRequests.getActiveAvailableById(SYSTEM, legacyArchive.id);
+  assert(expiredByExpiresOn === null, "getActiveAvailableById returns null for a need expired via expires_on");
+  const expiredByDeadline = await itemRequests.getActiveAvailableById(SYSTEM, pastDeadline.id);
+  assert(expiredByDeadline === null, "getActiveAvailableById returns null for a date_specific need past its deadline_date");
+  const stillActiveRow = await itemRequests.getActiveAvailableById(SYSTEM, futureDeadline.id);
+  assert(
+    stillActiveRow !== null && stillActiveRow.id === futureDeadline.id,
+    "getActiveAvailableById returns the row for a non-expired active need",
+  );
+
+  // item_pledges_reject_expired_request trigger: a direct SQL insert for an
+  // expired request must raise 'request_not_active', not silently succeed.
+  const personResult = await pool.query<{ id: string }>(`select id from people order by created_at limit 1`);
+  const triggerPersonId = personResult.rows[0]?.id;
+  if (!triggerPersonId) throw new Error("no person row found for trigger test — run npm run db:seed first");
+  let triggerFired = false;
+  try {
+    await pool.query(`insert into item_pledges (person_id, item_request_id) values ($1, $2)`, [
+      triggerPersonId,
+      pastDeadline.id,
+    ]);
+  } catch (err: unknown) {
+    if ((err instanceof Error ? err.message : String(err)).includes("request_not_active")) triggerFired = true;
+  }
+  assert(triggerFired, "item_pledges_reject_expired_request trigger raises request_not_active for an expired need");
+
   await runExpiryOnce();
   const rows = await pool.query<{ id: string; status: string; archivedReason: string | null }>(
     `select id, status, archived_reason as "archivedReason"
