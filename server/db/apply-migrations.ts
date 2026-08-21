@@ -129,6 +129,14 @@ async function main(): Promise<void> {
     const client = await pool.connect();
     try {
       await client.query("begin");
+      // Set the RLS context GUCs locally so migrations that write to
+      // FORCE ROW LEVEL SECURITY tables pass the system/staff policies.
+      // The `true` third argument makes them transaction-local — they are
+      // cleared automatically on commit or rollback.
+      await client.query(
+        `select set_config('app.context', 'system', true),
+                set_config('app.user_id', '', true)`,
+      );
       await client.query(sql);
       await client.query(`insert into schema_migrations (filename, sha256) values ($1, $2)`, [filename, sha]);
       await client.query("commit");
