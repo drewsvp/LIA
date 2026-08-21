@@ -17,6 +17,7 @@
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { productUrlProblem } from "@shared/item-product-url";
+import { useNavigationGuard } from "../../hooks/useNavigationGuard";
 
 type RequestKind = "item" | "volunteer";
 type Tab = "pending" | "active" | "archived" | "returned";
@@ -568,6 +569,50 @@ export function RequestsPage() {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  // Snapshot of the form at the moment editing began — used to detect actual changes
+  const initialEditFormRef = useRef<EditForm | null>(null);
+  // Ref for the edit-form container so focus can be restored after "Stay"
+  const editFormRef = useRef<HTMLDivElement | null>(null);
+
+  // Navigation guard — fires when the admin tries to leave while editing.
+  // isDirty is true only when the form has actually been changed from its
+  // initial state, so opening edit mode without touching anything is not dirty.
+  const [pendingRowSwitch, setPendingRowSwitch] = useState<{ type: RequestKind; id: string } | null>(null);
+  const isDirty =
+    editing &&
+    editForm !== null &&
+    JSON.stringify(editForm) !== JSON.stringify(initialEditFormRef.current);
+  const { blocked, confirmLeave, cancelLeave } = useNavigationGuard(isDirty);
+  const showGuardDialog = blocked || pendingRowSwitch !== null;
+
+  function handleConfirmLeave() {
+    confirmLeave(); // replays any intercepted pushState/replaceState
+    if (pendingRowSwitch) {
+      // Row-switch case: apply the deferred selection and reset edit state
+      setSelected(pendingRowSwitch);
+      setPendingRowSwitch(null);
+      setConfirm(null);
+      setReturning(false);
+      setNote("");
+      setResult(null);
+      setEditing(false);
+      setEditForm(null);
+      setEditError(null);
+    } else {
+      // Nav-leave case: just clear edit state; the nav replay drives the rest
+      setEditing(false);
+      setEditForm(null);
+      setEditError(null);
+    }
+  }
+
+  function handleCancelLeave() {
+    cancelLeave();
+    setPendingRowSwitch(null);
+    // Return focus to the edit form so the admin can continue editing
+    // without having to click back into it manually.
+    setTimeout(() => editFormRef.current?.focus(), 0);
+  }
 
   const listQueryKey = tab === "returned"
     ? "/api/admin/requests?status=returned"
@@ -595,6 +640,7 @@ export function RequestsPage() {
     setEditing(false);
     setEditForm(null);
     setEditError(null);
+    initialEditFormRef.current = null;
   }
 
   async function refreshAfterAction() {
@@ -660,7 +706,9 @@ export function RequestsPage() {
 
   function startEdit() {
     if (!detail) return;
-    setEditForm(buildEditForm(detail));
+    const form = buildEditForm(detail);
+    initialEditFormRef.current = form;
+    setEditForm(form);
     setEditError(null);
     setEditing(true);
     setConfirm(null);
@@ -672,6 +720,7 @@ export function RequestsPage() {
     setEditing(false);
     setEditForm(null);
     setEditError(null);
+    initialEditFormRef.current = null;
   }
 
   async function saveEdit() {
@@ -694,6 +743,7 @@ export function RequestsPage() {
       if (ok) {
         setEditing(false);
         setEditForm(null);
+        initialEditFormRef.current = null;
       }
     } catch {
       setResult({ kind: "error", text: FAILURE });
@@ -886,6 +936,11 @@ export function RequestsPage() {
                 key={`${row.type}-${row.id}`}
                 className={selected?.id === row.id ? "adm-row adm-row-on" : "adm-row"}
                 onClick={() => {
+                  if (isDirty) {
+                    // Defer the row switch until the admin confirms losing changes
+                    setPendingRowSwitch({ type: row.type, id: row.id });
+                    return;
+                  }
                   setSelected({ type: row.type, id: row.id });
                   setConfirm(null);
                   setReturning(false);
@@ -911,6 +966,39 @@ export function RequestsPage() {
         </table>
       )}
 
+      {/* Navigation-guard dialog — shown when the admin tries to leave an
+          unsaved edit, either via the admin nav or by clicking another row. */}
+      {showGuardDialog && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 200,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            className="adm-confirm"
+            style={{ background: "#fff", padding: "24px 28px", maxWidth: 420, width: "100%", borderRadius: 4, boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}
+          >
+            <p style={{ marginTop: 0 }}>
+              You have unsaved changes. Leave and lose them, or stay and keep editing?
+            </p>
+            <div className="adm-actions">
+              <button className="adm-btn adm-btn-danger" onClick={handleConfirmLeave}>
+                Leave and lose changes
+              </button>
+              <button className="adm-btn" onClick={handleCancelLeave}>
+                Stay and keep editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selected !== null && (
         <div className="adm-detail">
           {detailQuery.isError ? (
@@ -919,7 +1007,7 @@ export function RequestsPage() {
             <p className="adm-muted">Loading…</p>
           ) : editing && editForm ? (
             /* ──────────── EDIT MODE ──────────── */
-            <div className="adm-edit-form">
+            <div className="adm-edit-form" ref={editFormRef} tabIndex={-1}>
               <h2 className="adm-subheading">Edit Request</h2>
 
               <div className="adm-form-section">

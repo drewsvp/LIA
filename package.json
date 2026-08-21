@@ -9,6 +9,7 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "build": "vite build",
     "check": "tsc --noEmit",
+    "test:nav-guard": "tsx scripts/test-nav-guard.ts",
     "test:responsive-nav": "tsx scripts/test-responsive-nav.ts",
     "test:volunteer-interests": "tsx scripts/test-volunteer-interests.ts",
     "test:volunteer-request-categories": "tsx scripts/test-volunteer-request-categories.ts",
