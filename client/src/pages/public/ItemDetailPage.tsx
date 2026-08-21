@@ -2,6 +2,13 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { PublicLayout } from "../../components/public/PublicLayout";
+import { ShareButton } from "../../components/public/ShareButton";
+import {
+  itemRequestPath,
+  itemShareDescription,
+  itemShareTitle,
+  organizationPath,
+} from "@shared/share-copy";
 import { beginEngagementLifecycle, reportEngagement } from "../../lib/engagement";
 
 /**
@@ -35,6 +42,7 @@ type DetailPayload = {
   };
   organization: {
     name: string;
+    slug: string;
     websiteUrl: string | null;
     mission: string | null;
     populations: string[];
@@ -232,6 +240,14 @@ export function ItemDetailPage(): ReactElement {
             >
               {data.request.title}
             </h1>
+            <div style={{ display: "flex", justifyContent: "center", margin: "0 0 24px" }}>
+              <ShareButton
+                path={itemRequestPath(data.request.id)}
+                title={itemShareTitle(data.request.title, data.organization.name)}
+                text={itemShareDescription(data.organization.name)}
+                label="Share this need"
+              />
+            </div>
             <div className="pb2-detail">
               <div className="pb2-detail-image">
                 {data.request.imageUrl != null && data.request.imageUrl.trim() !== "" ? (
@@ -261,7 +277,8 @@ export function ItemDetailPage(): ReactElement {
               </div>
               <div className="pb2-detail-summary" style={{ fontSize: 15, lineHeight: 1.7 }}>
                 <p style={{ margin: "0 0 10px" }}>
-                  <span className="pub-label">Requesting Organization:</span> {data.organization.name}
+                  <span className="pub-label">Requesting Organization:</span>{" "}
+                  <Link href={organizationPath(data.organization.slug)}>{data.organization.name}</Link>
                 </p>
                 {/* Confirmed: label renders even when the value is blank (§7). */}
                 <p style={{ margin: "0 0 10px" }}>
@@ -291,7 +308,7 @@ export function ItemDetailPage(): ReactElement {
             <div className="pb2-orgbox">
               <div>
                 <p style={{ margin: "0 0 10px", fontWeight: 700, color: "var(--color-navy)", fontSize: 17 }}>
-                  {data.organization.name}
+                  <Link href={organizationPath(data.organization.slug)}>{data.organization.name}</Link>
                 </p>
                 {data.organization.populations.length > 0 && (
                   <div style={{ fontSize: 15 }}>

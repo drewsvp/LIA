@@ -22,3 +22,21 @@ become stale before its transition, so neither is sufficient at a write gate.
 pattern. Date-backed deadline checks compare to the shared LA date and use a
 strict `<` comparison. For writes, evaluate the wall clock under the row lock;
 for batch jobs, recheck the rule after acquiring that lock before transitioning.
+
+## Status is not a substitute for the date
+
+Public read queries must re-check the expiry date themselves; filtering on
+`status = 'active'` alone is not enough, and neither is any new query that
+reuses an existing public list.
+
+**Why:** an expired request keeps `status = 'active'` until the nightly job
+archives it, and that job runs on a schedule, can lag, and can fail. Anything
+that trusts the status column shows expired needs during that window. Keep the
+job's predicate and the public predicate in one shared expression per request
+type so they cannot drift; when they were maintained separately, the item query
+had the check and the volunteer one silently did not.
+
+**How to apply:** when adding a public surface, confirm the list query it
+reuses actually carries the expiry predicate rather than assuming it does — and
+cover it with a test that activates a row with a past expiry date, since a
+status-only filter looks correct until the job falls behind.

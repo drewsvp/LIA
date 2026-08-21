@@ -20,7 +20,7 @@ type ListPayload = {
     description: string | null;
     imageUrl: string | null;
     eventLocation: string | null;
-    organization: { name: string; city: string | null; logoUrl: string | null };
+    organization: { name: string; slug: string; city: string | null; logoUrl: string | null };
   }[];
 };
 
@@ -97,6 +97,7 @@ export function VolunteerBrowsePage(): ReactElement {
                 description={r.description}
                 imageUrl={r.imageUrl}
                 orgName={r.organization.name}
+                orgSlug={r.organization.slug}
                 orgLogoUrl={r.organization.logoUrl}
                 locationLabel="Location"
                 locationValue={r.eventLocation}

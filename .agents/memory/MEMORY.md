@@ -7,7 +7,7 @@
 - [Authed E2E session recipe](auth-e2e-recipes.md) — mint session jars via magic-link + verification.identifier; jars die when the dev domain rotates; Resend test-mode 500s are expected and non-blocking.
 - [Email template entity defaults](email-template-entity-type.md) — shared templates default entity_type per-template; cross-entity call sites must override per call or logs mislabel silently.
 - [Legacy NULL required fields](legacy-null-required-fields.md) — seeded volunteer requests predate required details; edit saves correctly refuse until a member fills them — never backfill invented content.
-- [LA calendar-day semantics](la-calendar-day-semantics.md) — compare LA calendar dates; deadline write guards use wall-clock time, and batch transitions recheck after locking.
+- [LA calendar-day semantics](la-calendar-day-semantics.md) — compare LA calendar dates; write guards use wall-clock time; public reads re-check expiry because status lags the nightly job.
 - [Staff-admin client gate lockstep](staff-admin-client-gate.md) — requireStaffAdmin surfaces must also join STAFF_ADMIN_ONLY_SURFACES in shared/routes.ts, or approvers can load the page shell.
 - [Email dispatch claim](email-dispatch-claim.md) — queued→sending claim before every provider call; sweep re-dispatches stranded queued, never retries stranded sending (possible double send).
 - [Test fixture conventions](test-fixture-conventions.md) — zz_fixture payload key / zz. email prefix mark deliberate rows; check markers before diagnosing "stuck" data as a bug.
@@ -16,10 +16,13 @@
 - [SPA identity switch](spa-identity-switch.md) — logout/quick-login must end in a full page reload; queryClient.clear() with mounted queries leaves stale session UI.
 - [Email copy overrides](email-copy-overrides.md) — only free-text copy is editable, all-or-nothing override with defaultCopy fallback; disabled templates write visible skipped log rows, never silent drops.
 - [Policy migrations vs bootstrap](policy-migration-bootstrap.md) — migrations run before apply-rls on fresh DBs: policy drops need 'if exists'; rls-policies.sql must mirror policy changes.
-- [Digest run guard](digest-run-guard.md) — scheduled email jobs need a durable run-date claim + run-bound once-only fan-out, not the in-memory expiry guard; skipped weeks write visible rows.
+- [Digest run guard](digest-run-guard.md) — scheduled email jobs need occurrence claims, cross-process serialization, catch-up, and run-bound once-only fan-out; date-only guards lose same-day sends.
 - [Supporter accounts](supporter-accounts.md) — users.kind='supporter', zero memberships is valid; login routes them to /profile; provisioning never rolls back the public submission.
 - [Need auto-image sourcing](need-image-sourcing.md) — AI-generation only for item + volunteer, fixed per-kind guardrail prompt; uploaded-wins enforced in SQL; gpt-image-1 rejects response_format.
 - [Public image asset sets](public-image-asset-sets.md) — one photo backs several graphics with different baked-in wording/crops; match new art by its words + surface, never by photo or filename.
 - [Polymorphic trigger rows](plpgsql-trigger-row-branches.md) — shared PL/pgSQL triggers must branch before referencing table-specific NEW/OLD fields; an AND guard does not prevent field-resolution errors.
 - [Responsive preview isolation](responsive-preview-isolation.md) — exact-width iframe previews exercise real media queries; run authenticated screenshot states sequentially because the preview cookie jar is shared.
+- [Matching-alert once-only rule](matching-alert-once-only.md) — first-approval claims survive failed or disabled sends; only explicit failed-email resend may retry delivery.
+- [Public org visibility gate](public-org-visibility.md) — org identity surfaces gate on status alone; request listings also require kind='member_org', so the platform owner has a profile but posts no needs.
+- [Engagement privacy boundary](engagement-privacy-boundary.md) — anonymous request events stay aggregate-only; signed-in views may be attributed; pledges/signups remain the only conversion source.
 - [Publish schema after restores](publish-schema-after-restores.md) — restoring code does not roll back dev DB; orphaned schema can reappear in Publish, and new parent keys may be emitted after dependent FKs.

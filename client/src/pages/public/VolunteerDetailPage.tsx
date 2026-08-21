@@ -2,6 +2,13 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { PublicLayout } from "../../components/public/PublicLayout";
+import { ShareButton } from "../../components/public/ShareButton";
+import {
+  organizationPath,
+  volunteerRequestPath,
+  volunteerShareDescription,
+  volunteerShareTitle,
+} from "@shared/share-copy";
 import { beginEngagementLifecycle, reportEngagement } from "../../lib/engagement";
 
 /**
@@ -34,6 +41,7 @@ type DetailPayload = {
   };
   organization: {
     name: string;
+    slug: string;
     websiteUrl: string | null;
     mission: string | null;
     populations: string[];
@@ -224,6 +232,14 @@ export function VolunteerDetailPage(): ReactElement {
             >
               {data.request.title}
             </h1>
+            <div style={{ display: "flex", justifyContent: "center", margin: "0 0 24px" }}>
+              <ShareButton
+                path={volunteerRequestPath(data.request.id)}
+                title={volunteerShareTitle(data.request.title, data.organization.name)}
+                text={volunteerShareDescription(data.organization.name)}
+                label="Share this opportunity"
+              />
+            </div>
             <div className="pb2-detail">
               <div>
                 {data.request.imageUrl != null && data.request.imageUrl.trim() !== "" ? (
@@ -283,7 +299,7 @@ export function VolunteerDetailPage(): ReactElement {
             <div className="pb2-orgbox">
               <div>
                 <p style={{ margin: "0 0 10px", fontWeight: 700, color: "var(--color-navy)", fontSize: 17 }}>
-                  {data.organization.name}
+                  <Link href={organizationPath(data.organization.slug)}>{data.organization.name}</Link>
                 </p>
                 {data.organization.populations.length > 0 && (
                   <div style={{ fontSize: 15 }}>

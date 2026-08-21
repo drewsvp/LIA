@@ -604,6 +604,99 @@ h3 {
   height: auto;
 }
 
+/* ---- Shared share control (PB-02, PB-04, PB-08) ---- */
+.pb-share {
+  position: relative;
+  display: inline-block;
+}
+.pb-share-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 200px;
+  background: var(--color-surface);
+  border: 1px solid #dddddd;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.pb-share-option {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #eeeeee;
+  font: inherit;
+  font-size: 15px;
+  color: var(--color-navy);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.pb-share-option:last-child {
+  border-bottom: none;
+}
+.pb-share-option:hover {
+  background: #f1f1f1;
+}
+
+/* ---- PB-08 organization profile ---- */
+.pb7-identity {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 28px;
+  align-items: start;
+  background: #f1f1f1;
+  border: 1px solid #dddddd;
+  border-radius: var(--radius-card);
+  padding: 20px 22px;
+}
+/* The logo frame keeps one size whether or not an organization has a logo,
+   so the (much more common) fallback never collapses or stretches. */
+.pb7-logo {
+  width: 240px;
+  aspect-ratio: 5 / 2;
+  background: #ffffff;
+  border: 1px solid #dddddd;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pb7-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 10px;
+  box-sizing: border-box;
+}
+/* Fallback: the site header art, cropped to the frame rather than letterboxed. */
+.pb7-logo-fallback img {
+  object-fit: cover;
+  object-position: 40% center;
+  padding: 0;
+}
+.pb7-name {
+  margin: 0 0 12px;
+  color: var(--color-navy);
+  font-size: clamp(22px, 3.4vw, 30px);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+@media (max-width: 720px) {
+  .pb7-identity {
+    grid-template-columns: 1fr;
+  }
+  .pb7-logo {
+    width: 100%;
+    max-width: 320px;
+  }
+}
+
 /* ---- MP-01 Login ---- */
 .mp1-page {
   max-width: 460px;

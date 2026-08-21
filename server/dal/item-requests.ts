@@ -355,8 +355,12 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
   );
 }
 
-/** Active, unexpired requests of approved orgs with public org fields (PB-01). */
-export async function listActivePublic(ctx: DbContext): Promise<PublicItemRequest[]> {
+/**
+ * Active, unexpired requests of approved orgs with public org fields (PB-01).
+ * Passing orgId narrows the SAME predicate to one organization (PB-08) so the
+ * profile page can never show a request the browse page would hide.
+ */
+export async function listActivePublic(ctx: DbContext, orgId?: string): Promise<PublicItemRequest[]> {
   type Row = ItemRequest & {
     orgName: string;
     orgSlug: string;
@@ -373,7 +377,9 @@ export async function listActivePublic(ctx: DbContext): Promise<PublicItemReques
          from item_requests r join organizations o on o.id = r.org_id
          where r.status = 'active' and not (${ITEM_REQUEST_EXPIRED})
            and o.status = 'approved' and o.kind = 'member_org'
+           ${orgId === undefined ? "" : "and r.org_id = $1"}
         order by r.approved_at desc nulls last, r.created_at desc`,
+      orgId === undefined ? [] : [orgId],
     ),
   );
   return rows.map((row) => {

@@ -45,6 +45,9 @@ export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   { id: "PB-05", path: "/unsubscribe/:token", title: "Unsubscribe", area: "public" },
   { id: "PB-06", path: "/about", title: "About", area: "public" },
   { id: "PB-07", path: "/volunteer-alerts/unsubscribe/:token", title: "Volunteer alert opt-out", area: "public" },
+  // PB-08 — public organization profile. Slug-addressed so a shared link
+  // stays readable and stable; every request card and detail page links here.
+  { id: "PB-08", path: "/o/:slug", title: "Organization profile", area: "public" },
 
   // Staff admin
   { id: "ADMIN-01", path: "/admin/organizations", title: "Organizations", area: "admin" },

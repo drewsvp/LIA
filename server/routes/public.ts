@@ -128,9 +128,10 @@ async function processSupporterOptIns(opts: {
 
 // ---------------------------------------------------------------- payloads
 
-/** Org fields the public browse cards render. */
+/** Org fields the public browse cards render. slug builds the PB-08 link. */
 export type PublicOrgCard = {
   name: string;
+  slug: string;
   city: string | null;
   logoUrl: string | null;
 };
@@ -167,6 +168,7 @@ export type PublicItemRequestDetailPayload = {
   };
   organization: {
     name: string;
+    slug: string;
     websiteUrl: string | null;
     mission: string | null;
     populations: string[];
@@ -174,6 +176,19 @@ export type PublicItemRequestDetailPayload = {
   items: PublicItemPayload[];
 };
 
+/** PB-08 — the organization's own public identity block. */
+export type PublicOrganizationProfilePayload = {
+  organization: {
+    name: string;
+    slug: string;
+    mission: string | null;
+    websiteUrl: string | null;
+    city: string | null;
+    logoUrl: string | null;
+  };
+  itemRequests: PublicItemRequestListPayload[];
+  volunteerRequests: PublicVolunteerRequestListPayload[];
+};
 export type PublicVolunteerRequestListPayload = {
   id: string;
   title: string;
@@ -193,6 +208,7 @@ function toVolunteerListPayload(r: PublicVolunteerRequest): PublicVolunteerReque
     eventLocation: r.eventLocation,
     organization: {
       name: r.organization.name,
+      slug: r.organization.slug,
       city: r.organization.city,
       logoUrl: r.organization.logoUrl,
     },
@@ -225,6 +241,7 @@ export type PublicVolunteerRequestDetailPayload = {
   };
   organization: {
     name: string;
+    slug: string;
     websiteUrl: string | null;
     mission: string | null;
     populations: string[];
@@ -252,6 +269,7 @@ function toItemListPayload(r: PublicItemRequest): PublicItemRequestListPayload {
     imageUrl: r.imageUrl,
     organization: {
       name: r.organization.name,
+      slug: r.organization.slug,
       city: r.organization.city,
       logoUrl: r.organization.logoUrl,
     },
@@ -381,6 +399,47 @@ export function registerPublicRoutes(app: Express): void {
     }
   });
 
+  // ---- PB-08: public organization profile by slug. A non-approved org is
+  // indistinguishable from a slug that does not exist — same JSON 404 body as
+  // every other public detail endpoint.
+  app.get("/api/public/organizations/:slug", async (req: Request, res: Response, next) => {
+    try {
+      const slug = (req.params.slug ?? "").trim().toLowerCase();
+      if (slug === "" || slug.length > 200) {
+        res.status(404).json(NOT_FOUND_BODY);
+        return;
+      }
+      const org = await dal.organizations.getBySlug(PUBLIC, slug);
+      // Explicit status check — the runtime DB role has BYPASSRLS, so the
+      // PUBLIC context filters nothing. Pending, disabled, and rejected orgs
+      // all fall through to the 404 above. The platform owner keeps a profile:
+      // it is an approved organization and its identity is already public.
+      if (!org || org.status !== "approved") {
+        res.status(404).json(NOT_FOUND_BODY);
+        return;
+      }
+      const [itemRows, volunteerRows] = await Promise.all([
+        dal.itemRequests.listActivePublic(PUBLIC, org.id),
+        dal.volunteerRequests.listActivePublic(PUBLIC, org.id),
+      ]);
+      const payload: PublicOrganizationProfilePayload = {
+        organization: {
+          name: org.name,
+          slug: org.slug,
+          mission: org.mission,
+          websiteUrl: org.websiteUrl,
+          city: org.city,
+          logoUrl: org.logoUrl,
+        },
+        itemRequests: itemRows.map(toItemListPayload),
+        volunteerRequests: volunteerRows.map(toVolunteerListPayload),
+      };
+      res.json(payload);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ---- PB-02: item request detail. Non-active === nonexistent.
   app.get("/api/public/item-requests/:id", async (req: Request, res: Response, next) => {
     try {
@@ -417,6 +476,7 @@ export function registerPublicRoutes(app: Express): void {
         },
         organization: {
           name: org.name,
+          slug: org.slug,
           websiteUrl: org.websiteUrl,
           mission: org.mission,
           populations: populations.map((p) => p.name),
@@ -735,6 +795,7 @@ export function registerPublicRoutes(app: Express): void {
         },
         organization: {
           name: org.name,
+          slug: org.slug,
           websiteUrl: org.websiteUrl,
           mission: org.mission,
           populations: populations.map((p) => p.name),

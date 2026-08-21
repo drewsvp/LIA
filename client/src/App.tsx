@@ -43,6 +43,7 @@ import { EmailTemplatesPage as AdminEmailTemplatesPage } from "./pages/admin/Ema
 import { VolunteerCategoriesPage as AdminVolunteerCategoriesPage } from "./pages/admin/VolunteerCategoriesPage";
 import { AnalyticsPage as AdminAnalyticsPage } from "./pages/admin/AnalyticsPage";
 import { VolunteerAlertOptOutPage } from "./pages/public/VolunteerAlertOptOutPage";
+import { OrganizationProfilePage } from "./pages/public/OrganizationProfilePage";
 
 /** Built surfaces, by surface ID. Everything else renders its placeholder. */
 const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
@@ -68,6 +69,7 @@ const SURFACE_PAGES: Partial<Record<string, () => ReactElement>> = {
   "PB-05": () => <DigestPage />,
   "PB-06": () => <AboutPage />,
   "PB-07": () => <VolunteerAlertOptOutPage />,
+  "PB-08": () => <OrganizationProfilePage />,
 };
 
 /** Built admin surfaces, by surface ID; the rest render placeholders inside the shell. */

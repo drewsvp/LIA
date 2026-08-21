@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from "react";
 import { Link } from "wouter";
+import { organizationPath } from "@shared/share-copy";
 import { reportEngagement, type EngagementRequestKind } from "../../lib/engagement";
 
 /**
@@ -16,6 +17,8 @@ export type RequestCardProps = {
   description: string | null;
   imageUrl: string | null;
   orgName: string;
+  /** Slug of the requesting organization — links the name/logo to PB-08. */
+  orgSlug: string;
   orgLogoUrl: string | null;
   locationLabel: "City" | "Location";
   locationValue: string | null;
@@ -49,6 +52,7 @@ export function RequestCard(props: RequestCardProps): ReactElement {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = props.imageUrl != null && props.imageUrl.trim() !== "" && !imageFailed;
   const hasLogo = props.orgLogoUrl != null && props.orgLogoUrl.trim() !== "";
+  const orgHref = organizationPath(props.orgSlug);
   const labelStyle = {
     color: "var(--color-navy)",
     textDecoration: props.underlineLabels ? "underline" : "none",
@@ -84,22 +88,26 @@ export function RequestCard(props: RequestCardProps): ReactElement {
           <PlaceholderGraphic />
         )}
         {hasLogo && (
-          <img
-            src={props.orgLogoUrl ?? undefined}
-            alt={`${props.orgName} logo`}
-            style={{
-              position: "absolute",
-              top: 20,
-              left: 20,
-              height: 44,
-              width: 44,
-              borderRadius: "50%",
-              objectFit: "cover",
-              background: "#ffffff",
-              border: "2px solid #ffffff",
-              boxShadow: "var(--shadow-card)",
-            }}
-          />
+          // Links to the organization, NOT the request: no engagement event.
+          <Link
+            href={orgHref}
+            aria-label={`${props.orgName} profile`}
+            style={{ position: "absolute", top: 20, left: 20, display: "block", lineHeight: 0 }}
+          >
+            <img
+              src={props.orgLogoUrl ?? undefined}
+              alt={`${props.orgName} logo`}
+              style={{
+                height: 44,
+                width: 44,
+                borderRadius: "50%",
+                objectFit: "cover",
+                background: "#ffffff",
+                border: "2px solid #ffffff",
+                boxShadow: "var(--shadow-card)",
+              }}
+            />
+          </Link>
         )}
       </div>
       {props.titleVariant === "bar" ? (
@@ -135,7 +143,9 @@ export function RequestCard(props: RequestCardProps): ReactElement {
         <p style={{ margin: "0 0 8px" }}>
           <strong style={labelStyle}>Requesting Organization</strong>
           <br />
-          {props.orgName}
+          {/* The organization link is deliberately NOT an engagement event —
+              clicking through to an org is not a click on this request. */}
+          <Link href={orgHref}>{props.orgName}</Link>
         </p>
         {props.locationValue != null && props.locationValue.trim() !== "" && (
           <p style={{ margin: "0 0 8px" }}>

@@ -367,15 +367,24 @@ export type VolunteerTransitionInput = {
   archivedReason?: ArchivedReason;
 };
 
+/**
+ * A volunteer request is past its expiry when its legacy expires_on date is
+ * behind today's Los Angeles calendar date. One expression, used by both the
+ * nightly expiry job and public reads, so the two can never disagree: the job
+ * runs on a schedule and can fail or lag, and until it lands an expired row is
+ * still status = 'active'. Public visibility therefore has to re-check at read
+ * time rather than trust the status column, exactly as the item query does.
+ */
+const VOLUNTEER_REQUEST_EXPIRED = `(r.expires_on is not null
+  and r.expires_on < (now() at time zone 'America/Los_Angeles')::date)`;
 /** Twin of itemRequests.expiredActiveIds — see that comment. */
 export async function expiredActiveIds(ctx: DbContext, limit: number): Promise<string[]> {
   const rows = await withDbContext(ctx, (c) =>
     q<{ id: string }>(
       c,
-      `select id from volunteer_requests
-        where status = 'active' and expires_on is not null
-          and expires_on < (now() at time zone 'America/Los_Angeles')::date
-        order by expires_on, id
+      `select r.id from volunteer_requests r
+        where r.status = 'active' and ${VOLUNTEER_REQUEST_EXPIRED}
+        order by r.expires_on, r.id
         limit $1`,
       [limit],
     ),
@@ -414,8 +423,12 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
   );
 }
 
-/** Active volunteer requests of approved orgs with public org fields (PB-03). */
-export async function listActivePublic(ctx: DbContext): Promise<PublicVolunteerRequest[]> {
+/**
+ * Active volunteer requests of approved orgs with public org fields (PB-03).
+ * Passing orgId narrows the SAME predicate to one organization (PB-08) so the
+ * profile page can never show a request the browse page would hide.
+ */
+export async function listActivePublic(ctx: DbContext, orgId?: string): Promise<PublicVolunteerRequest[]> {
   type Row = VolunteerRequest & {
     orgName: string;
     orgSlug: string;
@@ -430,8 +443,11 @@ export async function listActivePublic(ctx: DbContext): Promise<PublicVolunteerR
       `select ${COLS}, o.name as "orgName", o.slug as "orgSlug", o.mission as "orgMission",
               o.website_url as "orgWebsiteUrl", o.city as "orgCity", o.logo_url as "orgLogoUrl"
          from volunteer_requests r join organizations o on o.id = r.org_id
-        where r.status = 'active' and o.status = 'approved' and o.kind = 'member_org'
+        where r.status = 'active' and not ${VOLUNTEER_REQUEST_EXPIRED}
+          and o.status = 'approved' and o.kind = 'member_org'
+          ${orgId === undefined ? "" : "and r.org_id = $1"}
         order by r.approved_at desc nulls last, r.created_at desc`,
+      orgId === undefined ? [] : [orgId],
     ),
   );
   return rows.map((row) => {
