@@ -140,3 +140,17 @@ mtime_ms = 1787288873869
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/44901710-a078-4736-a12c-2f037e2722db/a2309cad-45b2-4b39-9983-c0780aae67ae"
 storage_version_token = "1787288940113702"
 content_type = "image/gif"
+
+[[outputs]]
+id = "FzISzj-g34aWckq_ZuCmC"
+uri = "file://attached_assets/generated_media/new-horizons-profile-scroll.gif"
+type = "image"
+title = "New Horizons profile — slow full-page scroll"
+description = "Full-window capture of /o/new-horizons-refugee-support at 1440×900: a pause at the top, a slow eased scroll past the organization details and all six needs, and a pause at the footer. 218 frames at 12 fps, roughly 18 seconds, 950px wide."
+logical_id = "02a70f29-e6ce-43fc-b78b-b3e4e1c25e8f"
+content_hash = "sha256:3f1209de128ee146667422819270a44fe43914450f6b247d97c384a51da0631a"
+size = 20180709
+mtime_ms = 1787289160965
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/02a70f29-e6ce-43fc-b78b-b3e4e1c25e8f/cd483247-0248-4dea-9476-c1dd506f6275"
+storage_version_token = "1787289194745806"
+content_type = "image/gif"
