@@ -716,6 +716,10 @@ h3 {
 }
 
 /* ---- MP-01 Login ---- */
+/* Login sits on white edge to edge, not a white column on the grey body. */
+.mp1-shell {
+  background: var(--color-surface);
+}
 .mp1-page {
   max-width: 460px;
   margin: 0 auto;

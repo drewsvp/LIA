@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useSession } from "../../hooks/useSession";
+import { PublicLayout } from "../../components/public/PublicLayout";
 
 const QUICK_LOGIN_ROLES = [
   { role: "staff_admin", label: "Staff Admin", name: "Tiffany Loeffler" },
@@ -136,75 +137,77 @@ export function LoginPage(): ReactElement | null {
   }
 
   return (
-    <main className="mp1-page">
-      <h1 className="mp1-heading">LOG IN</h1>
-      <p className="mp1-copy">Access for current Alliance members.</p>
-      {sent ? (
-        <p className="mp1-sent" role="status">
-          Check your email for a link to log in.
-        </p>
-      ) : (
-        <form className="mp1-form" onSubmit={handleSubmit} noValidate>
-          {linkError ? (
-            <p className="mp1-link-error" role="alert">
-              That login link is no longer valid — it may have expired or already been used. Enter
-              your email below and we&rsquo;ll send you a new one.
-            </p>
-          ) : null}
-          <label className="mp1-label" htmlFor="mp1-email">
-            Email*
-          </label>
-          <input
-            id="mp1-email"
-            className="mp1-input"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          {formError ? (
-            <p className="mp1-error" role="alert">
-              {formError}
-            </p>
-          ) : null}
-          <button className="mp1-submit" type="submit" disabled={submitting}>
-            {submitting ? "Sending Link…" : "Send Login Link"}
-          </button>
-        </form>
-      )}
+    <PublicLayout className="mp1-shell">
+      <div className="mp1-page">
+        <h1 className="mp1-heading">LOG IN</h1>
+        <p className="mp1-copy">Access for current Alliance members.</p>
+        {sent ? (
+          <p className="mp1-sent" role="status">
+            Check your email for a link to log in.
+          </p>
+        ) : (
+          <form className="mp1-form" onSubmit={handleSubmit} noValidate>
+            {linkError ? (
+              <p className="mp1-link-error" role="alert">
+                That login link is no longer valid — it may have expired or already been used. Enter
+                your email below and we&rsquo;ll send you a new one.
+              </p>
+            ) : null}
+            <label className="mp1-label" htmlFor="mp1-email">
+              Email*
+            </label>
+            <input
+              id="mp1-email"
+              className="mp1-input"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            {formError ? (
+              <p className="mp1-error" role="alert">
+                {formError}
+              </p>
+            ) : null}
+            <button className="mp1-submit" type="submit" disabled={submitting}>
+              {submitting ? "Sending Link…" : "Send Login Link"}
+            </button>
+          </form>
+        )}
 
-      {quickEnabled ? (
-        <section className="mp1-quick-section" aria-label="Quick login — test accounts">
-          <p className="mp1-quick-heading">Quick Login — test accounts</p>
-          {quickSeeded ? (
-            <>
-              <div className="mp1-quick-buttons">
-                {QUICK_LOGIN_ROLES.map(({ role, label, name }) => (
-                  <button
-                    key={role}
-                    className="mp1-quick-btn"
-                    type="button"
-                    disabled={quickLoading !== null}
-                    onClick={() => void handleQuickLogin(role)}
-                  >
-                    {quickLoading === role ? "Signing in…" : `${label} — ${name}`}
-                  </button>
-                ))}
-              </div>
-              {quickError ? (
-                <p className="mp1-quick-error" role="alert">
-                  {quickError}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="mp1-quick-seed-warning" role="status">
-              Seed not yet run — test accounts are unavailable.{" "}
-              <code>npm run db:seed</code>
-            </p>
-          )}
-        </section>
-      ) : null}
-    </main>
+        {quickEnabled ? (
+          <section className="mp1-quick-section" aria-label="Quick login — test accounts">
+            <p className="mp1-quick-heading">Quick Login — test accounts</p>
+            {quickSeeded ? (
+              <>
+                <div className="mp1-quick-buttons">
+                  {QUICK_LOGIN_ROLES.map(({ role, label, name }) => (
+                    <button
+                      key={role}
+                      className="mp1-quick-btn"
+                      type="button"
+                      disabled={quickLoading !== null}
+                      onClick={() => void handleQuickLogin(role)}
+                    >
+                      {quickLoading === role ? "Signing in…" : `${label} — ${name}`}
+                    </button>
+                  ))}
+                </div>
+                {quickError ? (
+                  <p className="mp1-quick-error" role="alert">
+                    {quickError}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="mp1-quick-seed-warning" role="status">
+                Seed not yet run — test accounts are unavailable.{" "}
+                <code>npm run db:seed</code>
+              </p>
+            )}
+          </section>
+        ) : null}
+      </div>
+    </PublicLayout>
   );
 }
