@@ -17,6 +17,7 @@
     "test:request-engagement": "tsx scripts/test-request-engagement.ts",
     "test:request-engagement-ui": "tsx scripts/test-request-engagement-ui.ts",
     "test:request-outreach": "tsx scripts/test-request-outreach.ts",
+    "test:share-preview": "tsx scripts/test-share-preview.ts",
     "db:seed": "tsx server/db/seed.ts",
     "db:apply-auth-schema": "tsx server/auth/apply-auth-schema.ts",
     "db:apply-migrations": "tsx server/db/apply-migrations.ts",

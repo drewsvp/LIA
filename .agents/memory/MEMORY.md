@@ -25,4 +25,5 @@
 - [Matching-alert once-only rule](matching-alert-once-only.md) — first-approval claims survive failed or disabled sends; only explicit failed-email resend may retry delivery.
 - [Public org visibility gate](public-org-visibility.md) — org identity surfaces gate on status alone; request listings also require kind='member_org', so the platform owner has a profile but posts no needs.
 - [Engagement privacy boundary](engagement-privacy-boundary.md) — anonymous request events stay aggregate-only; signed-in views may be attributed; pledges/signups remain the only conversion source.
+- [SPA shell head injection](spa-shell-head-injection.md) — dev and prod serve the shell differently; head changes must cover both, replace default meta tags, and never reference hashed build assets.
 - [Publish schema after restores](publish-schema-after-restores.md) — restoring code does not roll back dev DB; orphaned schema can reappear in Publish, and new parent keys may be emitted after dependent FKs.
