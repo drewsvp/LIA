@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict M4lFTfQO5ZNhnjkJ7DufD4ZJvSz30hZzyicsdqPn5GmIxNLJCARpB2pjGg8vCpj
+\restrict J29AItAUEIV9Mz8OUWsWRKKbb8BLbqZ7qsFdXn3WSEY4LsFMQYy0PqIyA72cmrm
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -1003,6 +1003,8 @@ CREATE TABLE public.person_volunteer_interests (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+ALTER TABLE ONLY public.person_volunteer_interests FORCE ROW LEVEL SECURITY;
+
 
 --
 -- Name: populations; Type: TABLE; Schema: public; Owner: -
@@ -1017,6 +1019,44 @@ CREATE TABLE public.populations (
 );
 
 ALTER TABLE ONLY public.populations FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: request_engagement_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.request_engagement_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    client_event_id uuid NOT NULL,
+    event_type text NOT NULL,
+    request_kind text NOT NULL,
+    item_request_id uuid,
+    volunteer_request_id uuid,
+    item_id uuid,
+    volunteer_role_id uuid,
+    user_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT request_engagement_child_target CHECK ((((event_type = ANY (ARRAY['product_link_click'::text, 'item_selected'::text])) AND (request_kind = 'item'::text) AND (item_id IS NOT NULL) AND (volunteer_role_id IS NULL)) OR ((event_type = 'role_selected'::text) AND (request_kind = 'volunteer'::text) AND (volunteer_role_id IS NOT NULL) AND (item_id IS NULL)) OR ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'form_start'::text])) AND (item_id IS NULL) AND (volunteer_role_id IS NULL)))),
+    CONSTRAINT request_engagement_events_event_type_check CHECK ((event_type = ANY (ARRAY['card_click'::text, 'detail_view'::text, 'product_link_click'::text, 'form_start'::text, 'item_selected'::text, 'role_selected'::text]))),
+    CONSTRAINT request_engagement_events_request_kind_check CHECK ((request_kind = ANY (ARRAY['item'::text, 'volunteer'::text]))),
+    CONSTRAINT request_engagement_request_target CHECK ((((request_kind = 'item'::text) AND (item_request_id IS NOT NULL) AND (volunteer_request_id IS NULL)) OR ((request_kind = 'volunteer'::text) AND (volunteer_request_id IS NOT NULL) AND (item_request_id IS NULL))))
+);
+
+ALTER TABLE ONLY public.request_engagement_events FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: TABLE request_engagement_events; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.request_engagement_events IS 'Allowlisted public request interactions. Anonymous rows have no persistent visitor identity; pledges/signups remain authoritative conversions.';
+
+
+--
+-- Name: COLUMN request_engagement_events.client_event_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.request_engagement_events.client_event_id IS 'Fresh UUID for one client interaction, used only to make duplicate delivery idempotent.';
 
 
 --
@@ -1108,6 +1148,8 @@ CREATE TABLE public.volunteer_alert_preferences (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+ALTER TABLE ONLY public.volunteer_alert_preferences FORCE ROW LEVEL SECURITY;
+
 
 --
 -- Name: TABLE volunteer_alert_preferences; Type: COMMENT; Schema: public; Owner: -
@@ -1134,6 +1176,8 @@ CREATE TABLE public.volunteer_categories (
     CONSTRAINT volunteer_categories_name_check CHECK ((btrim(name) <> ''::text))
 );
 
+ALTER TABLE ONLY public.volunteer_categories FORCE ROW LEVEL SECURITY;
+
 
 --
 -- Name: volunteer_match_alert_claims; Type: TABLE; Schema: public; Owner: -
@@ -1146,6 +1190,8 @@ CREATE TABLE public.volunteer_match_alert_claims (
     claimed_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT volunteer_match_alert_claims_to_email_check CHECK ((btrim(to_email) <> ''::text))
 );
+
+ALTER TABLE ONLY public.volunteer_match_alert_claims FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1164,6 +1210,8 @@ CREATE TABLE public.volunteer_request_categories (
     category_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
+
+ALTER TABLE ONLY public.volunteer_request_categories FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1470,6 +1518,22 @@ ALTER TABLE ONLY public.populations
 
 ALTER TABLE ONLY public.populations
     ADD CONSTRAINT populations_slug_key UNIQUE (slug);
+
+
+--
+-- Name: request_engagement_events request_engagement_events_client_event_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_client_event_id_key UNIQUE (client_event_id);
+
+
+--
+-- Name: request_engagement_events request_engagement_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -1801,6 +1865,34 @@ CREATE INDEX people_needs_review_idx ON public.people USING btree (needs_review)
 --
 
 CREATE INDEX person_volunteer_interests_category_idx ON public.person_volunteer_interests USING btree (category_id);
+
+
+--
+-- Name: request_engagement_item_reporting_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_item_reporting_idx ON public.request_engagement_events USING btree (item_request_id, created_at DESC) WHERE (item_request_id IS NOT NULL);
+
+
+--
+-- Name: request_engagement_type_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_type_created_idx ON public.request_engagement_events USING btree (event_type, created_at DESC);
+
+
+--
+-- Name: request_engagement_user_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_user_history_idx ON public.request_engagement_events USING btree (user_id, created_at DESC) WHERE ((user_id IS NOT NULL) AND (event_type = 'detail_view'::text));
+
+
+--
+-- Name: request_engagement_volunteer_reporting_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_engagement_volunteer_reporting_idx ON public.request_engagement_events USING btree (volunteer_request_id, created_at DESC) WHERE (volunteer_request_id IS NOT NULL);
 
 
 --
@@ -2206,6 +2298,62 @@ ALTER TABLE ONLY public.person_volunteer_interests
 
 ALTER TABLE ONLY public.person_volunteer_interests
     ADD CONSTRAINT person_volunteer_interests_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.items(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_item_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_item_request_id_fkey FOREIGN KEY (item_request_id) REFERENCES public.item_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_volunteer_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_volunteer_request_id_fkey FOREIGN KEY (volunteer_request_id) REFERENCES public.volunteer_requests(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_events_volunteer_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_events_volunteer_role_id_fkey FOREIGN KEY (volunteer_role_id) REFERENCES public.volunteer_roles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_item_ownership_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_item_ownership_fk FOREIGN KEY (item_id, item_request_id) REFERENCES public.items(id, item_request_id) ON DELETE CASCADE;
+
+
+--
+-- Name: request_engagement_events request_engagement_role_ownership_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_engagement_events
+    ADD CONSTRAINT request_engagement_role_ownership_fk FOREIGN KEY (volunteer_role_id, volunteer_request_id) REFERENCES public.volunteer_roles(id, volunteer_request_id) ON DELETE CASCADE;
 
 
 --
@@ -2691,6 +2839,48 @@ CREATE POLICY people_system_staff_all ON public.people USING ((current_setting('
 
 
 --
+-- Name: person_volunteer_interests; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.person_volunteer_interests ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: person_volunteer_interests person_volunteer_interests_member_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY person_volunteer_interests_member_delete ON public.person_volunteer_interests FOR DELETE USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
+   FROM public.users u
+  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))))));
+
+
+--
+-- Name: person_volunteer_interests person_volunteer_interests_member_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY person_volunteer_interests_member_insert ON public.person_volunteer_interests FOR INSERT WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
+   FROM public.users u
+  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid)))) AND (EXISTS ( SELECT 1
+   FROM public.volunteer_categories vc
+  WHERE ((vc.id = person_volunteer_interests.category_id) AND vc.is_active)))));
+
+
+--
+-- Name: person_volunteer_interests person_volunteer_interests_member_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY person_volunteer_interests_member_select ON public.person_volunteer_interests FOR SELECT USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
+   FROM public.users u
+  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))))));
+
+
+--
+-- Name: person_volunteer_interests person_volunteer_interests_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY person_volunteer_interests_system_staff_all ON public.person_volunteer_interests USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: populations; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2711,6 +2901,19 @@ CREATE POLICY populations_system_staff_all ON public.populations USING ((current
 
 
 --
+-- Name: request_engagement_events; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.request_engagement_events ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: request_engagement_events request_engagement_events_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY request_engagement_events_system_staff_all ON public.request_engagement_events USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: users; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2728,6 +2931,107 @@ CREATE POLICY users_member_select_self ON public.users FOR SELECT USING (((curre
 --
 
 CREATE POLICY users_system_staff_all ON public.users USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: volunteer_alert_preferences; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.volunteer_alert_preferences ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: volunteer_alert_preferences volunteer_alert_preferences_member_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_alert_preferences_member_insert ON public.volunteer_alert_preferences FOR INSERT WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (EXISTS ( SELECT 1
+   FROM public.users u
+  WHERE ((u.id = volunteer_alert_preferences.user_id) AND (u.kind = 'supporter'::text) AND (u.status = 'active'::text))))));
+
+
+--
+-- Name: volunteer_alert_preferences volunteer_alert_preferences_member_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_alert_preferences_member_select ON public.volunteer_alert_preferences FOR SELECT USING (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid)));
+
+
+--
+-- Name: volunteer_alert_preferences volunteer_alert_preferences_member_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_alert_preferences_member_update ON public.volunteer_alert_preferences FOR UPDATE USING (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))) WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (EXISTS ( SELECT 1
+   FROM public.users u
+  WHERE ((u.id = volunteer_alert_preferences.user_id) AND (u.kind = 'supporter'::text) AND (u.status = 'active'::text))))));
+
+
+--
+-- Name: volunteer_alert_preferences volunteer_alert_preferences_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_alert_preferences_system_staff_all ON public.volunteer_alert_preferences USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: volunteer_categories; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.volunteer_categories ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: volunteer_categories volunteer_categories_member_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_categories_member_select ON public.volunteer_categories FOR SELECT USING ((current_setting('app.context'::text, true) = 'member'::text));
+
+
+--
+-- Name: volunteer_categories volunteer_categories_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_categories_system_staff_all ON public.volunteer_categories USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: volunteer_match_alert_claims; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.volunteer_match_alert_claims ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: volunteer_match_alert_claims volunteer_match_alert_claims_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_match_alert_claims_system_staff_all ON public.volunteer_match_alert_claims USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: volunteer_request_categories; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.volunteer_request_categories ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: volunteer_request_categories volunteer_request_categories_member_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_request_categories_member_all ON public.volunteer_request_categories USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
+   FROM public.volunteer_requests r
+  WHERE ((r.id = volunteer_request_categories.volunteer_request_id) AND (r.org_id IN ( SELECT om.org_id
+           FROM public.org_memberships om
+          WHERE ((om.user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (om.status = 'active'::text))))))))) WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
+   FROM public.volunteer_requests r
+  WHERE ((r.id = volunteer_request_categories.volunteer_request_id) AND (r.org_id IN ( SELECT om.org_id
+           FROM public.org_memberships om
+          WHERE ((om.user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (om.status = 'active'::text))))))) AND (EXISTS ( SELECT 1
+   FROM public.volunteer_categories vc
+  WHERE ((vc.id = volunteer_request_categories.category_id) AND vc.is_active)))));
+
+
+--
+-- Name: volunteer_request_categories volunteer_request_categories_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY volunteer_request_categories_system_staff_all ON public.volunteer_request_categories USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -2872,5 +3176,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict M4lFTfQO5ZNhnjkJ7DufD4ZJvSz30hZzyicsdqPn5GmIxNLJCARpB2pjGg8vCpj
+\unrestrict J29AItAUEIV9Mz8OUWsWRKKbb8BLbqZ7qsFdXn3WSEY4LsFMQYy0PqIyA72cmrm
 

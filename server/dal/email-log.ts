@@ -9,6 +9,14 @@ import type { PoolClient } from "pg";
 import { isUniqueViolation, q, withDbContext, type DbContext } from "../db/client";
 import type { EmailFailureCategory, EmailLogEntry, EmailStatus } from "../../shared/types";
 
+/**
+ * Marker embedded in the error text of rows whose provider outcome is
+ * unknown (mid-send crash or provider timeout). The admin resend path
+ * refuses rows carrying it — resending could duplicate a delivered email.
+ * Exported from email-log so send.ts can re-export it without circular imports.
+ */
+export const MAY_HAVE_SENT_MARKER = "the provider MAY have sent this email";
+
 const COLS = `id, template_key as "templateKey", to_email as "toEmail", to_person_id as "toPersonId",
   entity_type as "entityType", entity_id as "entityId", payload, status,
   provider_message_id as "providerMessageId", error,
@@ -85,6 +93,65 @@ export async function insertQueuedInTx(c: PoolClient, input: InsertQueuedEmailIn
   const entry = rows[0];
   if (!entry) throw new Error("emailLog.insertQueuedInTx returned no row");
   return entry;
+}
+
+/**
+ * Outreach-specific once-only claim keyed by the stable person identity rather
+ * than their mutable email address. The transaction advisory lock serializes
+ * concurrent claims without requiring a second idempotency table or index.
+ */
+export async function insertQueuedOnceByPerson(
+  ctx: DbContext,
+  input: InsertQueuedEmailInput,
+): Promise<InsertQueuedResult> {
+  if (!input.toPersonId || !input.entityType || !input.entityId) {
+    throw new Error("emailLog.insertQueuedOnceByPerson requires person and entity bindings");
+  }
+  const lockKey = [input.templateKey, input.entityType, input.entityId, input.toPersonId].join(":");
+  try {
+    return await withDbContext(ctx, async (c) => {
+      await q(c, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, [lockKey]);
+      const existing = await q<{ id: string }>(
+        c,
+        `select id
+           from email_log
+          where template_key = $1
+            and entity_type = $2
+            and entity_id = $3
+            and to_person_id = $4
+            and (
+              status not in ('failed', 'skipped')
+              or (
+                status = 'failed'
+                and failure_category is distinct from 'config'
+              )
+            )
+          limit 1`,
+        [input.templateKey, input.entityType, input.entityId, input.toPersonId],
+      );
+      if (existing.length > 0) return { duplicate: true, entry: null };
+      const rows = await q<EmailLogEntry>(
+        c,
+        `insert into email_log (template_key, to_email, to_person_id, entity_type, entity_id, payload, status, resend_of_id)
+         values ($1, $2, $3, $4, $5, $6::jsonb, 'queued', $7) returning ${COLS}`,
+        [
+          input.templateKey,
+          input.toEmail,
+          input.toPersonId,
+          input.entityType,
+          input.entityId,
+          JSON.stringify(input.payload ?? {}),
+          input.resendOfId ?? null,
+        ],
+      );
+      const entry = rows[0];
+      if (!entry) throw new Error("emailLog.insertQueuedOnceByPerson returned no row");
+      return { duplicate: false, entry };
+    });
+  } catch (err) {
+    if (isUniqueViolation(err, "email_log_once_idx")) return { duplicate: true, entry: null };
+    throw err;
+  }
 }
 
 /**
@@ -318,6 +385,8 @@ export type EmailLogFilters = {
   toEmail?: string;
   /** ADMIN-06 §5: case-insensitive substring on the recipient. */
   toEmailContains?: string;
+  /** Outreach history: filter by stable person identity rather than mutable email. */
+  toPersonId?: string;
   /** Inclusive date bounds on created_at (UTC dates). */
   createdFrom?: string;
   createdTo?: string;
@@ -348,6 +417,10 @@ export async function listWithFilters(ctx: DbContext, filters: EmailLogFilters =
     // pattern — % and _ in it must not act as wildcards.
     params.push(filters.toEmailContains);
     where.push(`position(lower($${params.length}) in lower(to_email)) > 0`);
+  }
+  if (filters.toPersonId) {
+    params.push(filters.toPersonId);
+    where.push(`to_person_id = $${params.length}`);
   }
   if (filters.createdFrom) {
     params.push(filters.createdFrom);

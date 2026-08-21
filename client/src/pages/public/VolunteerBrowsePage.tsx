@@ -91,6 +91,8 @@ export function VolunteerBrowsePage(): ReactElement {
               <RequestCard
                 key={r.id}
                 href={`/volunteer/${r.id}`}
+                requestKind="volunteer"
+                requestId={r.id}
                 title={r.title}
                 description={r.description}
                 imageUrl={r.imageUrl}

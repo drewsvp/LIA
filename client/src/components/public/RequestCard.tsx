@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from "react";
 import { Link } from "wouter";
+import { reportEngagement, type EngagementRequestKind } from "../../lib/engagement";
 
 /**
  * Public browse card, shared by PB-01 and PB-03. Both surfaces use a square
@@ -9,6 +10,8 @@ import { Link } from "wouter";
  */
 export type RequestCardProps = {
   href: string;
+  requestKind: EngagementRequestKind;
+  requestId: string;
   title: string;
   description: string | null;
   imageUrl: string | null;
@@ -50,6 +53,13 @@ export function RequestCard(props: RequestCardProps): ReactElement {
     color: "var(--color-navy)",
     textDecoration: props.underlineLabels ? "underline" : "none",
   } as const;
+  const reportCardClick = (): void => {
+    reportEngagement({
+      eventType: "card_click",
+      requestKind: props.requestKind,
+      requestId: props.requestId,
+    });
+  };
 
   return (
     <article
@@ -143,7 +153,12 @@ export function RequestCard(props: RequestCardProps): ReactElement {
         )}
       </div>
       <div style={{ padding: "0 16px 16px" }}>
-        <Link href={props.href} className="btn-teal" style={{ display: "block", textAlign: "center" }}>
+        <Link
+          href={props.href}
+          className="btn-teal"
+          style={{ display: "block", textAlign: "center" }}
+          onClick={reportCardClick}
+        >
           {props.buttonText}
         </Link>
       </div>

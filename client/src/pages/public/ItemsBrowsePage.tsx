@@ -91,6 +91,8 @@ export function ItemsBrowsePage(): ReactElement {
               <RequestCard
                 key={r.id}
                 href={`/items/${r.id}`}
+                requestKind="item"
+                requestId={r.id}
                 title={r.title}
                 description={r.description}
                 imageUrl={r.imageUrl}
