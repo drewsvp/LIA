@@ -254,6 +254,7 @@ const QUICK_LOGIN_ACCOUNTS: Record<string, { email: string; label: string }> = {
   staff_admin: { email: "tiffany@defendingthecause.org", label: "Staff Admin (Tiffany)" },
   staff_approver: { email: "approver@thealliance.example.org", label: "Staff Approver (Riley)" },
   org_owner: { email: "dana@heartsandhands.example.org", label: "Org Owner (Dana)" },
+  supporter: { email: "supporter@example.org", label: "Supporter (Alex)" },
 };
 
 function isQuickLoginEnabled(): boolean {

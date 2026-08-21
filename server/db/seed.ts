@@ -57,10 +57,14 @@ async function ensurePerson(input: {
   return dal.people.create(ctx, { ...input, sourceNote: "seed" });
 }
 
-async function ensureUser(personId: string, status: "invited" | "active"): Promise<User> {
+async function ensureUser(
+  personId: string,
+  status: "invited" | "active",
+  kind?: "member" | "supporter",
+): Promise<User> {
   const existing = await dal.users.findByPersonId(ctx, personId);
   if (existing) return existing;
-  return dal.users.create(ctx, { personId, status });
+  return dal.users.create(ctx, { personId, status, ...(kind ? { kind } : {}) });
 }
 
 async function ensureMembership(input: {
@@ -168,6 +172,10 @@ async function main(): Promise<void> {
   const tiffany = await ensureUser(tiffanyP.id, "active");
   const christina = await ensureUser(christinaP.id, "active");
   const riley = await ensureUser(rileyP.id, "active");
+
+  // Supporter account — no org membership, kind='supporter'.
+  const alexP = await ensurePerson({ firstName: "Alex", lastName: "Rivera", email: "supporter@example.org" });
+  await ensureUser(alexP.id, "active", "supporter");
 
   // -------------------------------------------------------------------------
   // 3. Organizations. The Alliance approves itself at bootstrap (there is no
@@ -799,6 +807,10 @@ async function main(): Promise<void> {
   const bridgeCheck = await dal.organizations.getBySlug(ctx, "bridge-of-hope-single-parents");
   if (bridgeCheck?.status !== "pending") fail(`Bridge of Hope should be pending, got ${bridgeCheck?.status}`);
 
+  const alexCheck = await dal.users.findByEmail(SYSTEM, "supporter@example.org");
+  if (!alexCheck || alexCheck.status !== "active") fail("supporter account (supporter@example.org) missing or not active");
+  if (alexCheck.kind !== "supporter") fail(`supporter account should have kind='supporter', got '${alexCheck.kind}'`);
+
   const allianceStaff = await dal.memberships.listByOrganization(ctx, alliance.id);
   const staffRoles = allianceStaff.map((m) => m.role).sort();
   if (staffRoles.join(",") !== "staff_admin,staff_admin,staff_approver") {
@@ -822,6 +834,7 @@ async function main(): Promise<void> {
   console.log("    staff_admin:    christina@defendingthecause.org  (Christina Moe)");
   console.log("    staff_approver: approver@thealliance.example.org  (Riley Chen — synthetic, cannot receive mail)");
   console.log("  Org owner logins: dana@heartsandhands.example.org, samuel@newhorizons.example.org, grace@safeharbor.example.org");
+  console.log("  Supporter login:  supporter@example.org  (Alex Rivera — synthetic, cannot receive mail)");
 }
 main()
   .then(async () => {

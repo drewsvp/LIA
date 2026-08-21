@@ -20,6 +20,7 @@ const QUICK_LOGIN_ROLES = [
   { role: "staff_admin", label: "Staff Admin", name: "Tiffany Loeffler" },
   { role: "staff_approver", label: "Staff Approver", name: "Riley Chen" },
   { role: "org_owner", label: "Org Owner", name: "Dana Whitfield" },
+  { role: "supporter", label: "Supporter", name: "Alex Rivera" },
 ] as const;
 
 export function LoginPage(): ReactElement | null {
