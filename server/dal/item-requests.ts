@@ -248,17 +248,22 @@ export type TransitionInput = {
 };
 
 /**
- * The database function is the single expiry rule for item requests. It
- * includes the legacy archive date and date-specific member deadlines, while
- * keeping a request live through its full LA calendar day.
+ * The expiry rule for item requests: a legacy expires_on date that has passed,
+ * or a date-specific member deadline that has passed, both measured against
+ * today's Los Angeles calendar date. Inlined here (rather than calling a DB
+ * function) so the public browse page loads even when the custom function is
+ * absent from the production database. The function and trigger are repaired
+ * by migration 0044; the inline expression stays so reads never depend on it.
  */
 const ITEM_REQUEST_CURRENT_LA_DATE = `(clock_timestamp() at time zone 'America/Los_Angeles')::date`;
 
-const ITEM_REQUEST_EXPIRED = `item_request_expired_on(
-  r.deadline_type,
-  r.deadline_date,
-  r.expires_on,
-  ${ITEM_REQUEST_CURRENT_LA_DATE}
+const ITEM_REQUEST_EXPIRED = `(
+  (r.expires_on is not null and r.expires_on < ${ITEM_REQUEST_CURRENT_LA_DATE})
+  or (
+    r.deadline_type = 'date_specific'
+    and r.deadline_date is not null
+    and r.deadline_date < ${ITEM_REQUEST_CURRENT_LA_DATE}
+  )
 )`;
 
 /**
