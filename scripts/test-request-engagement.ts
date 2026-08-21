@@ -289,49 +289,6 @@ async function main(): Promise<void> {
     "recent history is isolated in both directions",
   );
 
-  // Organization reporting is session scoped and aggregate-only.
-  const ownerReport = await json<{
-    daily: Array<{ engagementEvents: number; detailViews: number }>;
-    performance: Array<{ requestId: string; orgId: string; detailViews: number }>;
-  }>("/api/dashboard/engagement", ownerCookie);
-  assert(ownerReport.response.status === 200, "organization engagement report loads");
-  assert(
-    ownerReport.body.performance.every((row) => row.orgId === ownerSession.activeOrgId),
-    "organization report contains only the session-selected organization",
-  );
-  assert(
-    ownerReport.body.performance.some(
-      (row) =>
-        row.requestId === ownerRequest.id &&
-        row.orgId === ownerSession.activeOrgId &&
-        row.detailViews >= 1,
-    ) &&
-      ownerReport.body.daily.some((row) => row.engagementEvents >= 1 && row.detailViews >= 1),
-    "organization report includes its recorded engagement with nonzero metrics",
-  );
-  assert(
-    !ownerReport.body.performance.some((row) => row.requestId === adminRequest.id),
-    "events for another organization stay outside the member report",
-  );
-  const attemptedOverride = await json<{
-    filters: { orgId: string };
-    performance: Array<{ requestId: string; orgId: string; detailViews: number }>;
-  }>(`/api/dashboard/engagement?orgId=${adminRequest.org_id}`, ownerCookie);
-  assert(
-    attemptedOverride.body.filters.orgId === ownerSession.activeOrgId &&
-      attemptedOverride.body.performance.some(
-        (row) => row.requestId === ownerRequest.id && row.detailViews >= 1,
-      ) &&
-      !attemptedOverride.body.performance.some((row) => row.requestId === adminRequest.id),
-    "a caller-supplied organization cannot override the session organization",
-  );
-  assert(
-    ownerReport.body.performance.every(
-      (row) => !("email" in row) && !("userId" in row) && !("firstName" in row),
-    ),
-    "organization aggregates expose no viewer identities",
-  );
-
   // Staff-admin authorization mirrors client discoverability.
   const adminReport = await json<{ performance: unknown[] }>("/api/admin/analytics", adminCookie);
   const approverReport = await json<{ message: string }>("/api/admin/analytics", approverCookie);

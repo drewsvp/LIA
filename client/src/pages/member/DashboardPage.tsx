@@ -10,7 +10,6 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
-import { EngagementReport } from "../../components/analytics/EngagementReport";
 import heroImg from "../../assets/dashboard/hero.png";
 import tileItem from "../../assets/dashboard/tile-item.png";
 import tileVolunteer from "../../assets/dashboard/tile-volunteer.png";
@@ -216,17 +215,6 @@ export function DashboardPage() {
           />
         </section>
 
-        <section className="mp4-engagement-region" aria-labelledby="mp4-engagement-heading">
-          <h2 id="mp4-engagement-heading" className="mp4-edit-heading">
-            REQUEST ENGAGEMENT
-          </h2>
-          <p className="mp4-welcome">
-            See how people are finding and responding to your organization&rsquo;s requests. Engagement counts
-            describe public interactions; completed donations and volunteer signups come from the actual
-            submission records.
-          </p>
-          <EngagementReport apiUrl="/api/dashboard/engagement" exportUrl="/api/dashboard/engagement/export" />
-        </section>
       </div>
     </div>
   );

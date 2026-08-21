@@ -244,11 +244,13 @@ async function main(): Promise<void> {
     const memberPage = await memberContext.newPage();
     await memberPage.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
     assert(
-      await memberPage.getByRole("heading", { name: "REQUEST ENGAGEMENT", exact: true }).isVisible(),
-      "mobile organization dashboard exposes its engagement report",
+      !(await memberPage.getByRole("heading", { name: "REQUEST ENGAGEMENT", exact: true }).isVisible()),
+      "mobile organization dashboard does not expose the engagement report to members",
     );
-    assert(await memberPage.getByLabel("Engagement report").isVisible(), "organization report is labelled");
-    await assertContained(memberPage, ".mp4-engagement-region .adm-table-wrap", "mobile organization performance table");
+    assert(
+      !(await memberPage.locator(".mp4-engagement-region").isVisible()),
+      "engagement section is absent from the member dashboard",
+    );
     await memberContext.close();
   } finally {
     await browser.close();
