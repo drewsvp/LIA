@@ -13,6 +13,16 @@
  * schema_migrations has no row for 0001 but the schema is present, the
  * runner records 0001 as applied WITHOUT running it and says so. Only 0001
  * is ever baselined this way.
+ *
+ * Second baseline — the 2026-08-21 production ledger drift:
+ * production's schema is kept in step by Replit's publish diff, which carries
+ * tables and columns but not the ledger, so these files were never recorded
+ * there even though their objects exist. Re-running one fails on "already
+ * exists" and takes the whole deploy down. Each file in PUBLISH_SYNCED below
+ * was checked against production before being listed — see that comment. A
+ * duplicate-object failure on one of them is recorded and skipped, loudly.
+ * Every other file gets no tolerance: a duplicate-object error there is a
+ * real conflict and must fail.
  */
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
@@ -20,6 +30,58 @@ import path from "node:path";
 import { pool } from "./client";
 
 const BASELINE_FILE = "0001_initial_schema.sql";
+
+/**
+ * The exact files unrecorded in production on 2026-08-21, when the deploy
+ * build first ran this runner there. Before listing them, development and
+ * production were compared object by object — columns, constraints, indexes,
+ * row-security flags and policies were identical, the one email_schedules
+ * seed row was present, and digest_runs was empty so its backfill had nothing
+ * to do. The only genuine gap was functions and triggers, which
+ * 0045_restore_routine_parity.sql recreates.
+ *
+ * This list is closed. Never add to it: a new migration must apply cleanly,
+ * and a duplicate-object error in one is a real conflict.
+ */
+const PUBLISH_SYNCED = new Set([
+  "0008_email_template_overrides.sql",
+  "0008_item_image_generation.sql",
+  "0009_digest_runs.sql",
+  "0009_email_template_overrides_updated_by.sql",
+  "0010_digest_run_needs_snapshot.sql",
+  "0011_image_gen_retries.sql",
+  "0012_digest_exclusions.sql",
+  "0012_email_log_failure_structured.sql",
+  "0013_digest_exclusions_simpler_key.sql",
+  "0014_supporter_user_kind.sql",
+  "0034_split_counter_trigger_branches.sql",
+  "0035_volunteer_image_generation.sql",
+  "0036_item_request_deadline_expiry.sql",
+  "0037_email_schedules.sql",
+  "0037_volunteer_interests.sql",
+  "0038_digest_run_occurrences.sql",
+  "0038_volunteer_request_categories.sql",
+  "0039_matching_volunteer_alerts.sql",
+  "0040_request_analytics_parent_ownership_keys.sql",
+  "0041_request_engagement.sql",
+  "0042_engagement_child_ownership.sql",
+  "0043_request_revisions.sql",
+  "0043_volunteer_signup_expiry_check.sql",
+  "0044_repair_item_request_expiry_functions.sql",
+]);
+
+/**
+ * Postgres "this object already exists" error codes: duplicate_table (which
+ * also covers indexes and sequences), duplicate_object, duplicate_column,
+ * duplicate_function, duplicate_schema.
+ */
+const DUPLICATE_OBJECT_CODES = new Set(["42P07", "42710", "42701", "42723", "42P06"]);
+
+function isAlreadyMaterialized(filename: string, err: unknown): boolean {
+  if (!PUBLISH_SYNCED.has(filename)) return false;
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" && DUPLICATE_OBJECT_CODES.has(code);
+}
 
 async function main(): Promise<void> {
   const dir = path.resolve(import.meta.dirname, "../../migrations");
@@ -76,6 +138,18 @@ async function main(): Promise<void> {
         await client.query("rollback");
       } catch {
         /* the original error is the one that matters */
+      }
+      if (isAlreadyMaterialized(filename, err)) {
+        // The objects are already there (publish synced the tables without the
+        // ledger). Record it so the deploy can proceed, and say exactly what
+        // was skipped — anything this migration does BEYOND creating those
+        // objects did not run.
+        await pool.query(`insert into schema_migrations (filename, sha256) values ($1, $2)`, [filename, sha]);
+        console.warn(
+          `  ${filename} — objects already exist (${(err as { code?: string }).code}); recorded WITHOUT running. ` +
+            `Anything else in this file did not run.`,
+        );
+        continue;
       }
       throw new Error(`${filename} failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     } finally {
