@@ -1,10 +1,17 @@
 /**
- * Regression check for the missing-function startup warning.
+ * Regression checks for the startup DB check utilities.
  *
- * Temporarily drops item_request_expired_on from the database, runs
- * checkRequiredDbFunctions(), and asserts that console.error was called with
- * the function name and the repair migration filename. The function is restored
- * in a finally block so the database is never left in a broken state.
+ * Test 1 — connection-failure guard (no real DB access)
+ *   Stubs pool.connect to reject and asserts that checkRequiredDbFunctions()
+ *   swallows the error, logs "[db-check] Could not connect", and returns
+ *   normally without throwing.
+ *
+ * Test 2 — missing-function warning
+ *   Temporarily drops item_request_expired_on from the database, runs
+ *   checkRequiredDbFunctions(), and asserts that console.error was called with
+ *   the function name and the repair migration filename. The function is
+ *   restored in a finally block so the database is never left in a broken
+ *   state.
  *
  * Usage: NODE_ENV=development npx tsx scripts/test-startup-db-check.ts
  * Exit 0 = pass.
@@ -53,8 +60,62 @@ const RESTORE_SQL = `
   $$
 `;
 
+/**
+ * Test 1 — connection-failure guard.
+ *
+ * Stubs pool.connect so it rejects immediately, then calls
+ * checkRequiredDbFunctions() and asserts:
+ *   - the function returns normally (does not throw)
+ *   - console.error was called with the "[db-check] Could not connect" message
+ *
+ * The real database is never contacted; no cleanup is needed.
+ */
+async function testConnectionFailure(): Promise<void> {
+  console.log("startup-db-check: connection-failure guard\n");
+
+  const capturedErrors: string[] = [];
+  const realConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    capturedErrors.push(args.map(String).join(" "));
+  };
+
+  // Replace pool.connect with a stub that simulates an unreachable database.
+  const realConnect = pool.connect.bind(pool);
+  (pool as any).connect = (): Promise<never> =>
+    Promise.reject(new Error("ECONNREFUSED — simulated unreachable DB"));
+
+  let threw = false;
+  try {
+    await checkRequiredDbFunctions();
+  } catch {
+    threw = true;
+  } finally {
+    // Restore both before asserting so assert() output goes to real stderr.
+    (pool as any).connect = realConnect;
+    console.error = realConsoleError;
+  }
+
+  const combined = capturedErrors.join("\n");
+
+  console.log("--- warnings captured ---");
+  console.log(combined || "(none)");
+  console.log("-------------------------\n");
+
+  assert(
+    !threw,
+    "checkRequiredDbFunctions() does not throw when pool.connect rejects",
+  );
+  assert(
+    capturedErrors.some((m) => m.includes("[db-check] Could not connect")),
+    'console.error includes "[db-check] Could not connect"',
+    combined,
+  );
+}
+
 async function main(): Promise<void> {
-  console.log("startup-db-check: missing-function warning\n");
+  await testConnectionFailure();
+
+  console.log("\nstartup-db-check: missing-function warning\n");
 
   // Intercept console.error so we can assert on the messages it receives.
   const capturedErrors: string[] = [];
