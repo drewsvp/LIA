@@ -580,11 +580,13 @@ h3 {
   display: inline-block;
   margin: 10px 6px 0;
 }
-/* Standard responsive 16:9 embed — padding-top holds the ratio so the video
-   scales with its column and never overflows on narrow screens. */
+/* Standard responsive 16:9 embed. The ratio must come from aspect-ratio, not a
+   percentage padding-top: percentage padding resolves against the *parent's*
+   width, which ignores the max-width clamp below and produced a near-square
+   box (56.25% of the full navy band, not of the 720px column). */
 .pb6-video-wrap {
   position: relative;
-  padding-top: 56.25%;
+  aspect-ratio: 16 / 9;
   width: 100%;
   max-width: 720px;
   margin: 28px auto 0;
@@ -654,11 +656,11 @@ h3 {
   border-radius: var(--radius-card);
   padding: 20px 22px;
 }
-/* The logo frame keeps one size whether or not an organization has a logo,
-   so the (much more common) fallback never collapses or stretches. */
+/* The logo frame is square and keeps one size whether or not an organization
+   has a logo, so the (much more common) fallback never collapses or stretches. */
 .pb7-logo {
   width: 240px;
-  aspect-ratio: 5 / 2;
+  aspect-ratio: 1 / 1;
   background: #ffffff;
   border: 1px solid #dddddd;
   border-radius: var(--radius-card);
@@ -674,11 +676,11 @@ h3 {
   padding: 10px;
   box-sizing: border-box;
 }
-/* Fallback: the site header art, cropped to the frame rather than letterboxed. */
+/* Fallback: the site mark sits whole inside the square frame. Cover-cropping a
+   3.4:1 banner to a square would slice straight through the wordmark. */
 .pb7-logo-fallback img {
-  object-fit: cover;
-  object-position: 40% center;
-  padding: 0;
+  object-fit: contain;
+  padding: 14px;
 }
 .pb7-name {
   margin: 0 0 12px;

@@ -27,3 +27,4 @@
 - [Engagement privacy boundary](engagement-privacy-boundary.md) — anonymous request events stay aggregate-only; signed-in views may be attributed; pledges/signups remain the only conversion source.
 - [SPA shell head injection](spa-shell-head-injection.md) — dev and prod serve the shell differently; head changes must cover both, replace default meta tags, and never reference hashed build assets.
 - [Publish schema after restores](publish-schema-after-restores.md) — restoring code does not roll back dev DB; orphaned schema can reappear in Publish, and new parent keys may be emitted after dependent FKs.
+- [Publish and database routines](publish-db-routines.md) — table parity is not routine parity: functions/triggers can be missing in prod after a clean publish, surfacing as runtime 42883 errors.

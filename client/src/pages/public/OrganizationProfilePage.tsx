@@ -6,7 +6,7 @@ import { RequestCard } from "../../components/public/RequestCard";
 import { ShareButton } from "../../components/public/ShareButton";
 import { NotFound } from "../NotFound";
 import { organizationPath, organizationShareDescription, organizationShareTitle } from "@shared/share-copy";
-import liaHeader from "../../assets/headers/LIA-Main-Page-Header.png";
+import allianceLogo from "../../assets/alliance-logo-blue.png";
 
 /**
  * PB-08 — public organization profile.
@@ -57,9 +57,9 @@ export function OrganizationProfilePage(): ReactElement {
   if (notFound) return <NotFound />;
 
   const org = data?.organization;
-  // 8 of 9 live organizations have no logo, so the fallback is the ordinary
-  // case: the site header art, cover-cropped into the logo frame rather than
-  // stretched across it.
+  // The organization's own logo wins whenever it has one. 8 of 9 live
+  // organizations have none, so the fallback is the ordinary case: the site
+  // mark, fitted whole inside the same square frame.
   const hasLogo = org != null && org.logoUrl != null && org.logoUrl.trim() !== "";
 
   return (
@@ -84,7 +84,7 @@ export function OrganizationProfilePage(): ReactElement {
           <>
             <div className="pb7-identity">
               <div className={hasLogo ? "pb7-logo" : "pb7-logo pb7-logo-fallback"}>
-                <img src={hasLogo ? (org.logoUrl as string) : liaHeader} alt={hasLogo ? `${org.name} logo` : ""} />
+                <img src={hasLogo ? (org.logoUrl as string) : allianceLogo} alt={hasLogo ? `${org.name} logo` : ""} />
               </div>
               <div className="pb7-identity-body">
                 <h1 className="pb7-name">{org.name}</h1>
