@@ -13,6 +13,7 @@
 import { useState } from "react";
 import type { ReactElement } from "react";
 import { useSearch } from "wouter";
+import { PublicLayout } from "../../components/public/PublicLayout";
 
 const GENERIC_ERROR = "We could not finish signing you in. Request a new link below and try again.";
 const MISSING_TOKEN_ERROR =
@@ -54,29 +55,31 @@ export function LoginVerifyPage(): ReactElement {
   }
 
   return (
-    <main className="mp1-page">
-      <h1 className="mp1-heading">LOG IN</h1>
-      {error === null ? (
-        <>
-          <p className="mp1-copy">Click below to finish signing in.</p>
-          <button className="mp1-submit" type="button" disabled={submitting} onClick={() => void handleSignIn()}>
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="mp1-link-error" role="alert">
-            {error}
-          </p>
-          <button
-            className="mp1-submit"
-            type="button"
-            onClick={() => window.location.assign("/login?error=link")}
-          >
-            Request a New Link
-          </button>
-        </>
-      )}
-    </main>
+    <PublicLayout className="mp1-shell">
+      <div className="mp1-page">
+        <h1 className="mp1-heading">LOG IN</h1>
+        {error === null ? (
+          <>
+            <p className="mp1-copy">Click below to finish signing in.</p>
+            <button className="mp1-submit" type="button" disabled={submitting} onClick={() => void handleSignIn()}>
+              {submitting ? "Signing in…" : "Sign in"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="mp1-link-error" role="alert">
+              {error}
+            </p>
+            <button
+              className="mp1-submit"
+              type="button"
+              onClick={() => window.location.assign("/login?error=link")}
+            >
+              Request a New Link
+            </button>
+          </>
+        )}
+      </div>
+    </PublicLayout>
   );
 }
