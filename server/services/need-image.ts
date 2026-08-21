@@ -288,15 +288,16 @@ export function buildPrompt(kind: RequestKind, request: ImageableRequest, subNam
  *
  * Replit AI Integrations bills provider usage to Replit credits instead of a
  * personal OpenAI account, and supplies the credentials (and, where it routes
- * through a gateway, the base URL) through the environment. OPENAI_BASE_URL is
- * the same variable the official OpenAI SDK reads, so honouring it means
- * moving between a personal key and Replit-managed billing needs no code
- * change. OPENAI_IMAGE_MODEL likewise allows trying gpt-image-2 without a
- * deploy. Defaults keep the documented D67 behaviour: OpenAI direct,
- * gpt-image-1.
+ * through a gateway, the base URL) through the environment. Two names are
+ * honoured: OPENAI_BASE_URL, what the official OpenAI SDK reads, and
+ * OPENAI_API_BASE_URL, the name Replit injects when an app is switched to
+ * managed credentials — so that switch needs no code change either way.
+ * OPENAI_IMAGE_MODEL likewise allows trying gpt-image-2 without a deploy.
+ * Defaults keep the documented D67 behaviour: OpenAI direct, gpt-image-1.
  */
 function imageEndpoint(): string {
-  const base = (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").trim().replace(/\/+$/, "");
+  const configured = (process.env.OPENAI_BASE_URL ?? process.env.OPENAI_API_BASE_URL ?? "").trim();
+  const base = (configured === "" ? "https://api.openai.com/v1" : configured).replace(/\/+$/, "");
   return `${base}/images/generations`;
 }
 

@@ -28,3 +28,4 @@
 - [SPA shell head injection](spa-shell-head-injection.md) — dev and prod serve the shell differently; head changes must cover both, replace default meta tags, and never reference hashed build assets.
 - [Publish schema after restores](publish-schema-after-restores.md) — restoring code does not roll back dev DB; orphaned schema can reappear in Publish, and new parent keys may be emitted after dependent FKs.
 - [Publish and database routines](publish-db-routines.md) — table parity is not routine parity: functions/triggers can be missing in prod after a clean publish, surfacing as runtime 42883 errors.
+- [Out-of-band need photos](managed-openai-availability.md) — externally produced photos still go through prompt builder + storage adapter + DAL write; pick rows by null image URL, never by gen status.
