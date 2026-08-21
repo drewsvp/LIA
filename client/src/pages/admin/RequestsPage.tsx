@@ -451,7 +451,7 @@ function ItemChildEditor({
           <input
             value={child.description}
             onChange={(e) => onChange({ ...child, description: e.target.value })}
-            placeholder="Optional description"
+            placeholder="Description"
             style={{ minWidth: 300 }}
           />
         </label>
@@ -541,7 +541,7 @@ function RoleChildEditor({
           <input
             value={child.description}
             onChange={(e) => onChange({ ...child, description: e.target.value })}
-            placeholder="Optional description"
+            placeholder="Description"
             style={{ minWidth: 300 }}
           />
         </label>
