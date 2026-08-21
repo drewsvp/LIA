@@ -12,7 +12,7 @@ import { startEmailSweep } from "./jobs/email-sweep";
 import { startDigestScheduler } from "./jobs/digest";
 import { startImageSweep } from "./jobs/image-sweep";
 import { setupVite, serveStatic } from "./vite";
-import { checkRequiredDbFunctions } from "./db/startup-checks";
+import { checkRequiredDbFunctions, checkRequiredDbTriggers } from "./db/startup-checks";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -105,6 +105,13 @@ async function start(): Promise<void> {
   // happen after a clean publish that did not replay all migrations).
   checkRequiredDbFunctions().catch(() => {
     // Already handled inside checkRequiredDbFunctions; swallow so startup
+    // never aborts due to the check itself.
+  });
+
+  // Startup check: warn if any required custom DB triggers are absent. A
+  // missing trigger silently bypasses its guard (no 500, just bad data).
+  checkRequiredDbTriggers().catch(() => {
+    // Already handled inside checkRequiredDbTriggers; swallow so startup
     // never aborts due to the check itself.
   });
 
