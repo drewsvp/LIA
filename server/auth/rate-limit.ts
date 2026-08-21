@@ -48,6 +48,16 @@ export const magicLinkEmailLimiter = new FixedWindowLimiter(3, WINDOW_MS);
 export const magicLinkIpLimiter = new FixedWindowLimiter(10, WINDOW_MS);
 
 /**
+ * Max quick-login attempts per source IP per 15 minutes.
+ *
+ * Quick-login is a dev/staging-only shortcut that never dispatches email, so
+ * it must not share the email-dispatch budget (magicLinkIpLimiter). A separate
+ * limiter prevents rapid test runs from exhausting the shared pool and causing
+ * spurious 429s on the real magic-link path.
+ */
+export const quickLoginIpLimiter = new FixedWindowLimiter(20, WINDOW_MS);
+
+/**
  * Max magic-link *confirmations* per source IP per 15 minutes. Separate from
  * the dispatch budget: confirming is the human clicking "Sign in" on the
  * confirmation page (D66), which is idempotent and can legitimately repeat

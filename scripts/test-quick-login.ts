@@ -92,13 +92,17 @@ async function checkVerificationSchema(): Promise<void> {
 
 // ── per-role flow ─────────────────────────────────────────────────────────────
 
-const ROLES: { role: string; expectedEmail: string }[] = [
-  { role: "staff_admin",    expectedEmail: "tiffany@defendingthecause.org" },
-  { role: "staff_approver", expectedEmail: "approver@thealliance.example.org" },
-  { role: "org_owner",      expectedEmail: "dana@heartsandhands.example.org" },
+const ROLES: { role: string; expectedEmail: string; expectedRedirect: string }[] = [
+  { role: "staff_admin",    expectedEmail: "tiffany@defendingthecause.org",         expectedRedirect: "/dashboard" },
+  { role: "staff_approver", expectedEmail: "approver@thealliance.example.org",      expectedRedirect: "/dashboard" },
+  { role: "org_owner",      expectedEmail: "dana@heartsandhands.example.org",       expectedRedirect: "/dashboard" },
 ];
 
-async function testRole(role: string, expectedEmail: string): Promise<void> {
+async function testRole(
+  role: string,
+  expectedEmail: string,
+  expectedRedirect: string,
+): Promise<void> {
   console.log(`\nRole: ${role}`);
 
   // ── 1. Quick login ──────────────────────────────────────────────────────
@@ -131,6 +135,15 @@ async function testRole(role: string, expectedEmail: string): Promise<void> {
   }
   if (loginBody.ok !== true) fail('body.ok === true', JSON.stringify(loginBody));
   else pass("body.ok === true");
+
+  if (loginBody.redirectTo !== expectedRedirect) {
+    fail(
+      `body.redirectTo === "${expectedRedirect}"`,
+      `got: ${JSON.stringify(loginBody.redirectTo)}`,
+    );
+  } else {
+    pass(`body.redirectTo === "${expectedRedirect}"`);
+  }
 
   // ── 2. Cookies present ──────────────────────────────────────────────────
   const setCookies = parseCookies(loginRes);
@@ -196,6 +209,126 @@ async function testRole(role: string, expectedEmail: string): Promise<void> {
   }
 }
 
+/**
+ * Supporter-specific flow: kind='supporter' accounts have no memberships and
+ * must be redirected to /profile, not /dashboard.
+ */
+async function testSupporterRole(): Promise<void> {
+  const role = "supporter";
+  const expectedEmail = "supporter@example.org";
+  const expectedRedirect = "/profile";
+
+  console.log(`\nRole: ${role}`);
+
+  // ── 1. Quick login ──────────────────────────────────────────────────────
+  let loginRes: Response;
+  try {
+    loginRes = await fetch(`${BASE}/api/login/quick`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+      redirect: "manual",
+    });
+  } catch (err) {
+    fail("POST /api/login/quick reachable", String(err));
+    return;
+  }
+
+  if (loginRes.status !== 200) {
+    const body = await loginRes.text().catch(() => "(unreadable)");
+    fail(`POST /api/login/quick → 200`, `got ${loginRes.status}: ${body}`);
+    return;
+  }
+  pass("POST /api/login/quick → 200");
+
+  let loginBody: { ok?: boolean; redirectTo?: string };
+  try {
+    loginBody = (await loginRes.json()) as typeof loginBody;
+  } catch {
+    fail("response body is valid JSON");
+    return;
+  }
+  if (loginBody.ok !== true) {
+    fail("body.ok === true", JSON.stringify(loginBody));
+  } else {
+    pass("body.ok === true");
+  }
+
+  // Core assertion: supporters must land on /profile, not /dashboard.
+  if (loginBody.redirectTo !== expectedRedirect) {
+    fail(
+      `body.redirectTo === "${expectedRedirect}" (supporter must not land on /dashboard)`,
+      `got: ${JSON.stringify(loginBody.redirectTo)}`,
+    );
+  } else {
+    pass(`body.redirectTo === "${expectedRedirect}"`);
+  }
+
+  // ── 2. Cookies present ──────────────────────────────────────────────────
+  const setCookies = parseCookies(loginRes);
+  const hasSession = setCookies.some(
+    (c) =>
+      c.startsWith("__Secure-better-auth.session_token") ||
+      c.startsWith("better-auth.session_token"),
+  );
+  if (!hasSession) {
+    fail("Set-Cookie contains session token", `got: ${setCookies.join(" | ") || "(none)"}`);
+    return;
+  }
+  pass("Set-Cookie contains session token");
+
+  // ── 3. Session endpoint confirms authentication ─────────────────────────
+  let sessionRes: Response;
+  try {
+    sessionRes = await fetch(`${BASE}/api/session`, {
+      headers: { Cookie: cookieHeader(setCookies) },
+    });
+  } catch (err) {
+    fail("GET /api/session reachable", String(err));
+    return;
+  }
+
+  if (sessionRes.status !== 200) {
+    const body = await sessionRes.text().catch(() => "(unreadable)");
+    fail(`GET /api/session → 200`, `got ${sessionRes.status}: ${body}`);
+    return;
+  }
+  pass("GET /api/session → 200");
+
+  let session: {
+    authenticated?: boolean;
+    user?: { email?: string };
+    memberships?: unknown[];
+  };
+  try {
+    session = (await sessionRes.json()) as typeof session;
+  } catch {
+    fail("session body is valid JSON");
+    return;
+  }
+
+  if (session.authenticated !== true) {
+    fail("session.authenticated === true", JSON.stringify(session));
+    return;
+  }
+  pass("session.authenticated === true");
+
+  const gotEmail = session.user?.email?.toLowerCase() ?? "";
+  const wantEmail = expectedEmail.toLowerCase();
+  if (gotEmail !== wantEmail) {
+    fail(`session.user.email = ${expectedEmail}`, `got: ${gotEmail}`);
+  } else {
+    pass(`session.user.email = ${expectedEmail}`);
+  }
+
+  // Supporters legitimately have zero memberships — this is not an error.
+  if (!Array.isArray(session.memberships)) {
+    fail("session.memberships is an array", JSON.stringify(session.memberships));
+  } else {
+    pass(`session.memberships is an array (${session.memberships.length} entries — zero is valid for supporters)`);
+  }
+}
+
 // ── entrypoint ───────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -222,9 +355,12 @@ async function main(): Promise<void> {
   await checkVerificationSchema();
 
   // Per-role flows.
-  for (const { role, expectedEmail } of ROLES) {
-    await testRole(role, expectedEmail);
+  for (const { role, expectedEmail, expectedRedirect } of ROLES) {
+    await testRole(role, expectedEmail, expectedRedirect);
   }
+
+  // Supporter role: must redirect to /profile, not /dashboard.
+  await testSupporterRole();
 
   // ── summary ───────────────────────────────────────────────────────────────
   console.log(`\n${"─".repeat(44)}`);

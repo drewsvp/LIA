@@ -16,7 +16,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "../auth/auth";
 import { resolveSessionInfo, ACTIVE_ORG_COOKIE } from "../auth/session";
 import { NOT_FOUND_BODY, requireStaff } from "../auth/guards";
-import { magicLinkEmailLimiter, magicLinkIpLimiter, magicLinkVerifyIpLimiter } from "../auth/rate-limit";
+import { magicLinkEmailLimiter, magicLinkIpLimiter, magicLinkVerifyIpLimiter, quickLoginIpLimiter } from "../auth/rate-limit";
 import { PUBLIC, SYSTEM, pool } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as dal from "../dal";
@@ -400,8 +400,9 @@ export function registerRoutes(app: Express): void {
       res.status(400).json({ message: "Unknown test role." });
       return;
     }
-    // Same IP-based rate limit as magic link.
-    if (!magicLinkIpLimiter.consume(req.ip ?? "unknown")) {
+    // Dedicated quick-login rate limiter: quick-login never dispatches email so
+    // it must not share the magic-link dispatch budget (magicLinkIpLimiter).
+    if (!quickLoginIpLimiter.consume(req.ip ?? "unknown")) {
       res.status(429).json({ message: "Too many attempts. Try again later." });
       return;
     }
@@ -454,7 +455,9 @@ export function registerRoutes(app: Express): void {
     for (const c of setCookies) {
       res.append("Set-Cookie", c);
     }
-    res.status(200).json({ ok: true, redirectTo: "/dashboard" });
+    // Supporters have no organization dashboard; mirror the confirmMagicLink
+    // redirect logic so quick-login and magic-link deliver the same destination.
+    res.status(200).json({ ok: true, redirectTo: user.kind === "supporter" ? "/profile" : "/dashboard" });
   });
 
   // ---- Session snapshot for the client (MP-02 routing, admin gate).
