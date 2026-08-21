@@ -39,5 +39,6 @@ export * as peopleReview from "./people-review";
 export * as volunteerInterests from "./volunteer-interests";
 export * as volunteerAlerts from "./volunteer-alerts";
 export * as requestEngagement from "./request-engagement";
+export * as requestRevisions from "./request-revisions";
 
 export { SYSTEM, PUBLIC, type DbContext } from "../db/client";

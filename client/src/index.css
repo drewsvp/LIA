@@ -2775,6 +2775,13 @@ a.site-nav-btn {
 .adm-return-note-body { margin: 6px 0 4px; font-size: 14px; }
 .adm-return-note-disclaimer { font-size: 12px; margin: 4px 0 0; }
 
+/* ---- Request correction history (ADMIN-02) ---- */
+.adm-revisions { margin: 18px 0 10px; }
+.adm-revisions-heading { font-size: 13px; font-weight: 600; color: #5a6b7c; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.adm-revisions-table { font-size: 12px; }
+.adm-revisions-table th { font-weight: 600; }
+.adm-revisions-date { white-space: nowrap; color: #5a6b7c; }
+
 /* ---- ADMIN-06 Email log ---- */
 .adm-banner-fail {
   display: block;

@@ -104,6 +104,12 @@ type Detail = {
     unapprovalReason: string | null;
   };
   categories: VolunteerCategoryOption[];
+  revisions: Array<{
+    id: string;
+    actorName: string | null;
+    summary: string;
+    createdAt: string;
+  }>;
 };
 
 type PendingConfirm = { kind: "approve" | "archive" | "unapprove" } | null;
@@ -167,6 +173,12 @@ function formatDate(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { dateStyle: "medium" });
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
 }
 
 function deadlineLabel(detail: Detail["request"]): string {
@@ -1355,6 +1367,31 @@ export function RequestsPage() {
                       : "No categories assigned — assign an active category before approval."}
                   </dd>
                 </dl>
+              )}
+
+              {/* Correction history — staff content edits and image uploads, separate from lifecycle events */}
+              {detail.revisions && detail.revisions.length > 0 && (
+                <div className="adm-revisions">
+                  <h3 className="adm-revisions-heading">Correction history</h3>
+                  <table className="adm-table adm-revisions-table">
+                    <thead>
+                      <tr>
+                        <th>When</th>
+                        <th>By</th>
+                        <th>What changed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.revisions.map((rev) => (
+                        <tr key={rev.id}>
+                          <td className="adm-revisions-date">{formatDateTime(rev.createdAt)}</td>
+                          <td>{rev.actorName ?? "Staff"}</td>
+                          <td>{rev.summary}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {/* Image upload — only when editable */}

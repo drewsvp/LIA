@@ -6,6 +6,10 @@
  * Request fields, contact attachment, and the complete ordered child structure
  * commit together. Activity counters are not present in the input types and the
  * child DALs reject the transaction if any activity exists.
+ *
+ * Successful content edits and image uploads write a request_revisions entry
+ * in the same transaction. Failed saves, validation rejections, and automatic
+ * image attempts never write a revision entry.
  */
 import type { PoolClient } from "pg";
 import type {
@@ -192,22 +196,240 @@ function mapActivityError(
   throw err;
 }
 
+// ── Before-state reads for diff summary ─────────────────────────────────────
+
+type BeforeContact = {
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+};
+
+type ItemBeforeState = {
+  title: string;
+  description: string | null;
+  deadlineType: string;
+  deadlineDate: string | null;
+  dropoffLocation: string | null;
+  peopleHelped: number | null;
+  contact: BeforeContact;
+  childIds: string[];
+};
+
+type VolunteerBeforeState = {
+  title: string;
+  description: string | null;
+  details: string | null;
+  deadlineType: string;
+  deadlineDate: string | null;
+  eventLocation: string | null;
+  peopleHelped: number | null;
+  contact: BeforeContact;
+  childIds: string[];
+  categoryIds: string[];
+};
+
+async function readItemBeforeState(c: PoolClient, requestId: string): Promise<ItemBeforeState> {
+  type Row = {
+    title: string;
+    description: string | null;
+    deadlineType: string;
+    deadlineDate: string | null;
+    dropoffLocation: string | null;
+    peopleHelped: number | null;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+  };
+  const rows = await c.query<Row>(
+    `select ir.title, ir.description,
+            ir.deadline_type as "deadlineType", ir.deadline_date as "deadlineDate",
+            ir.dropoff_location as "dropoffLocation", ir.people_helped as "peopleHelped",
+            p.first_name as "firstName", p.last_name as "lastName",
+            p.email, p.phone
+       from item_requests ir
+       left join people p on p.id = ir.contact_person_id
+      where ir.id = $1`,
+    [requestId],
+  );
+  const r = rows.rows[0];
+  if (!r) throw new RequestNotFoundError(requestId);
+  const childRows = await c.query<{ id: string }>(
+    `select id from items where item_request_id = $1 order by sort_order asc, created_at asc`,
+    [requestId],
+  );
+  return {
+    title: r.title,
+    description: r.description,
+    deadlineType: r.deadlineType,
+    deadlineDate: r.deadlineDate,
+    dropoffLocation: r.dropoffLocation,
+    peopleHelped: r.peopleHelped,
+    contact: { firstName: r.firstName, lastName: r.lastName, email: r.email, phone: r.phone },
+    childIds: childRows.rows.map((row) => row.id),
+  };
+}
+
+async function readVolunteerBeforeState(c: PoolClient, requestId: string): Promise<VolunteerBeforeState> {
+  type Row = {
+    title: string;
+    description: string | null;
+    details: string | null;
+    deadlineType: string;
+    deadlineDate: string | null;
+    eventLocation: string | null;
+    peopleHelped: number | null;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+  };
+  const rows = await c.query<Row>(
+    `select vr.title, vr.description, vr.details,
+            vr.deadline_type as "deadlineType", vr.deadline_date as "deadlineDate",
+            vr.event_location as "eventLocation", vr.people_helped as "peopleHelped",
+            p.first_name as "firstName", p.last_name as "lastName",
+            p.email, p.phone
+       from volunteer_requests vr
+       left join people p on p.id = vr.contact_person_id
+      where vr.id = $1`,
+    [requestId],
+  );
+  const r = rows.rows[0];
+  if (!r) throw new RequestNotFoundError(requestId);
+  const childRows = await c.query<{ id: string }>(
+    `select id from volunteer_roles where volunteer_request_id = $1 order by sort_order asc, created_at asc`,
+    [requestId],
+  );
+  const catRows = await c.query<{ categoryId: string }>(
+    `select category_id as "categoryId" from volunteer_request_categories
+      where volunteer_request_id = $1 order by category_id`,
+    [requestId],
+  );
+  return {
+    title: r.title,
+    description: r.description,
+    details: r.details,
+    deadlineType: r.deadlineType,
+    deadlineDate: r.deadlineDate,
+    eventLocation: r.eventLocation,
+    peopleHelped: r.peopleHelped,
+    contact: { firstName: r.firstName, lastName: r.lastName, email: r.email, phone: r.phone },
+    childIds: childRows.rows.map((row) => row.id),
+    categoryIds: catRows.rows.map((row) => row.categoryId),
+  };
+}
+
+/** Detect which child IDs were added, removed, or reordered vs. the before snapshot. */
+function childrenDiff(
+  beforeIds: string[],
+  inputChildren: Array<{ id?: string }>,
+): { added: number; removed: number; reordered: boolean } {
+  const beforeSet = new Set(beforeIds);
+  const afterIds = inputChildren.map((ch) => ch.id).filter((id): id is string => id !== undefined);
+  const afterSet = new Set(afterIds);
+
+  const added = inputChildren.filter((ch) => ch.id === undefined || !beforeSet.has(ch.id)).length;
+  const removed = beforeIds.filter((id) => !afterSet.has(id)).length;
+
+  // Reorder: compare the relative order of surviving IDs.
+  const beforeSurviving = beforeIds.filter((id) => afterSet.has(id));
+  const afterSurviving = afterIds.filter((id) => beforeSet.has(id));
+  const reordered = beforeSurviving.join(",") !== afterSurviving.join(",");
+
+  return { added, removed, reordered };
+}
+
+function buildItemRevisionSummary(before: ItemBeforeState, input: StaffItemRequestEditInput): string {
+  const changed: string[] = [];
+
+  if (before.title !== input.fields.title) changed.push("title");
+  if (before.description !== input.fields.description) changed.push("description");
+  if (
+    before.deadlineType !== input.fields.deadlineType ||
+    before.deadlineDate !== input.fields.deadlineDate
+  ) {
+    changed.push("deadline");
+  }
+  if (before.dropoffLocation !== input.fields.dropoffLocation) changed.push("drop-off location");
+  if (before.peopleHelped !== input.fields.peopleHelped) changed.push("people helped");
+
+  const contactChanged =
+    before.contact.firstName !== input.fields.contact.firstName ||
+    before.contact.lastName !== input.fields.contact.lastName ||
+    before.contact.email !== input.fields.contact.email ||
+    before.contact.phone !== input.fields.contact.phone;
+  if (contactChanged) changed.push("contact");
+
+  const { added, removed, reordered } = childrenDiff(before.childIds, input.children);
+  const childParts: string[] = [];
+  if (added > 0) childParts.push(`${added} added`);
+  if (removed > 0) childParts.push(`${removed} removed`);
+  if (reordered) childParts.push("reordered");
+
+  const parts: string[] = [];
+  if (changed.length > 0) parts.push(`Edited: ${changed.join(", ")}`);
+  if (childParts.length > 0) parts.push(`Items: ${childParts.join(", ")}`);
+  return parts.length > 0 ? parts.join("; ") : "Saved (no changes detected)";
+}
+
+function buildVolunteerRevisionSummary(before: VolunteerBeforeState, input: StaffVolunteerRequestEditInput): string {
+  const changed: string[] = [];
+
+  if (before.title !== input.fields.title) changed.push("title");
+  if (before.description !== input.fields.description) changed.push("description");
+  if (before.details !== input.fields.details) changed.push("details");
+  if (
+    before.deadlineType !== input.fields.deadlineType ||
+    before.deadlineDate !== input.fields.deadlineDate
+  ) {
+    changed.push("deadline");
+  }
+  if (before.eventLocation !== input.fields.eventLocation) changed.push("event location");
+  if (before.peopleHelped !== input.fields.peopleHelped) changed.push("people helped");
+
+  const contactChanged =
+    before.contact.firstName !== input.fields.contact.firstName ||
+    before.contact.lastName !== input.fields.contact.lastName ||
+    before.contact.email !== input.fields.contact.email ||
+    before.contact.phone !== input.fields.contact.phone;
+  if (contactChanged) changed.push("contact");
+
+  const sortedInputCategoryIds = [...input.categoryIds].sort().join(",");
+  if (before.categoryIds.join(",") !== sortedInputCategoryIds) changed.push("categories");
+
+  const { added, removed, reordered } = childrenDiff(before.childIds, input.children);
+  const childParts: string[] = [];
+  if (added > 0) childParts.push(`${added} added`);
+  if (removed > 0) childParts.push(`${removed} removed`);
+  if (reordered) childParts.push("reordered");
+
+  const parts: string[] = [];
+  if (changed.length > 0) parts.push(`Edited: ${changed.join(", ")}`);
+  if (childParts.length > 0) parts.push(`Roles: ${childParts.join(", ")}`);
+  return parts.length > 0 ? parts.join("; ") : "Saved (no changes detected)";
+}
+
 export async function saveStaffRequestEdits(
   input: StaffRequestEditInput,
 ): Promise<{ request: ItemRequest | VolunteerRequest }> {
   const staff: DbContext = { kind: "staff", userId: input.staffUserId };
+  const entityType = input.kind === "item" ? "item_request" : "volunteer_request";
   try {
     return await withDbContext(staff, async (c) => {
       const locked = await lockEditableRequest(c, input.kind, input.requestId);
-      const person = await resolveContactInTx(
-        c,
-        locked.orgId,
-        locked.contactPersonId,
-        input.fields.contact,
-        `${input.kind} request contact (ADMIN-02 staff edit)`,
-      );
 
       if (input.kind === "item") {
+        const before = await readItemBeforeState(c, input.requestId);
+        const person = await resolveContactInTx(
+          c,
+          locked.orgId,
+          locked.contactPersonId,
+          input.fields.contact,
+          `${input.kind} request contact (ADMIN-02 staff edit)`,
+        );
+
         if (locked.status !== "active") {
           await dal.items.assertNoItemActivityInTx(c, input.requestId);
         }
@@ -221,8 +443,27 @@ export async function saveStaffRequestEdits(
           contactPersonId: person.id,
         });
         await dal.items.replaceForStaffEditInTx(c, input.requestId, input.children);
+
+        const summary = buildItemRevisionSummary(before, input);
+        await dal.requestRevisions.insertInTx(c, {
+          entityType,
+          entityId: input.requestId,
+          actorUserId: input.staffUserId,
+          summary,
+        });
+
         return { request };
       }
+
+      // volunteer
+      const before = await readVolunteerBeforeState(c, input.requestId);
+      const person = await resolveContactInTx(
+        c,
+        locked.orgId,
+        locked.contactPersonId,
+        input.fields.contact,
+        `${input.kind} request contact (ADMIN-02 staff edit)`,
+      );
 
       if (locked.status !== "active") {
         await dal.volunteerRoles.assertNoVolunteerActivityInTx(c, input.requestId);
@@ -239,6 +480,15 @@ export async function saveStaffRequestEdits(
       });
       await dal.volunteerRoles.replaceForStaffEditInTx(c, input.requestId, input.children);
       await dal.volunteerRequests.replaceCategoriesInTx(c, input.requestId, input.categoryIds);
+
+      const summary = buildVolunteerRevisionSummary(before, input);
+      await dal.requestRevisions.insertInTx(c, {
+        entityType,
+        entityId: input.requestId,
+        actorUserId: input.staffUserId,
+        summary,
+      });
+
       return { request };
     });
   } catch (err) {
@@ -329,6 +579,7 @@ export async function saveStaffRequestImage(input: {
   imageUrl: string;
 }): Promise<{ request: ItemRequest | VolunteerRequest; previousImageUrl: string | null }> {
   const staff: DbContext = { kind: "staff", userId: input.staffUserId };
+  const entityType = input.kind === "item" ? "item_request" : "volunteer_request";
   try {
     return await withDbContext(staff, async (c) => {
       const locked = await lockEditableRequest(c, input.kind, input.requestId);
@@ -339,6 +590,12 @@ export async function saveStaffRequestImage(input: {
           imageGenStatus: null,
           imageGenError: null,
         });
+        await dal.requestRevisions.insertInTx(c, {
+          entityType,
+          entityId: input.requestId,
+          actorUserId: input.staffUserId,
+          summary: "Image uploaded",
+        });
         return { request, previousImageUrl: locked.imageUrl };
       }
       const request = await dal.volunteerRequests.updateInTx(c, locked.orgId, input.requestId, {
@@ -346,6 +603,12 @@ export async function saveStaffRequestImage(input: {
         imageGenerated: false,
         imageGenStatus: null,
         imageGenError: null,
+      });
+      await dal.requestRevisions.insertInTx(c, {
+        entityType,
+        entityId: input.requestId,
+        actorUserId: input.staffUserId,
+        summary: "Image uploaded",
       });
       return { request, previousImageUrl: locked.imageUrl };
     });

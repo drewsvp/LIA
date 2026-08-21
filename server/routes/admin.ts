@@ -516,11 +516,13 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      const [children, latestReturn, editability, categories] = await Promise.all([
+      const entityType = kind === "item" ? "item_request" : "volunteer_request";
+      const [children, latestReturn, editability, categories, revisions] = await Promise.all([
         kind === "item" ? dal.items.listByRequest(ctx, id) : dal.volunteerRoles.listByRequest(ctx, id),
         dal.adminRequests.latestReturn(ctx, kind, id),
         dal.adminRequests.preApprovalEditability(ctx, kind, id),
         kind === "volunteer" ? dal.volunteerRequests.listCategoryOptions(ctx, id) : Promise.resolve([]),
+        dal.requestRevisions.listByEntity(ctx, entityType, id),
       ]);
       const orgContactPerson = organization.primaryContactPersonId
         ? await dal.people.getById(ctx, organization.primaryContactPersonId)
@@ -560,6 +562,7 @@ export function registerAdminRoutes(app: Express): void {
         latestReturn,
         editability,
         categories,
+        revisions,
       });
     } catch (err) {
       next(err);

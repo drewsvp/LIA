@@ -348,6 +348,21 @@ export type DigestSubscriber = {
   legacySource: string | null;
 };
 
+// ---------------------------------------------------------------- revision history
+
+/** One staff content-correction entry — separate from lifecycle approval_events. */
+export type RequestRevision = {
+  id: string;
+  entityType: "item_request" | "volunteer_request";
+  entityId: string;
+  actorUserId: string;
+  summary: string;
+  createdAt: string;
+};
+
+/** Revision entry with the actor's display name joined in. */
+export type RequestRevisionWithActor = RequestRevision & { actorName: string | null };
+
 // ---------------------------------------------------------------- session
 
 /** What /api/session returns and what guards attach to the request. */
