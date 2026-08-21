@@ -655,19 +655,24 @@ async function runCase(
  * indefinitely while the React app is mounted and rendering. That freezes the
  * component in the isLoading=true state so we can inspect the DOM without a
  * race against a fast local response.
+ *
+ * Run at both desktop (1280px) and mobile (390px) widths: the mobile control
+ * row (.site-nav-mobile-controls) renders DASHBOARD/ADMIN independently of the
+ * desktop stack, so a regression there would not be caught by a desktop-only
+ * check.
  */
 async function runNavFlashCase(
   browser: Browser,
   state: "staff admin" | "member",
+  width: number,
   authState: AuthState,
 ): Promise<void> {
-  const label = `nav flash — ${state}`;
+  const label = `nav flash — ${state} at ${width}px`;
+  const mobile = width <= 720;
   let context: BrowserContext | null = null;
   try {
     context = await browser.newContext({
-      // Desktop width; both mobile and desktop gate on the same isLoading flag
-      // but a single width is sufficient to confirm the guard is present.
-      viewport: { width: 1280, height: VIEWPORT_HEIGHT },
+      viewport: { width, height: VIEWPORT_HEIGHT },
       storageState: authState,
     });
     const page = await context.newPage();
@@ -729,16 +734,40 @@ async function runNavFlashCase(
       (await page.locator(".site-nav-user-trigger:visible").count()) === 0,
       `${label}: user menu chip is visible during the session loading window.`,
     );
+    if (mobile) {
+      // Mobile-specific: the mobile control row must not expose any
+      // session-gated links (DASHBOARD, ADMIN) while isLoading is true. The
+      // desktop assertions above catch .site-nav a[href=...]:visible globally,
+      // but this assertion is explicit about the mobile control row being clean.
+      assertThat(
+        (await page.locator(".site-nav-mobile-controls a:visible").count()) === 0,
+        `${label}: mobile control row links (DASHBOARD / ADMIN) are visible during the session loading window.`,
+      );
+    }
 
     // Release the held /api/session response so the session resolves.
     releaseSession();
 
     // ── Sanity-check: expected controls appear after session resolves ────────
-    await page.waitForSelector(".site-nav-user-trigger", { state: "attached", timeout: 10_000 });
-    assertThat(
-      (await page.locator(".site-nav-user-trigger:visible").count()) === 1,
-      `${label}: user menu not visible after the session resolved.`,
-    );
+    if (mobile) {
+      // At mobile widths the user menu lives inside the hamburger panel (closed
+      // by default) and is not in the DOM until the panel opens. Wait for
+      // DASHBOARD in the always-visible mobile control row instead.
+      await page.waitForSelector(".site-nav-mobile-controls a[href='/dashboard']", {
+        state: "attached",
+        timeout: 10_000,
+      });
+      assertThat(
+        (await page.locator(".site-nav-mobile-controls a[href='/dashboard']:visible").count()) === 1,
+        `${label}: DASHBOARD not visible in the mobile control row after the session resolved.`,
+      );
+    } else {
+      await page.waitForSelector(".site-nav-user-trigger", { state: "attached", timeout: 10_000 });
+      assertThat(
+        (await page.locator(".site-nav-user-trigger:visible").count()) === 1,
+        `${label}: user menu not visible after the session resolved.`,
+      );
+    }
     assertThat(
       (await page.locator(".site-nav a[href='/login']:visible").count()) === 0,
       `${label}: MEMBER LOGIN still visible after the session resolved for an authenticated user.`,
@@ -782,9 +811,14 @@ async function main(): Promise<void> {
 
     // Nav-flash regression: verify that no session-dependent slot flashes
     // during the window between a hard reload and the session query resolving.
+    // Run at desktop (1280px) and mobile (390px) because the mobile control
+    // row (.site-nav-mobile-controls) renders DASHBOARD/ADMIN independently of
+    // the desktop stack and must also respect the isLoading gate.
     console.log("\nNav flash regression checks");
-    await runNavFlashCase(browser, "staff admin", staffState);
-    await runNavFlashCase(browser, "member", memberState);
+    await runNavFlashCase(browser, "staff admin", 1280, staffState);
+    await runNavFlashCase(browser, "member", 1280, memberState);
+    await runNavFlashCase(browser, "staff admin", 390, staffState);
+    await runNavFlashCase(browser, "member", 390, memberState);
   } finally {
     await browser?.close();
     if (fixture !== null) await cleanupSwitcherFixture(fixture);
