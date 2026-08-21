@@ -637,6 +637,118 @@ async function runCase(
   }
 }
 
+/**
+ * Nav-flash regression: asserts that no session-dependent slot renders while
+ * the session query is in-flight after a hard reload.
+ *
+ * The fix gates every session-dependent slot on `!isLoading` in NavBar.tsx. A
+ * future edit that removes or bypasses that gate would re-introduce the flash
+ * where authenticated users briefly see the public CTAs (or vice-versa). This
+ * check catches that regression before it ships.
+ *
+ * Technique: Playwright's route interception holds the /api/session response
+ * indefinitely while the React app is mounted and rendering. That freezes the
+ * component in the isLoading=true state so we can inspect the DOM without a
+ * race against a fast local response.
+ */
+async function runNavFlashCase(
+  browser: Browser,
+  state: "staff admin" | "member",
+  authState: AuthState,
+): Promise<void> {
+  const label = `nav flash — ${state}`;
+  let context: BrowserContext | null = null;
+  try {
+    context = await browser.newContext({
+      // Desktop width; both mobile and desktop gate on the same isLoading flag
+      // but a single width is sufficient to confirm the guard is present.
+      viewport: { width: 1280, height: VIEWPORT_HEIGHT },
+      storageState: authState,
+    });
+    const page = await context.newPage();
+
+    // Hold /api/session until we have inspected the loading-window DOM.
+    let releaseSession!: () => void;
+    const sessionHeld = new Promise<void>((resolve) => {
+      releaseSession = resolve;
+    });
+
+    let signalRequestReceived!: () => void;
+    const requestReceived = new Promise<void>((resolve) => {
+      signalRequestReceived = resolve;
+    });
+
+    await page.route("**/api/session", async (route) => {
+      // Tell the test that the app has issued its session fetch (isLoading=true).
+      signalRequestReceived();
+      // Block here until the test has finished its loading-window assertions.
+      await sessionHeld;
+      await route.continue();
+    });
+
+    // Navigate; the app mounts and immediately fires the session fetch.
+    await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
+
+    // Wait until the intercept has fired, confirming isLoading=true.
+    await requestReceived;
+
+    // ── Assert: nothing session-dependent is visible during loading ─────────
+    //
+    // Public CTAs (PROVIDE AN ITEM, VOLUNTEER teal buttons):
+    //   showMemberLogin = !isLoading && !authenticated  →  false while loading
+    assertThat(
+      (await page.locator(".site-nav .site-nav-btn-cta:visible").count()) === 0,
+      `${label}: teal CTA buttons (PROVIDE AN ITEM / VOLUNTEER) are visible during the session loading window.`,
+    );
+    // MEMBER LOGIN link (unauthenticated-only):
+    assertThat(
+      (await page.locator(".site-nav a[href='/login']:visible").count()) === 0,
+      `${label}: MEMBER LOGIN link is visible during the session loading window.`,
+    );
+    // DASHBOARD link (authenticated-only):
+    //   showDashboard = !isLoading && authenticated && memberships ≥ 1
+    assertThat(
+      (await page.locator(".site-nav a[href='/dashboard']:visible").count()) === 0,
+      `${label}: DASHBOARD link is visible during the session loading window.`,
+    );
+    // ADMIN link (staff-authenticated-only):
+    //   showAdmin = !isLoading && staffRole != null
+    assertThat(
+      (await page.locator(".site-nav a[href='/admin/organizations']:visible").count()) === 0,
+      `${label}: ADMIN link is visible during the session loading window.`,
+    );
+    // User menu chip (authenticated-only):
+    //   showUserMenu = !isLoading && authenticated
+    assertThat(
+      (await page.locator(".site-nav-user-trigger:visible").count()) === 0,
+      `${label}: user menu chip is visible during the session loading window.`,
+    );
+
+    // Release the held /api/session response so the session resolves.
+    releaseSession();
+
+    // ── Sanity-check: expected controls appear after session resolves ────────
+    await page.waitForSelector(".site-nav-user-trigger", { state: "attached", timeout: 10_000 });
+    assertThat(
+      (await page.locator(".site-nav-user-trigger:visible").count()) === 1,
+      `${label}: user menu not visible after the session resolved.`,
+    );
+    assertThat(
+      (await page.locator(".site-nav a[href='/login']:visible").count()) === 0,
+      `${label}: MEMBER LOGIN still visible after the session resolved for an authenticated user.`,
+    );
+
+    console.log(`  ✓ ${label}`);
+    passed += 1;
+  } catch (error) {
+    console.error(`  ✗ ${label}`);
+    console.error(`    ${error instanceof Error ? error.message.replace(/\n/g, "\n    ") : String(error)}`);
+    failed += 1;
+  } finally {
+    await context?.close();
+  }
+}
+
 async function main(): Promise<void> {
   console.log("Responsive navigation browser checks");
   console.log(`Base URL: ${BASE_URL}`);
@@ -661,6 +773,12 @@ async function main(): Promise<void> {
     for (const width of WIDTHS) {
       await runCase(browser, "member", width, memberState, fixture.name);
     }
+
+    // Nav-flash regression: verify that no session-dependent slot flashes
+    // during the window between a hard reload and the session query resolving.
+    console.log("\nNav flash regression checks");
+    await runNavFlashCase(browser, "staff admin", staffState);
+    await runNavFlashCase(browser, "member", memberState);
   } finally {
     await browser?.close();
     if (fixture !== null) await cleanupSwitcherFixture(fixture);
