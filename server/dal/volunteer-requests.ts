@@ -399,6 +399,28 @@ export async function getById(ctx: DbContext, requestId: string): Promise<Volunt
   return rows[0] ?? null;
 }
 
+/**
+ * Public-read variant: mirrors itemRequests.getActiveAvailableById. Returns
+ * null for an expired row even when status is still 'active' (the nightly
+ * expiry job can lag), treating it identically to a row that does not exist.
+ */
+export async function getActiveAvailableById(
+  ctx: DbContext,
+  requestId: string,
+): Promise<VolunteerRequest | null> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<VolunteerRequest>(
+      c,
+      `select ${COLS} from volunteer_requests r
+         where r.id = $1
+           and r.status = 'active'
+           and not ${VOLUNTEER_REQUEST_EXPIRED}`,
+      [requestId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
 /** Lookup for legacy Wix 301 redirects. Never used as a foreign key. */
 export async function getByLegacyWixId(ctx: DbContext, legacyWixId: string): Promise<VolunteerRequest | null> {
   const rows = await withDbContext(ctx, (c) =>

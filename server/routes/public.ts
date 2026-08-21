@@ -767,8 +767,8 @@ export function registerPublicRoutes(app: Express): void {
         res.status(404).json(NOT_FOUND_BODY);
         return;
       }
-      const request = await dal.volunteerRequests.getById(PUBLIC, id);
-      if (!request || request.status !== "active") {
+      const request = await dal.volunteerRequests.getActiveAvailableById(PUBLIC, id);
+      if (!request) {
         res.status(404).json(NOT_FOUND_BODY);
         return;
       }
@@ -829,15 +829,14 @@ export function registerPublicRoutes(app: Express): void {
       // and the residual-race note.
       // Review fix: explicit visibility gate (BYPASSRLS role — RLS filters
       // nothing at runtime). See the pledge handler for the full rationale.
-      const gateRequest = await dal.volunteerRequests.getById(PUBLIC, requestId);
+      // getActiveAvailableById re-checks expires_on at read time, so an
+      // expired-but-still-active request is treated as nonexistent — the same
+      // way the detail GET and the item-side pledge handler behave.
+      const gateRequest = await dal.volunteerRequests.getActiveAvailableById(PUBLIC, requestId);
       const gateOrg = gateRequest === null ? null : await dal.organizations.getById(PUBLIC, gateRequest.orgId);
       const orgIsPublic = gateOrg !== null && gateOrg.status === "approved" && gateOrg.kind === "member_org";
       if (gateRequest === null || !orgIsPublic) {
         res.status(404).json(NOT_FOUND_BODY);
-        return;
-      }
-      if (gateRequest.status !== "active") {
-        res.status(410).json({ code: "request_not_active" });
         return;
       }
 

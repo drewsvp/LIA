@@ -158,8 +158,11 @@ async function itemPreview(id: string): Promise<SharePreview | null> {
 
 async function volunteerPreview(id: string): Promise<SharePreview | null> {
   if (!UUID_RE.test(id)) return null;
-  const request = await dal.volunteerRequests.getById(PUBLIC, id);
-  if (!request || request.status !== "active") return null;
+  // Re-check expires_on at read time: the nightly job can lag, so an
+  // expired-but-still-active request must produce the default site card,
+  // not a live preview. Mirrors the detail endpoint and item-preview pattern.
+  const request = await dal.volunteerRequests.getActiveAvailableById(PUBLIC, id);
+  if (!request) return null;
   const org = await dal.organizations.getById(PUBLIC, request.orgId);
   if (!org || org.status !== "approved" || org.kind !== "member_org") return null;
 
