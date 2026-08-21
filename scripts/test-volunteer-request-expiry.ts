@@ -102,6 +102,7 @@ async function main(): Promise<void> {
   if (!actorUserId) throw new Error("expected an active staff admin to approve the fixture request");
 
   let requestId: string | null = null;
+  let extensionRequestId: string | null = null;
   try {
     console.log("\nExpired volunteer request: detail GET and signup POST");
 
@@ -198,17 +199,68 @@ async function main(): Promise<void> {
     });
     const archivedDetail = await getDetail(requestId);
     check(archivedDetail.status === 404, "detail GET returns 404 for an archived (non-active) request");
+
+    console.log("\nDeadline extension restores DAL-level visibility immediately (volunteer)");
+
+    // Create a second fixture with expires_on in the past. This is the same
+    // expiry field the DAL predicate (VOLUNTEER_REQUEST_EXPIRED) actually checks.
+    const extensionDraft = await dal.volunteerRequests.createDraft(ctx, org.id, {
+      title: "zz_fixture expired volunteer need (PB-04 extension)",
+      description: "Temporary row for deadline extension DAL test.",
+      details: "Temporary row for deadline extension DAL test.",
+      expiresOn: laDate(-1), // yesterday — already expired
+    });
+    extensionRequestId = extensionDraft.id;
+    await dal.volunteerRequests.transitionStatus(ctx, { requestId: extensionRequestId, to: "pending", actorUserId });
+    await dal.volunteerRequests.transitionStatus(ctx, { requestId: extensionRequestId, to: "active", actorUserId });
+
+    // The expiry predicate in listActivePublic is evaluated at read time.
+    // An expired-but-active fixture must be absent from the public list.
+    const dalListBefore = await dal.volunteerRequests.listActivePublic(ctx);
+    const dalListBeforeIds = new Set(dalListBefore.map((r) => r.id));
+    check(
+      !dalListBeforeIds.has(extensionRequestId),
+      "listActivePublic (DAL) excludes the expired volunteer fixture before deadline extension",
+    );
+
+    // getActiveAvailableById must return null for the same expired row.
+    const dalDetailBefore = await dal.volunteerRequests.getActiveAvailableById(ctx, extensionRequestId);
+    check(
+      dalDetailBefore === null,
+      "getActiveAvailableById (DAL) returns null for the expired volunteer fixture before extension",
+    );
+
+    // Extend the deadline via updateInTx — the same DAL path member-facing
+    // routes use. No status change, no re-approval: visibility must restore
+    // purely because the predicate re-evaluates expires_on at read time.
+    await dal.volunteerRequests.update(ctx, org.id, extensionRequestId, { expiresOn: laDate(1) });
+
+    // The request must now reappear in the public list.
+    const dalListAfter = await dal.volunteerRequests.listActivePublic(ctx);
+    const dalListAfterIds = new Set(dalListAfter.map((r) => r.id));
+    check(
+      dalListAfterIds.has(extensionRequestId),
+      "listActivePublic (DAL) includes the volunteer fixture immediately after deadline extension",
+    );
+
+    // getActiveAvailableById must return the row once expires_on is in the future.
+    const dalDetailAfter = await dal.volunteerRequests.getActiveAvailableById(ctx, extensionRequestId);
+    check(
+      dalDetailAfter !== null && dalDetailAfter.id === extensionRequestId,
+      "getActiveAvailableById (DAL) returns the row immediately after deadline extension",
+    );
   } finally {
-    if (requestId !== null) {
-      await pool.query(
-        `delete from approval_events where entity_type = 'volunteer_request' and entity_id = $1`,
-        [requestId],
-      );
-      await pool.query(`delete from volunteer_requests where id = $1`, [requestId]);
+    for (const id of [requestId, extensionRequestId]) {
+      if (id !== null) {
+        await pool.query(
+          `delete from approval_events where entity_type = 'volunteer_request' and entity_id = $1`,
+          [id],
+        );
+        await pool.query(`delete from volunteer_requests where id = $1`, [id]);
+      }
     }
     const leftovers = await pool.query<{ count: string }>(
-      `select count(*)::text as count from volunteer_requests where title = $1`,
-      [FIXTURE_TITLE],
+      `select count(*)::text as count from volunteer_requests where title like 'zz_fixture%'`,
     );
     if (Number(leftovers.rows[0]!.count) !== 0) {
       console.error("FAIL: fixture cleanup left a zz_fixture volunteer request behind");
