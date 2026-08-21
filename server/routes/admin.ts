@@ -28,6 +28,7 @@ import {
 } from "../services/email-resend";
 import { MAY_HAVE_SENT_MARKER } from "../email/send";
 import { ENTITY_TYPE_NAMES } from "../../shared/transitions";
+import { getDbRoutineCheckResult } from "../db/startup-checks";
 import { parseProductUrl } from "../../shared/item-product-url";
 
 /** ADMIN-05 §5: lowercase, hyphenated. Shared by add (validation) and promote (generation). */
@@ -326,6 +327,13 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err) {
       next(err);
     }
+  });
+
+  // ---- DB routine health — surfaces the startup check result so staff can
+  // confirm the published database has all required functions and triggers
+  // without reading server logs.
+  app.get("/api/admin/db-health", requireStaff, (_req: Request, res: Response) => {
+    res.json(getDbRoutineCheckResult());
   });
 
   // ---- ADMIN-01 queue tabs.

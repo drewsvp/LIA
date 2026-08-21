@@ -27,7 +27,7 @@ function assert(condition: boolean, label: string, detail = ""): void {
 
 const TRIGGER_NAME = "item_pledges_reject_expired_request";
 const TRIGGER_TABLE = "item_pledges";
-const MIGRATION_FILE = "0044_repair_item_request_expiry_functions.sql";
+const MIGRATION_FILE = "0045_restore_routine_parity.sql";
 
 /**
  * The CREATE TRIGGER statement from migrations/0044 — used to restore the
@@ -100,7 +100,7 @@ async function restore(): Promise<void> {
   } catch (err) {
     console.error(
       "FATAL: could not restore item_pledges_reject_expired_request — run " +
-        "migrations/0044_repair_item_request_expiry_functions.sql manually:",
+        "migrations/0045_restore_routine_parity.sql manually:",
       err,
     );
     process.exitCode = 1;

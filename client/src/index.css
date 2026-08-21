@@ -2507,6 +2507,49 @@ a.site-nav-btn {
   color: #b00020;
 }
 
+/* DB routine health banner — shown when the startup check found missing routines. */
+.adm-nav-alert--db {
+  display: block;
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  background: #fff3cd;
+  border: 1px solid #b8860b;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #7a4f00;
+  line-height: 1.4;
+}
+
+.adm-db-missing-list {
+  margin: 6px 0 4px 0;
+  padding-left: 16px;
+  font-weight: 400;
+  list-style: disc;
+}
+
+.adm-db-missing-list li {
+  margin-bottom: 2px;
+}
+
+.adm-db-missing-list code {
+  font-family: monospace;
+  font-size: 11px;
+  background: rgba(0,0,0,0.06);
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+
+.adm-db-missing-fix {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: monospace;
+  color: #5a3a00;
+  word-break: break-all;
+}
+
 .adm-content {
   flex: 1;
   min-width: 0;

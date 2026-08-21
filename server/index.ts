@@ -12,7 +12,7 @@ import { startEmailSweep } from "./jobs/email-sweep";
 import { startDigestScheduler } from "./jobs/digest";
 import { startImageSweep } from "./jobs/image-sweep";
 import { setupVite, serveStatic } from "./vite";
-import { checkRequiredDbFunctions, checkRequiredDbTriggers } from "./db/startup-checks";
+import { runDbRoutineChecks } from "./db/startup-checks";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -101,17 +101,11 @@ async function start(): Promise<void> {
   startDigestScheduler();
   startImageSweep();
 
-  // Startup check: warn if any required custom DB functions are absent (can
-  // happen after a clean publish that did not replay all migrations).
-  checkRequiredDbFunctions().catch(() => {
-    // Already handled inside checkRequiredDbFunctions; swallow so startup
-    // never aborts due to the check itself.
-  });
-
-  // Startup check: warn if any required custom DB triggers are absent. A
-  // missing trigger silently bypasses its guard (no 500, just bad data).
-  checkRequiredDbTriggers().catch(() => {
-    // Already handled inside checkRequiredDbTriggers; swallow so startup
+  // Startup check: warn (and cache the result for GET /api/admin/db-health)
+  // if any required custom DB functions or triggers are absent. This can
+  // happen after a clean publish that did not replay all migrations.
+  runDbRoutineChecks().catch(() => {
+    // Already handled inside runDbRoutineChecks; swallow so startup
     // never aborts due to the check itself.
   });
 
