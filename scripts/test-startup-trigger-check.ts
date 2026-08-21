@@ -1,10 +1,11 @@
 /**
  * Regression check for the missing-trigger startup warning.
  *
- * Temporarily drops item_pledges_reject_expired_request from the database,
- * runs checkRequiredDbTriggers(), and asserts that console.error was called
- * with the trigger name and the repair migration filename. The trigger is
- * restored in a finally block so the database is never left in a broken state.
+ * For each entry in TRIGGER_CASES, temporarily drops the trigger from the
+ * database, runs checkRequiredDbTriggers(), and asserts that console.error was
+ * called with the trigger name and the repair migration filename. Each trigger
+ * is restored immediately after its case so the database is never left in a
+ * broken state.
  *
  * Usage: NODE_ENV=development npx tsx scripts/test-startup-trigger-check.ts
  * Exit 0 = pass.
@@ -25,26 +26,53 @@ function assert(condition: boolean, label: string, detail = ""): void {
   }
 }
 
-const TRIGGER_NAME = "item_pledges_reject_expired_request";
-const TRIGGER_TABLE = "item_pledges";
-const MIGRATION_FILE = "0045_restore_routine_parity.sql";
+interface TriggerCase {
+  name: string;
+  table: string;
+  migration: string;
+  /** SQL that (re-)creates the trigger after the test drops it. */
+  restoreSql: string;
+}
 
-/**
- * The CREATE TRIGGER statement from migrations/0044 — used to restore the
- * trigger after the test drops it. Must match the canonical definition so
- * pledge inserts continue to be guarded after the test exits.
- */
-const RESTORE_SQL = `
-  drop trigger if exists item_pledges_reject_expired_request on item_pledges;
-  create trigger item_pledges_reject_expired_request
-    before insert on item_pledges
-    for each row execute function reject_expired_item_pledge()
-`;
+const TRIGGER_CASES: TriggerCase[] = [
+  {
+    name: "item_pledges_reject_expired_request",
+    table: "item_pledges",
+    migration: "0045_restore_routine_parity.sql",
+    restoreSql: `
+      drop trigger if exists item_pledges_reject_expired_request on item_pledges;
+      create trigger item_pledges_reject_expired_request
+        before insert on item_pledges
+        for each row execute function reject_expired_item_pledge()
+    `,
+  },
+  {
+    name: "items_guard_counters",
+    table: "items",
+    migration: "0045_restore_routine_parity.sql",
+    restoreSql: `
+      drop trigger if exists items_guard_counters on items;
+      create trigger items_guard_counters
+        before update on items
+        for each row execute function guard_counter_columns()
+    `,
+  },
+  {
+    name: "volunteer_roles_guard_counters",
+    table: "volunteer_roles",
+    migration: "0045_restore_routine_parity.sql",
+    restoreSql: `
+      drop trigger if exists volunteer_roles_guard_counters on volunteer_roles;
+      create trigger volunteer_roles_guard_counters
+        before update on volunteer_roles
+        for each row execute function guard_counter_columns()
+    `,
+  },
+];
 
-async function main(): Promise<void> {
-  console.log("startup-db-check: missing-trigger warning\n");
+async function runCase(tc: TriggerCase): Promise<void> {
+  console.log(`\n--- ${tc.name} on ${tc.table} ---`);
 
-  // Intercept console.error so we can assert on the messages it receives.
   const capturedErrors: string[] = [];
   const realConsoleError = console.error;
   console.error = (...args: unknown[]) => {
@@ -52,36 +80,24 @@ async function main(): Promise<void> {
   };
 
   try {
-    // Remove the trigger so the check sees it as absent.
-    // The underlying reject_expired_item_pledge() function is left in place so
-    // we can recreate the trigger without re-creating its function.
-    await pool.query(
-      `DROP TRIGGER IF EXISTS ${TRIGGER_NAME} ON ${TRIGGER_TABLE}`,
-    );
-
-    // Run the startup check — it should emit a console.error for every absent
-    // trigger it finds, including the one we just dropped.
+    await pool.query(`DROP TRIGGER IF EXISTS ${tc.name} ON ${tc.table}`);
     await checkRequiredDbTriggers();
   } finally {
-    // Restore console.error before asserting so that assert() failures are
-    // printed to the real stderr and visible in the terminal.
     console.error = realConsoleError;
   }
 
   const combined = capturedErrors.join("\n");
-
-  console.log("--- warnings captured ---");
+  console.log("warnings captured:");
   console.log(combined || "(none)");
-  console.log("-------------------------\n");
 
   assert(
-    capturedErrors.some((m) => m.includes(TRIGGER_NAME)),
-    `console.error includes the missing trigger name "${TRIGGER_NAME}"`,
+    capturedErrors.some((m) => m.includes(tc.name)),
+    `console.error includes the missing trigger name "${tc.name}"`,
     combined,
   );
   assert(
-    capturedErrors.some((m) => m.includes(MIGRATION_FILE)),
-    `console.error includes the repair migration filename "${MIGRATION_FILE}"`,
+    capturedErrors.some((m) => m.includes(tc.migration)),
+    `console.error includes the repair migration filename "${tc.migration}"`,
     combined,
   );
   assert(
@@ -90,23 +106,28 @@ async function main(): Promise<void> {
     combined,
   );
 
-  console.log(`\n${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exitCode = 1;
-}
-
-async function restore(): Promise<void> {
+  // Restore immediately so later cases and the application are unaffected.
   try {
-    await pool.query(RESTORE_SQL);
+    await pool.query(tc.restoreSql);
+    console.log(`  (restored ${tc.name})`);
   } catch (err) {
     console.error(
-      "FATAL: could not restore item_pledges_reject_expired_request — run " +
-        "migrations/0045_restore_routine_parity.sql manually:",
+      `FATAL: could not restore ${tc.name} on ${tc.table} — apply the repair migration manually:`,
       err,
     );
     process.exitCode = 1;
-  } finally {
-    await pool.end();
   }
+}
+
+async function main(): Promise<void> {
+  console.log("startup-db-check: missing-trigger warnings\n");
+
+  for (const tc of TRIGGER_CASES) {
+    await runCase(tc);
+  }
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exitCode = 1;
 }
 
 main()
@@ -114,4 +135,4 @@ main()
     console.error(err);
     process.exitCode = 1;
   })
-  .finally(restore);
+  .finally(() => pool.end());
