@@ -297,6 +297,51 @@ async function main(): Promise<void> {
   }
   assert(triggerFired, "item_pledges_reject_expired_request trigger raises request_not_active for an expired need");
 
+  // --- Deadline extension immediately restores public visibility (no re-approval needed) ---
+  // The expiry predicate in listActivePublic and getActiveAvailableById is evaluated at read
+  // time, so extending a past deadline on an active request must restore visibility instantly.
+  const extensionOrgResult = await pool.query<{ id: string }>(`
+    select id from organizations
+     where status = 'approved' and kind = 'member_org'
+     order by created_at
+     limit 1
+  `);
+  const extensionOrgId = extensionOrgResult.rows[0]?.id;
+  if (!extensionOrgId) throw new Error("deadline extension test requires an approved member org");
+
+  const deadlineExtension = await createFixture({
+    title: "deadline extension restores visibility",
+    deadlineType: "date_specific",
+    deadlineDate: yesterday,
+  });
+
+  const beforeExtension = await itemRequests.listActivePublic(SYSTEM);
+  const beforeExtensionIds = new Set(beforeExtension.map((r) => r.id));
+  assert(
+    !beforeExtensionIds.has(deadlineExtension.id),
+    "expired need is absent from listActivePublic before deadline extension",
+  );
+  assert(
+    (await itemRequests.getActiveAvailableById(SYSTEM, deadlineExtension.id)) === null,
+    "getActiveAvailableById returns null for expired need before extension",
+  );
+
+  await withDbContext(SYSTEM, (c) =>
+    itemRequests.updateInTx(c, extensionOrgId, deadlineExtension.id, { deadlineDate: tomorrow }),
+  );
+
+  const afterExtension = await itemRequests.listActivePublic(SYSTEM);
+  const afterExtensionIds = new Set(afterExtension.map((r) => r.id));
+  assert(
+    afterExtensionIds.has(deadlineExtension.id),
+    "extended need reappears in listActivePublic immediately after deadline is pushed to tomorrow",
+  );
+  const reappearedRow = await itemRequests.getActiveAvailableById(SYSTEM, deadlineExtension.id);
+  assert(
+    reappearedRow !== null && reappearedRow.id === deadlineExtension.id,
+    "getActiveAvailableById returns the row immediately after the deadline extension",
+  );
+
   await runExpiryOnce();
   const rows = await pool.query<{ id: string; status: string; archivedReason: string | null }>(
     `select id, status, archived_reason as "archivedReason"
