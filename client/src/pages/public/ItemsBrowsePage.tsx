@@ -18,7 +18,7 @@ type ListPayload = {
     title: string;
     description: string | null;
     imageUrl: string | null;
-    organization: { name: string; slug: string; city: string | null; logoUrl: string | null };
+    organization: { name: string; slug: string; city: string | null };
   }[];
 };
 

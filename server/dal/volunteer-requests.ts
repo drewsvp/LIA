@@ -457,13 +457,12 @@ export async function listActivePublic(ctx: DbContext, orgId?: string): Promise<
     orgMission: string | null;
     orgWebsiteUrl: string | null;
     orgCity: string | null;
-    orgLogoUrl: string | null;
   };
   const rows = await withDbContext(ctx, (c) =>
     q<Row>(
       c,
       `select ${COLS}, o.name as "orgName", o.slug as "orgSlug", o.mission as "orgMission",
-              o.website_url as "orgWebsiteUrl", o.city as "orgCity", o.logo_url as "orgLogoUrl"
+              o.website_url as "orgWebsiteUrl", o.city as "orgCity"
          from volunteer_requests r join organizations o on o.id = r.org_id
         where r.status = 'active' and not ${VOLUNTEER_REQUEST_EXPIRED}
           and o.status = 'approved' and o.kind = 'member_org'
@@ -473,7 +472,7 @@ export async function listActivePublic(ctx: DbContext, orgId?: string): Promise<
     ),
   );
   return rows.map((row) => {
-    const { orgName, orgSlug, orgMission, orgWebsiteUrl, orgCity, orgLogoUrl, ...request } = row;
+    const { orgName, orgSlug, orgMission, orgWebsiteUrl, orgCity, ...request } = row;
     const organization: PublicOrganization = {
       id: request.orgId,
       name: orgName,
@@ -481,7 +480,6 @@ export async function listActivePublic(ctx: DbContext, orgId?: string): Promise<
       mission: orgMission,
       websiteUrl: orgWebsiteUrl,
       city: orgCity,
-      logoUrl: orgLogoUrl,
     };
     return { ...request, organization };
   });

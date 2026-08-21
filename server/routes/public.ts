@@ -133,7 +133,6 @@ export type PublicOrgCard = {
   name: string;
   slug: string;
   city: string | null;
-  logoUrl: string | null;
 };
 
 export type PublicItemRequestListPayload = {
@@ -210,7 +209,6 @@ function toVolunteerListPayload(r: PublicVolunteerRequest): PublicVolunteerReque
       name: r.organization.name,
       slug: r.organization.slug,
       city: r.organization.city,
-      logoUrl: r.organization.logoUrl,
     },
   };
 }
@@ -271,7 +269,6 @@ function toItemListPayload(r: PublicItemRequest): PublicItemRequestListPayload {
       name: r.organization.name,
       slug: r.organization.slug,
       city: r.organization.city,
-      logoUrl: r.organization.logoUrl,
     },
   };
 }

@@ -102,7 +102,7 @@ export async function listApprovedForPublic(ctx: DbContext): Promise<PublicOrgan
   return withDbContext(ctx, (c) =>
     q<PublicOrganization>(
       c,
-      `select id, name, slug, mission, website_url as "websiteUrl", city, logo_url as "logoUrl"
+      `select id, name, slug, mission, website_url as "websiteUrl", city
          from organizations where kind = 'member_org' and status = 'approved' order by name asc`,
     ),
   );

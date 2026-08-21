@@ -101,7 +101,6 @@ export type PublicOrganization = {
   mission: string | null;
   websiteUrl: string | null;
   city: string | null;
-  logoUrl: string | null;
 };
 
 export type OrgMembership = {
