@@ -578,12 +578,13 @@ export function RequestsPage() {
   // isDirty is true only when the form has actually been changed from its
   // initial state, so opening edit mode without touching anything is not dirty.
   const [pendingRowSwitch, setPendingRowSwitch] = useState<{ type: RequestKind; id: string } | null>(null);
+  const [pendingTabSwitch, setPendingTabSwitch] = useState<Tab | null>(null);
   const isDirty =
     editing &&
     editForm !== null &&
     JSON.stringify(editForm) !== JSON.stringify(initialEditFormRef.current);
   const { blocked, confirmLeave, cancelLeave } = useNavigationGuard(isDirty);
-  const showGuardDialog = blocked || pendingRowSwitch !== null;
+  const showGuardDialog = blocked || pendingRowSwitch !== null || pendingTabSwitch !== null;
 
   function handleConfirmLeave() {
     confirmLeave(); // replays any intercepted pushState/replaceState
@@ -598,6 +599,12 @@ export function RequestsPage() {
       setEditing(false);
       setEditForm(null);
       setEditError(null);
+    } else if (pendingTabSwitch) {
+      // Tab-switch case: switch to the deferred tab and reset the panel
+      const next = pendingTabSwitch;
+      setPendingTabSwitch(null);
+      setTab(next);
+      resetPanel();
     } else {
       // Nav-leave case: just clear edit state; the nav replay drives the rest
       setEditing(false);
@@ -609,6 +616,7 @@ export function RequestsPage() {
   function handleCancelLeave() {
     cancelLeave();
     setPendingRowSwitch(null);
+    setPendingTabSwitch(null);
     // Return focus to the edit form so the admin can continue editing
     // without having to click back into it manually.
     setTimeout(() => editFormRef.current?.focus(), 0);
@@ -627,6 +635,10 @@ export function RequestsPage() {
   });
 
   function switchTab(next: Tab) {
+    if (isDirty) {
+      setPendingTabSwitch(next);
+      return;
+    }
     setTab(next);
     resetPanel();
   }
