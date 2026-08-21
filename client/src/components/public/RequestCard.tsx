@@ -5,8 +5,7 @@ import { reportEngagement, type EngagementRequestKind } from "../../lib/engageme
 
 /**
  * Public browse card, shared by PB-01 and PB-03. Both surfaces use a square
- * request image and, where available, a circular organization-logo overlay at
- * its top-left. Title, labels, location source, and button copy remain
+ * request image. Title, labels, location source, and button copy remain
  * surface-specific props. Empty fields hide their line entirely.
  */
 export type RequestCardProps = {
@@ -17,9 +16,8 @@ export type RequestCardProps = {
   description: string | null;
   imageUrl: string | null;
   orgName: string;
-  /** Slug of the requesting organization — links the name/logo to PB-08. */
+  /** Slug of the requesting organization — links the name to PB-08. */
   orgSlug: string;
-  orgLogoUrl: string | null;
   locationLabel: "City" | "Location";
   locationValue: string | null;
   buttonText: string;
@@ -51,7 +49,6 @@ function PlaceholderGraphic(): ReactElement {
 export function RequestCard(props: RequestCardProps): ReactElement {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = props.imageUrl != null && props.imageUrl.trim() !== "" && !imageFailed;
-  const hasLogo = props.orgLogoUrl != null && props.orgLogoUrl.trim() !== "";
   const orgHref = organizationPath(props.orgSlug);
   const labelStyle = {
     color: "var(--color-navy)",
@@ -100,28 +97,6 @@ export function RequestCard(props: RequestCardProps): ReactElement {
             <PlaceholderGraphic />
           )}
         </Link>
-        {hasLogo && (
-          // Links to the organization, NOT the request: no engagement event.
-          <Link
-            href={orgHref}
-            aria-label={`${props.orgName} profile`}
-            style={{ position: "absolute", top: 20, left: 20, display: "block", lineHeight: 0 }}
-          >
-            <img
-              src={props.orgLogoUrl ?? undefined}
-              alt={`${props.orgName} logo`}
-              style={{
-                height: 44,
-                width: 44,
-                borderRadius: "50%",
-                objectFit: "cover",
-                background: "#ffffff",
-                border: "2px solid #ffffff",
-                boxShadow: "var(--shadow-card)",
-              }}
-            />
-          </Link>
-        )}
       </div>
       {props.titleVariant === "bar" ? (
         <h3

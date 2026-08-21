@@ -98,7 +98,6 @@ export function ItemsBrowsePage(): ReactElement {
                 imageUrl={r.imageUrl}
                 orgName={r.organization.name}
                 orgSlug={r.organization.slug}
-                orgLogoUrl={r.organization.logoUrl}
                 locationLabel="City"
                 locationValue={r.organization.city}
                 buttonText="Learn More / View Details"

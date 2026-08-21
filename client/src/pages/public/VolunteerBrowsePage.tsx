@@ -98,7 +98,6 @@ export function VolunteerBrowsePage(): ReactElement {
                 imageUrl={r.imageUrl}
                 orgName={r.organization.name}
                 orgSlug={r.organization.slug}
-                orgLogoUrl={r.organization.logoUrl}
                 locationLabel="Location"
                 locationValue={r.eventLocation}
                 buttonText="Learn More / View Roles"

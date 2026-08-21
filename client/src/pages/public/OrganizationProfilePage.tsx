@@ -132,7 +132,6 @@ export function OrganizationProfilePage(): ReactElement {
                       imageUrl={r.imageUrl}
                       orgName={r.organization.name}
                       orgSlug={r.organization.slug}
-                      orgLogoUrl={r.organization.logoUrl}
                       locationLabel="City"
                       locationValue={r.organization.city}
                       buttonText="Learn More / View Details"
@@ -158,7 +157,6 @@ export function OrganizationProfilePage(): ReactElement {
                       imageUrl={r.imageUrl}
                       orgName={r.organization.name}
                       orgSlug={r.organization.slug}
-                      orgLogoUrl={r.organization.logoUrl}
                       locationLabel="Location"
                       locationValue={r.eventLocation}
                       buttonText="Learn More / View Roles"
