@@ -182,3 +182,31 @@ mtime_ms = 1787292020282
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/68890ad8-b280-4b13-9414-4206c88e3d57/09a4b809-0003-47f4-aaf7-9f5484028bfc"
 storage_version_token = "1787292103184665"
 content_type = "image/gif"
+
+[[outputs]]
+id = "Kv4GuDuGWo6zITI0r6Jwp"
+uri = "file://attached_assets/generated_media/donor-profile-scroll-iphone.gif"
+type = "image"
+title = "Donor profile — iPhone very slow scroll"
+description = "Drew Hayes's supporter profile at /profile, captured signed in at iPhone 15 size (393x852, retina): volunteer interests and alert preference, ten recently viewed needs, four item donations, two volunteer signups. 472 frames at 12 fps, about 110 pixels per second — roughly 39 seconds top to bottom."
+logical_id = "c9574bd0-6a84-4a23-9d89-d30ce31c49ba"
+content_hash = "sha256:3fa8004be140ae838db4bd5b5c158f700a6fcef3fcffe1122f6b5f6bb86d5487"
+size = 21718533
+mtime_ms = 1787293739577
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/c9574bd0-6a84-4a23-9d89-d30ce31c49ba/13577eaf-b870-4f56-b98b-91a33682d9a2"
+storage_version_token = "1787293778972996"
+content_type = "image/gif"
+
+[[outputs]]
+id = "ciJvoKX5O7E5fjUBnBKfW"
+uri = "file://attached_assets/generated_media/donor-profile-scroll-desktop.gif"
+type = "image"
+title = "Donor profile — desktop very slow scroll"
+description = "Drew Hayes's supporter profile at /profile, captured signed in at desktop size (1440x900): volunteer interests in a two-column grid, the alert preference, ten recently viewed needs, four item donations, two volunteer signups. 324 frames at 12 fps, about 105 pixels per second — roughly 27 seconds top to bottom."
+logical_id = "b91fd786-7c3c-4e5b-8ad7-85556f1cea59"
+content_hash = "sha256:35fb64b8692f4f0b239fe6dcf827225eedf507b9d9ca16b0f8d6a1e165f05163"
+size = 13057550
+mtime_ms = 1787315050618
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:1fa707d9-1a0a-408b-8c94-c8c14ac65531/b91fd786-7c3c-4e5b-8ad7-85556f1cea59/fedae943-c1bd-463b-ab34-db3f9560f96b"
+storage_version_token = "1787315072027868"
+content_type = "image/gif"
