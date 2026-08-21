@@ -1980,6 +1980,123 @@ async function main(): Promise<void> {
     JSON.stringify({ status: nullDescFilledEdit.status, stored: nullDescCheck.rows[0] }),
   );
 
+  // ── Null-description roles (pre-migration legacy rows) ──────────────────────
+  // Seed a pending volunteer request whose roles have NULL description — the
+  // shape that pre-dates the required-details migration. Verify that blank
+  // descriptions are still rejected and that filling them all in succeeds.
+  const nullDescVolunteerRequest = await pool.query<{ id: string }>(
+    `insert into volunteer_requests
+       (org_id, title, description, details, event_location, people_helped, deadline_type,
+        contact_person_id, status, submitted_at)
+      values ($1, $2, 'Null-role-desc fixture', 'Some details', 'Some location', 2, 'ongoing',
+              $3, 'pending', now())
+     returning id`,
+    [orgId, `${marker} null-role-desc`, contactId],
+  );
+  const nullRoleDescId = nullDescVolunteerRequest.rows[0]!.id;
+  requestIds.push(nullRoleDescId);
+  await pool.query(
+    `insert into approval_events (entity_type, entity_id, from_status, to_status, note)
+     values ('volunteer_request', $1, 'draft', 'pending', $2)`,
+    [nullRoleDescId, marker],
+  );
+  const nullDescRoles = await pool.query<{ id: string }>(
+    `insert into volunteer_roles
+       (volunteer_request_id, name, description, quantity_needed, sort_order)
+     values ($1, 'Role A', NULL, 2, 0), ($1, 'Role B', NULL, 3, 1)
+     returning id`,
+    [nullRoleDescId],
+  );
+  const nullDescRoleIdA = nullDescRoles.rows[0]!.id;
+  const nullDescRoleIdB = nullDescRoles.rows[1]!.id;
+
+  // A blank role description must still return 400 with a named field error.
+  const blankRoleDescEdit = await request(staff, `/api/admin/requests/volunteer/${nullRoleDescId}/edit`, {
+    title: `${marker} null-role-desc corrected`,
+    description: "Corrected volunteer description",
+    details: "Corrected details",
+    eventLocation: "Some location",
+    contactFirstName: "Corrected",
+    contactLastName: "Contact",
+    contactEmail: `${marker}@example.invalid`,
+    contactPhone: "555-0100",
+    deadlineType: "ongoing",
+    deadlineDate: null,
+    peopleHelped: 2,
+    categoryIds: [volunteerCategoryId],
+    children: [
+      {
+        id: nullDescRoleIdA,
+        name: "Role A",
+        description: "",
+        quantityNeeded: 2,
+      },
+      {
+        id: nullDescRoleIdB,
+        name: "Role B",
+        description: "B filled in",
+        quantityNeeded: 3,
+      },
+    ],
+  });
+  const blankRoleDescBody = (await blankRoleDescEdit.json()) as { message?: string };
+  assert(
+    blankRoleDescEdit.status === 400 &&
+      blankRoleDescBody.message?.includes("Role 1") === true &&
+      blankRoleDescBody.message?.includes("description") === true,
+    "blank role description on a null-description volunteer request is rejected with a named field error",
+    blankRoleDescBody.message,
+  );
+
+  // Filling in all descriptions must succeed (200) and persist to the DB.
+  const nullRoleDescFilledEdit = await request(staff, `/api/admin/requests/volunteer/${nullRoleDescId}/edit`, {
+    title: `${marker} null-role-desc corrected`,
+    description: "Corrected volunteer description",
+    details: "Corrected details",
+    eventLocation: "Some location",
+    contactFirstName: "Corrected",
+    contactLastName: "Contact",
+    contactEmail: `${marker}@example.invalid`,
+    contactPhone: "555-0100",
+    deadlineType: "ongoing",
+    deadlineDate: null,
+    peopleHelped: 2,
+    categoryIds: [volunteerCategoryId],
+    children: [
+      {
+        id: nullDescRoleIdA,
+        name: "Role A filled",
+        description: "A description filled in",
+        quantityNeeded: 2,
+      },
+      {
+        id: nullDescRoleIdB,
+        name: "Role B filled",
+        description: "B description filled in",
+        quantityNeeded: 3,
+      },
+    ],
+  });
+  const nullRoleDescCheck = await pool.query<{
+    descriptions: (string | null)[];
+    requestStatus: string;
+  }>(
+    `select array_agg(vr.description order by vr.sort_order) as descriptions,
+            r.status as "requestStatus"
+       from volunteer_roles vr
+       join volunteer_requests r on r.id = vr.volunteer_request_id
+      where vr.volunteer_request_id = $1
+      group by r.status`,
+    [nullRoleDescId],
+  );
+  assert(
+    nullRoleDescFilledEdit.ok &&
+      nullRoleDescCheck.rows[0]?.requestStatus === "pending" &&
+      nullRoleDescCheck.rows[0]?.descriptions.every((d) => d !== null && d !== "") === true,
+    "staff edit succeeds on a pending volunteer request whose roles had null descriptions",
+    JSON.stringify({ status: nullRoleDescFilledEdit.status, stored: nullRoleDescCheck.rows[0] }),
+  );
+
   await pool.query(`update item_requests set status = 'archived' where id = $1`, [liveItemRequestId]);
   await pool.query(`update volunteer_requests set status = 'archived' where id = $1`, [liveVolunteerRequestId]);
   const archivedItemEdit = await request(
