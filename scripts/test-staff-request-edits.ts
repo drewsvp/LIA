@@ -1855,6 +1855,131 @@ async function main(): Promise<void> {
     }),
   );
 
+  // ── Null-description items (pre-migration legacy rows) ──────────────────────
+  // Seed a pending item request whose items have NULL description and NULL
+  // condition — the shape that caused a silent 500 before the counter-trigger
+  // fix. Verify that blank descriptions are still rejected, and that filling
+  // them in succeeds end-to-end via HTTP.
+  const nullDescRequest = await pool.query<{ id: string }>(
+    `insert into item_requests
+       (org_id, title, description, dropoff_location, people_helped, deadline_type,
+        contact_person_id, status, submitted_at)
+      values ($1, $2, 'Null-description fixture', 'Some dropoff', 1, 'ongoing',
+              $3, 'pending', now())
+     returning id`,
+    [orgId, `${marker} null-desc`, contactId],
+  );
+  const nullDescId = nullDescRequest.rows[0]!.id;
+  requestIds.push(nullDescId);
+  await pool.query(
+    `insert into approval_events (entity_type, entity_id, from_status, to_status, note)
+     values ('item_request', $1, 'draft', 'pending', $2)`,
+    [nullDescId, marker],
+  );
+  const nullDescItems = await pool.query<{ id: string }>(
+    `insert into items
+       (item_request_id, name, description, condition, quantity_requested, sort_order)
+     values ($1, 'Widget A', NULL, NULL, 3, 0), ($1, 'Widget B', NULL, NULL, 5, 1)
+     returning id`,
+    [nullDescId],
+  );
+  const nullDescItemIdA = nullDescItems.rows[0]!.id;
+  const nullDescItemIdB = nullDescItems.rows[1]!.id;
+
+  // Submitting a blank description must still return 400 with a clear message.
+  const blankDescEdit = await request(staff, `/api/admin/requests/item/${nullDescId}/edit`, {
+    title: `${marker} null-desc corrected`,
+    description: "Corrected request description",
+    contactFirstName: "Corrected",
+    contactLastName: "Contact",
+    contactEmail: `${marker}@example.invalid`,
+    contactPhone: "555-0100",
+    deadlineType: "ongoing",
+    deadlineDate: null,
+    peopleHelped: 1,
+    dropoffLocation: "Some dropoff",
+    children: [
+      {
+        id: nullDescItemIdA,
+        name: "Widget A",
+        description: "",
+        condition: "new",
+        productUrl: null,
+        quantityRequested: 3,
+      },
+      {
+        id: nullDescItemIdB,
+        name: "Widget B",
+        description: "B filled in",
+        condition: "any",
+        productUrl: null,
+        quantityRequested: 5,
+      },
+    ],
+  });
+  const blankDescBody = (await blankDescEdit.json()) as { message?: string };
+  assert(
+    blankDescEdit.status === 400 &&
+      blankDescBody.message?.includes("Item 1") === true &&
+      blankDescBody.message?.includes("description") === true,
+    "blank item description on a null-description request is rejected with a named field error",
+    blankDescBody.message,
+  );
+
+  // Filling in all descriptions must succeed (200) and persist to the DB.
+  const nullDescFilledEdit = await request(staff, `/api/admin/requests/item/${nullDescId}/edit`, {
+    title: `${marker} null-desc corrected`,
+    description: "Corrected request description",
+    contactFirstName: "Corrected",
+    contactLastName: "Contact",
+    contactEmail: `${marker}@example.invalid`,
+    contactPhone: "555-0100",
+    deadlineType: "ongoing",
+    deadlineDate: null,
+    peopleHelped: 1,
+    dropoffLocation: "Some dropoff",
+    children: [
+      {
+        id: nullDescItemIdA,
+        name: "Widget A filled",
+        description: "A description filled in",
+        condition: "new",
+        productUrl: null,
+        quantityRequested: 3,
+      },
+      {
+        id: nullDescItemIdB,
+        name: "Widget B filled",
+        description: "B description filled in",
+        condition: "any",
+        productUrl: null,
+        quantityRequested: 5,
+      },
+    ],
+  });
+  const nullDescCheck = await pool.query<{
+    descriptions: (string | null)[];
+    conditions: (string | null)[];
+    requestStatus: string;
+  }>(
+    `select array_agg(i.description order by i.sort_order) as descriptions,
+            array_agg(i.condition order by i.sort_order) as conditions,
+            r.status as "requestStatus"
+       from items i
+       join item_requests r on r.id = i.item_request_id
+      where i.item_request_id = $1
+      group by r.status`,
+    [nullDescId],
+  );
+  assert(
+    nullDescFilledEdit.ok &&
+      nullDescCheck.rows[0]?.requestStatus === "pending" &&
+      nullDescCheck.rows[0]?.descriptions.every((d) => d !== null && d !== "") === true &&
+      nullDescCheck.rows[0]?.conditions.every((c) => c !== null) === true,
+    "staff edit succeeds on a pending request whose items had null description and condition",
+    JSON.stringify({ status: nullDescFilledEdit.status, stored: nullDescCheck.rows[0] }),
+  );
+
   await pool.query(`update item_requests set status = 'archived' where id = $1`, [liveItemRequestId]);
   await pool.query(`update volunteer_requests set status = 'archived' where id = $1`, [liveVolunteerRequestId]);
   const archivedItemEdit = await request(
