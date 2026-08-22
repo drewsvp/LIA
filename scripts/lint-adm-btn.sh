@@ -101,3 +101,47 @@ if [ -n "$VIOLATIONS" ]; then
 fi
 
 echo "lint-adm-btn: OK — all adm-btn-outline usages correctly pair with adm-btn."
+echo ""
+
+# ---------------------------------------------------------------------------
+# CSS structure check — verify .adm-btn and .adm-btn-outline share a selector.
+#
+# If the two classes are split back into separate rules, .adm-btn-outline will
+# silently lose the shared border/font/padding/cursor/border-radius styles.
+# ---------------------------------------------------------------------------
+CSS_FILE="client/src/index.css"
+echo "lint-adm-btn CSS check ($CSS_FILE):"
+
+if [ ! -f "$CSS_FILE" ]; then
+  echo "  ERROR: $CSS_FILE not found."
+  exit 1
+fi
+
+# Collapse the file (newlines → spaces) so a multi-line selector like
+#   .adm-btn,
+#   .adm-btn-outline {
+# becomes a single searchable string.
+COLLAPSED=$(tr '\n' ' ' < "$CSS_FILE")
+
+# Match a combined selector in either order.
+# (?!-) prevents .adm-btn from matching .adm-btn-outline / .adm-btn-sm etc.
+# [^{]* stops at the opening brace so we don't stray into the next rule.
+CSS_OK=0
+if printf '%s' "$COLLAPSED" | grep -qP '\.adm-btn(?!-)[^{]*,\s*\.adm-btn-outline[^{]*\{'; then
+  CSS_OK=1
+elif printf '%s' "$COLLAPSED" | grep -qP '\.adm-btn-outline[^{]*,\s*\.adm-btn(?!-)[^{]*\{'; then
+  CSS_OK=1
+fi
+
+if [ "$CSS_OK" -eq 1 ]; then
+  echo "  PASS: .adm-btn and .adm-btn-outline share a combined selector."
+else
+  echo "  FAIL: .adm-btn and .adm-btn-outline are no longer in a combined selector."
+  echo "  They must share a rule (e.g. '.adm-btn, .adm-btn-outline { ... }') so"
+  echo "  .adm-btn-outline inherits the shared border / font / padding / cursor styles."
+  echo "  Restore the combined selector in $CSS_FILE."
+  exit 1
+fi
+
+echo ""
+echo "lint-adm-btn: OK — CSS combined-selector check passed."
