@@ -382,6 +382,23 @@ export function EmailLogPage(): ReactElement {
                       sandbox="allow-same-origin"
                       style={{ width: "100%", height: 480, border: "1px solid #ccc", background: "#fff" }}
                     />
+                    <button
+                      type="button"
+                      className="adm-link-btn adm-preview-newtab"
+                      onClick={() => {
+                        const blob = new Blob([previewData.html], { type: "text/html" });
+                        const url = URL.createObjectURL(blob);
+                        const tab = window.open(url, "_blank", "noopener,noreferrer");
+                        // Revoke after the tab has had time to load
+                        if (tab) {
+                          tab.addEventListener("load", () => URL.revokeObjectURL(url), { once: true });
+                        } else {
+                          setTimeout(() => URL.revokeObjectURL(url), 10_000);
+                        }
+                      }}
+                    >
+                      Open in new tab ↗
+                    </button>
                   </>
                 )}
               </div>
