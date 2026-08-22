@@ -485,7 +485,13 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
   if (missing.length > 0) {
     throw new EmailConfigError(`${template.key}: unresolved variable(s): ${missing.join(", ")}`);
   }
-  const rendered = template.render(input.vars as never, effectiveCopy(input.key, override));
+  let rendered: ReturnType<typeof template.render>;
+  try {
+    rendered = template.render(input.vars as never, effectiveCopy(input.key, override));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new EmailConfigError(`${template.key}: render failed: ${msg}`);
+  }
   const leftovers = leftoverPlaceholders(input.vars, rendered);
   if (leftovers.length > 0) {
     throw new EmailConfigError(`${template.key}: literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
