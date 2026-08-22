@@ -19,6 +19,7 @@
     "test:public-org-profile": "tsx scripts/test-public-org-profile.ts",
     "test:admin-styles": "tsx scripts/test-admin-styles.ts",
     "test:request-engagement": "tsx scripts/test-request-engagement.ts",
+    "test:email-editor-close-scroll": "tsx scripts/test-email-editor-close-scroll.ts",
     "test:request-engagement-ui": "tsx scripts/test-request-engagement-ui.ts",
     "test:request-outreach": "tsx scripts/test-request-outreach.ts",
     "test:share-preview": "tsx scripts/test-share-preview.ts",
