@@ -133,6 +133,7 @@ async function main(): Promise<void> {
   const PARTIAL_VARS_EMAIL = "zz.preview-partial-vars@example.test";
   const EMPTY_VAL_EMAIL = "zz.preview-empty-val@example.test";
   const LEFTOVER_EMAIL = "zz.preview-leftover@example.test";
+  const RENDER_THROW_EMAIL = "zz.preview-render-throw@example.test";
 
   // Fictitious entity IDs using a reserved nil-prefix UUID block (ffff) that
   // will never exist in real data, so the once-only index can't collide.
@@ -141,6 +142,7 @@ async function main(): Promise<void> {
   const ENTITY_ID_PARTIAL = "00000000-0000-0000-ffff-000000000104";
   const ENTITY_ID_EMPTY_VAL = "00000000-0000-0000-ffff-000000000105";
   const ENTITY_ID_LEFTOVER = "00000000-0000-0000-ffff-000000000106";
+  const ENTITY_ID_RENDER_THROW = "00000000-0000-0000-ffff-000000000107";
 
   // org_approved required vars: organizationName, organizationPrimaryContact,
   // organizationPrimaryContactEmail, dashboardUrl
@@ -162,8 +164,8 @@ async function main(): Promise<void> {
   await pool.query(
     `delete from email_log
       where to_email = any($1::text[])
-        and (payload->>'zz_fixture')::boolean is true`,
-    [[PRODUCT_EMAIL, AUTH_EMAIL, EMPTY_VARS_EMAIL, PARTIAL_VARS_EMAIL, EMPTY_VAL_EMAIL, LEFTOVER_EMAIL]],
+        and payload->'zz_fixture' = 'true'::jsonb`,
+    [[PRODUCT_EMAIL, AUTH_EMAIL, EMPTY_VARS_EMAIL, PARTIAL_VARS_EMAIL, EMPTY_VAL_EMAIL, LEFTOVER_EMAIL, RENDER_THROW_EMAIL]],
   );
 
   let productRowId: string;
@@ -172,6 +174,7 @@ async function main(): Promise<void> {
   let partialVarsRowId: string;
   let emptyValRowId: string;
   let leftoverVarRowId: string;
+  let renderThrowRowId: string;
 
   // Insert all six rows in a single transaction.
   const client = await pool.connect();
@@ -301,6 +304,42 @@ async function main(): Promise<void> {
     leftoverVarRowId = r6.id;
     insertedIds.push(r6.id);
 
+    // donor_item_confirmation row where all required fields are present and
+    // non-empty (so unresolvedVariables passes) but vars.items is a non-empty
+    // array of plain strings rather than {name, quantity} objects. itemsTable
+    // calls escapeHtml(r.name) where r.name is undefined, causing a TypeError
+    // inside template.render(). The endpoint must catch this and return
+    // previewUnavailable with the error message in reason.
+    const r7 = await emailLog.insertQueuedInTx(client, {
+      templateKey: "donor_item_confirmation",
+      toEmail: RENDER_THROW_EMAIL,
+      entityType: "item_pledge",
+      entityId: ENTITY_ID_RENDER_THROW,
+      payload: {
+        zz_fixture: true,
+        vars: {
+          donorName: "Fixture Donor",
+          organizationName: "Fixture RenderThrow Org",
+          requestContactName: "Fixture Contact",
+          requestContactEmail: "contact@fixture.test",
+          requestContactPhone: null,
+          requestName: "Fixture Request",
+          requestDescription: null,
+          requestDeadlineType: "Ongoing",
+          requestDeadlineDate: null,
+          dropoffLocation: null,
+          requestUrl: "https://fixture.test/request",
+          // non-empty array passes unresolvedVariables, but the elements are
+          // plain strings rather than {name, quantity} objects — itemsTable
+          // calls escapeHtml(r.name) on each element, where .name is undefined,
+          // causing a TypeError inside render().
+          items: ["not-a-valid-item"],
+        },
+      },
+    });
+    renderThrowRowId = r7.id;
+    insertedIds.push(r7.id);
+
     await client.query("commit");
   } catch (err) {
     await client.query("rollback").catch(() => undefined);
@@ -410,6 +449,27 @@ async function main(): Promise<void> {
   assert(
     r6body?.subject === undefined && r6body?.html === undefined,
     "1f: no subject or html fields on unavailable response",
+  );
+
+  // 1g. Product template row that passes all pre-render gates (unresolvedVariables
+  // and leftoverPlaceholders checks are never reached) but causes template.render()
+  // to throw at runtime. vars.items is a non-empty array (passes unresolvedVariables)
+  // but contains plain strings rather than {name, quantity} objects — itemsTable
+  // calls escapeHtml(r.name) where r.name is undefined, throwing a TypeError.
+  // The endpoint's try/catch must intercept this and return a graceful response
+  // with HTTP 200, previewUnavailable: true, and the error text in reason.
+  const r7res = await apiGet(`/api/admin/email/${renderThrowRowId}/preview`, cookieHeader);
+  const r7body = r7res.body as Record<string, unknown> | null;
+  assert(r7res.status === 200, "1g: HTTP 200 when render() throws (not a 500)");
+  assert(r7body?.previewUnavailable === true, "1g: previewUnavailable: true when render() throws");
+  assert(
+    typeof r7body?.reason === "string" && (r7body.reason as string).length > 0,
+    "1g: reason is a non-empty string containing the error text",
+    r7body?.reason,
+  );
+  assert(
+    r7body?.subject === undefined && r7body?.html === undefined,
+    "1g: no subject or html fields on render-throw response",
   );
 
   // ── Section 2: Browser panel checks (Playwright) ──────────────────────────
