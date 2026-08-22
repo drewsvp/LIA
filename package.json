@@ -36,6 +36,7 @@
     "test:magic-link-finalize-throw": "tsx scripts/test-magic-link-finalize-throw.ts",
     "test:magic-link-http-error": "tsx scripts/test-magic-link-http-error.ts",
     "test:magic-link-rate-limit-failure": "tsx scripts/test-magic-link-rate-limit-failure.ts",
+    "test:login-error-ui": "tsx scripts/test-login-error-ui.ts",
     "test:staff-admin-access": "tsx scripts/test-staff-admin-access.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",
     "db:seed": "tsx server/db/seed.ts",
