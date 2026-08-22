@@ -5,7 +5,7 @@
  * Section 1 — API endpoint checks (fetch + DAL, no browser):
  *   1a. Product template row with valid payload.vars → { subject, html } non-empty
  *   1b. auth_magic_link row → { previewUnavailable: true, reason mentions single-use tokens }
- *   1c. Product template row with missing payload.vars → { previewUnavailable: true }
+ *   1c. Product template row with missing payload.vars → { previewUnavailable: true, reason mentions vars/variable }
  *   1d. Product template row whose payload.vars omits one required field → previewUnavailable, reason names the missing var
  *   1e. Product template row whose payload.vars has all required fields but one is an empty string → previewUnavailable
  *   1f. Product template row whose payload.vars has an extra key whose name appears as a literal {token} in the rendered
@@ -19,7 +19,7 @@
  *   2c. Clicking a partial-vars row renders the unavailable message naming the missing var
  *   2d. Clicking an empty-string-var row renders the unavailable message naming the offending var
  *   2e. Clicking a no-vars row (payload.vars absent entirely) renders the unavailable message
- *       with a non-empty reason and no subject/iframe
+ *       that mentions vars/variable (actionable for staff) and no subject/iframe
  *
  * Usage:
  *   npm run test:email-preview-panel
@@ -392,8 +392,9 @@ async function main(): Promise<void> {
   assert(r3res.status === 200, "1c: HTTP 200 for row with missing payload.vars");
   assert(r3body?.previewUnavailable === true, "1c: previewUnavailable: true for missing vars");
   assert(
-    typeof r3body?.reason === "string" && (r3body.reason as string).length > 0,
-    "1c: reason is a non-empty string",
+    typeof r3body?.reason === "string" &&
+      /var(iable)?s?/i.test(r3body.reason as string),
+    "1c: reason mentions vars/variable so staff know what is missing",
     r3body?.reason,
   );
 
@@ -696,9 +697,9 @@ async function main(): Promise<void> {
           );
           const mutedMsg = previewPanel.locator("p.adm-muted");
           const msgText = (await mutedMsg.textContent()) ?? "";
-          if (msgText.trim().length === 0) {
+          if (!/var(iable)?s?/i.test(msgText)) {
             throw new Error(
-              `Expected a non-empty unavailable reason, got empty string`,
+              `Expected unavailable reason mentioning vars/variable so staff can act, got: ${JSON.stringify(msgText)}`,
             );
           }
 
