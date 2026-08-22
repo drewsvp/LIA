@@ -320,7 +320,8 @@ export function registerRoutes(app: Express): void {
     // Better Auth's HTTP rate limit, so the budget is enforced here. Throttled
     // requests got the same 200 above and simply do not dispatch.
     const normalized = email.trim().toLowerCase();
-    if (!magicLinkIpLimiter.consume(req.ip ?? "unknown") || !magicLinkEmailLimiter.consume(normalized)) {
+    const ip = req.ip ?? "unknown";
+    if (!magicLinkIpLimiter.consume(ip) || !magicLinkEmailLimiter.consume(normalized)) {
       return;
     }
     void auth.api
@@ -329,6 +330,12 @@ export function registerRoutes(app: Express): void {
         headers: new Headers({ "content-type": "application/json" }),
       })
       .catch((err: unknown) => {
+        // Server-side failures (broken template, provider outage, etc.) must not
+        // count against the user's rate-limit window. The email was never
+        // delivered, so charging the slot would lock a real user out for the
+        // full 15-minute window during an incident. Refund both counters.
+        magicLinkIpLimiter.unconsume(ip);
+        magicLinkEmailLimiter.unconsume(normalized);
         // Send failures (config, provider) are recorded in email_log and here.
         console.error("magic-link request failed:", err);
       });

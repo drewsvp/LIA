@@ -19,11 +19,6 @@ export class FixedWindowLimiter {
     private readonly windowMs: number,
   ) {}
 
-  /** Reset all buckets. Development/test use only. */
-  resetAll(): void {
-    this.buckets.clear();
-  }
-
   /** Consume one unit for `key`; false when the key is over budget in the current window. */
   consume(key: string): boolean {
     const now = Date.now();
@@ -35,6 +30,31 @@ export class FixedWindowLimiter {
     }
     bucket.count += 1;
     return bucket.count <= this.limit;
+  }
+
+  /**
+   * Return one unit to `key`'s bucket, undoing a prior consume() call.
+   *
+   * Used by the magic-link dispatch path to refund a slot when the send fails
+   * due to a server-side error (broken template, provider outage, etc.). Without
+   * the refund, every failed attempt counts against the user's window even
+   * though no email was ever delivered, which can lock a real user out for the
+   * full 15-minute window during an incident.
+   *
+   * Safety: the count floor is 0 — unconsume() on a fresh or already-zero
+   * bucket is a no-op. The resetAt timestamp is never modified; the window
+   * still expires on its original schedule.
+   */
+  unconsume(key: string): void {
+    const now = Date.now();
+    const bucket = this.buckets.get(key);
+    if (!bucket || bucket.resetAt <= now) return; // window already expired — no-op
+    bucket.count = Math.max(0, bucket.count - 1);
+  }
+
+  /** Reset all buckets. Development/test use only. */
+  resetAll(): void {
+    this.buckets.clear();
   }
 
   /**
