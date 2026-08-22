@@ -67,7 +67,7 @@ function parseCookie(setCookie: string): BrowserCookie {
   return cookie;
 }
 
-async function loginCookie(): Promise<BrowserCookie> {
+async function loginCookieAndHeader(): Promise<{ cookie: BrowserCookie; cookieHeader: string }> {
   const response = await fetch(`${BASE}/api/login/quick`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,7 +83,22 @@ async function loginCookie(): Promise<BrowserCookie> {
   const sessionCookie = values.find((v) => v.includes("session_token"));
   if (!sessionCookie)
     throw new Error("Quick login did not return a session cookie.");
-  return parseCookie(sessionCookie);
+  const [pair] = sessionCookie.split(";");
+  return { cookie: parseCookie(sessionCookie), cookieHeader: pair! };
+}
+
+async function apiGet(path: string, cookieHeader: string): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(`${BASE}${path}`, { headers: { Cookie: cookieHeader } });
+  return { status: res.status, body: await res.json().catch(() => null) };
+}
+
+async function apiPut(path: string, cookieHeader: string, body: unknown): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers: { Cookie: cookieHeader, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json().catch(() => null) };
 }
 
 async function newCtx(
@@ -116,7 +131,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    const cookie = await loginCookie();
+    const { cookie, cookieHeader } = await loginCookieAndHeader();
 
     // ── Case 1: Non-auth row click expands the editor ──────────────────────
     await runCase(
@@ -600,9 +615,29 @@ async function main(): Promise<void> {
     // After clicking "Restore built-in copy", the editor must show the default
     // copy (not the old override), isDirty must be false (no guard on close),
     // and reopening the template must still show the default copy.
-    await runCase(
-      "restoring built-in copy syncs the editor draft and leaves no unsaved-edit guard on close",
-      async () => {
+    //
+    // Snapshot/restore: the test saves an override and then clicks "Restore
+    // built-in copy" (which clears the override). To be non-destructive when a
+    // real staff override already exists, we snapshot the first template's
+    // override state via the API before the test and always restore it after.
+    {
+      // Identify the first non-auth template and record its current copy state.
+      const tmplRes = await apiGet("/api/admin/email-templates", cookieHeader);
+      const templates = ((tmplRes.body as Record<string, unknown> | null)?.templates ?? []) as {
+        key: string;
+        authInfrastructure?: boolean;
+        hasCopyOverride: boolean;
+        copy: { subject: string; heading: string; paragraphs: string[] };
+        recipientsOverride: string | null;
+        recipientsConfigurable: boolean;
+      }[];
+      const firstTemplate = templates.find((t) => !t.authInfrastructure);
+
+      await (async () => {
+        try {
+          await runCase(
+            "restoring built-in copy syncs the editor draft and leaves no unsaved-edit guard on close",
+            async () => {
         const ctx = await newCtx(browser, cookie);
         try {
           const page = await ctx.newPage();
@@ -670,8 +705,36 @@ async function main(): Promise<void> {
         } finally {
           await ctx.close();
         }
-      },
-    );
+          },
+        );
+      } finally {
+        // Always restore the first template's override state so a real staff
+        // edit is not permanently lost if one existed before the test.
+        if (firstTemplate) {
+          if (firstTemplate.hasCopyOverride) {
+            // Re-save the prior override copy.
+            await apiPut(
+              `/api/admin/email-templates/${firstTemplate.key}`,
+              cookieHeader,
+              {
+                copy: firstTemplate.copy,
+                ...(firstTemplate.recipientsConfigurable && firstTemplate.recipientsOverride != null
+                  ? { recipients: firstTemplate.recipientsOverride }
+                  : {}),
+              },
+            );
+          } else {
+            // No prior override — clear any copy the test may have left behind.
+            await apiPut(
+              `/api/admin/email-templates/${firstTemplate.key}`,
+              cookieHeader,
+              { copy: null },
+            );
+          }
+        }
+      }
+    })();
+    }
   } finally {
     await browser.close();
   }
