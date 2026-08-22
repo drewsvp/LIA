@@ -11,6 +11,13 @@
  *      receives a 404 (not the template list).
  *   4. org_owner calling /api/admin/email-templates directly receives a
  *      non-200 response (session treated as unauthenticated staff-admin).
+ *   5. staff_approver calling PUT /api/admin/email-templates/:key (save copy)
+ *      receives a 404 — write endpoint is also guard-blocked.
+ *   6. org_owner calling PUT /api/admin/email-templates/:key receives a 404.
+ *   7. staff_approver calling POST /api/admin/email-templates/:key/enabled
+ *      (toggle on/off) receives a 404.
+ *   8. org_owner calling POST /api/admin/email-templates/:key/enabled receives
+ *      a 404.
  *
  * Usage:
  *   npm run test:email-admin-guard
@@ -67,22 +74,38 @@ function parseCookie(setCookie: string): BrowserCookie {
 type QuickLoginRole = "staff_approver" | "org_owner" | "staff_admin";
 
 async function quickLoginCookie(role: QuickLoginRole): Promise<BrowserCookie> {
-  const response = await fetch(`${BASE}/api/login/quick`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role }),
-  });
-  if (!response.ok)
-    throw new Error(`Quick login as ${role} failed: HTTP ${response.status}`);
-  const getSetCookie = (
-    response.headers as Headers & { getSetCookie?: () => string[] }
-  ).getSetCookie;
-  const values =
-    typeof getSetCookie === "function" ? getSetCookie.call(response.headers) : [];
-  const sessionCookie = values.find((v) => v.includes("session_token"));
-  if (!sessionCookie)
-    throw new Error(`Quick login as ${role} did not return a session cookie.`);
-  return parseCookie(sessionCookie);
+  // Retry up to 4 times with exponential backoff when the quick-login rate
+  // limiter returns 429 (can happen when the test suite is run repeatedly in
+  // a short window during CI or code review).
+  const MAX_ATTEMPTS = 4;
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const response = await fetch(`${BASE}/api/login/quick`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    if (response.ok) {
+      const getSetCookie = (
+        response.headers as Headers & { getSetCookie?: () => string[] }
+      ).getSetCookie;
+      const values =
+        typeof getSetCookie === "function" ? getSetCookie.call(response.headers) : [];
+      const sessionCookie = values.find((v) => v.includes("session_token"));
+      if (!sessionCookie)
+        throw new Error(`Quick login as ${role} did not return a session cookie.`);
+      return parseCookie(sessionCookie);
+    }
+    lastStatus = response.status;
+    if (response.status === 429 && attempt < MAX_ATTEMPTS) {
+      const waitMs = 2_000 * 2 ** (attempt - 1); // 2 s, 4 s, 8 s
+      console.log(`  (rate-limited on quick-login; retrying in ${waitMs / 1000}s…)`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      continue;
+    }
+    break;
+  }
+  throw new Error(`Quick login as ${role} failed: HTTP ${lastStatus}`);
 }
 
 async function newCtx(
@@ -114,13 +137,19 @@ async function main(): Promise<void> {
     executablePath: chromiumExecutable(),
   });
 
+  // Acquire one session cookie per role upfront so every case reuses the same
+  // authenticated session. This avoids hitting the quick-login rate limiter
+  // when running all eight cases in sequence. Logins are sequential so they
+  // don't burst the per-IP limiter simultaneously.
+  const approverCookie = await quickLoginCookie("staff_approver");
+  const ownerCookie = await quickLoginCookie("org_owner");
+
   try {
     // ── Case 1: staff_approver is denied the page in the browser ──────────
     await runCase(
       "staff_approver navigating to /admin/emails sees not-found, not the template table",
       async () => {
-        const cookie = await quickLoginCookie("staff_approver");
-        const ctx = await newCtx(browser, cookie);
+        const ctx = await newCtx(browser, approverCookie);
         try {
           const page = await ctx.newPage();
           await page.goto(`${BASE}/admin/emails`, { waitUntil: "networkidle" });
@@ -150,8 +179,7 @@ async function main(): Promise<void> {
     await runCase(
       "org_owner navigating to /admin/emails sees not-found, not the template table",
       async () => {
-        const cookie = await quickLoginCookie("org_owner");
-        const ctx = await newCtx(browser, cookie);
+        const ctx = await newCtx(browser, ownerCookie);
         try {
           const page = await ctx.newPage();
           await page.goto(`${BASE}/admin/emails`, { waitUntil: "networkidle" });
@@ -184,8 +212,7 @@ async function main(): Promise<void> {
     await runCase(
       "staff_approver calling /api/admin/email-templates receives a 404",
       async () => {
-        const cookie = await quickLoginCookie("staff_approver");
-        const ctx = await newCtx(browser, cookie);
+        const ctx = await newCtx(browser, approverCookie);
         try {
           // Use a browser page so the session cookie is sent with the request
           const page = await ctx.newPage();
@@ -205,14 +232,116 @@ async function main(): Promise<void> {
     await runCase(
       "org_owner calling /api/admin/email-templates is not granted access (non-200)",
       async () => {
-        const cookie = await quickLoginCookie("org_owner");
-        const ctx = await newCtx(browser, cookie);
+        const ctx = await newCtx(browser, ownerCookie);
         try {
           const page = await ctx.newPage();
           const response = await page.request.get(`${BASE}/api/admin/email-templates`);
           assert(
             response.status() !== 200,
             "org_owner API call does not return 200 (template list)",
+            response.status(),
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    // ── Case 5: staff_approver PUT (save copy) returns 404 ────────────────
+    //
+    // requireStaffAdmin fires before any key/body validation, so the guard
+    // must return 404 for a valid template key regardless of the payload.
+    await runCase(
+      "staff_approver calling PUT /api/admin/email-templates/:key receives a 404",
+      async () => {
+        const ctx = await newCtx(browser, approverCookie);
+        try {
+          const page = await ctx.newPage();
+          const response = await page.request.put(
+            `${BASE}/api/admin/email-templates/staff_new_org`,
+            {
+              headers: { "Content-Type": "application/json" },
+              data: { copy: null },
+            },
+          );
+          assert(
+            response.status() === 404,
+            "staff_approver PUT email template returns 404",
+            response.status(),
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    // ── Case 6: org_owner PUT (save copy) returns 404 ─────────────────────
+    await runCase(
+      "org_owner calling PUT /api/admin/email-templates/:key receives a 404",
+      async () => {
+        const ctx = await newCtx(browser, ownerCookie);
+        try {
+          const page = await ctx.newPage();
+          const response = await page.request.put(
+            `${BASE}/api/admin/email-templates/staff_new_org`,
+            {
+              headers: { "Content-Type": "application/json" },
+              data: { copy: null },
+            },
+          );
+          assert(
+            response.status() === 404,
+            "org_owner PUT email template returns 404",
+            response.status(),
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    // ── Case 7: staff_approver POST /enabled (toggle) returns 404 ─────────
+    await runCase(
+      "staff_approver calling POST /api/admin/email-templates/:key/enabled receives a 404",
+      async () => {
+        const ctx = await newCtx(browser, approverCookie);
+        try {
+          const page = await ctx.newPage();
+          const response = await page.request.post(
+            `${BASE}/api/admin/email-templates/staff_new_org/enabled`,
+            {
+              headers: { "Content-Type": "application/json" },
+              data: { enabled: false },
+            },
+          );
+          assert(
+            response.status() === 404,
+            "staff_approver POST email template /enabled returns 404",
+            response.status(),
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    // ── Case 8: org_owner POST /enabled (toggle) returns 404 ─────────────
+    await runCase(
+      "org_owner calling POST /api/admin/email-templates/:key/enabled receives a 404",
+      async () => {
+        const ctx = await newCtx(browser, ownerCookie);
+        try {
+          const page = await ctx.newPage();
+          const response = await page.request.post(
+            `${BASE}/api/admin/email-templates/staff_new_org/enabled`,
+            {
+              headers: { "Content-Type": "application/json" },
+              data: { enabled: false },
+            },
+          );
+          assert(
+            response.status() === 404,
+            "org_owner POST email template /enabled returns 404",
             response.status(),
           );
         } finally {
