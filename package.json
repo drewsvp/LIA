@@ -15,6 +15,7 @@
     "test:volunteer-request-categories": "tsx scripts/test-volunteer-request-categories.ts",
     "test:matching-volunteer-alerts": "tsx scripts/test-matching-volunteer-alerts.ts",
     "test:public-org-profile": "tsx scripts/test-public-org-profile.ts",
+    "test:admin-styles": "tsx scripts/test-admin-styles.ts",
     "test:request-engagement": "tsx scripts/test-request-engagement.ts",
     "test:request-engagement-ui": "tsx scripts/test-request-engagement-ui.ts",
     "test:request-outreach": "tsx scripts/test-request-outreach.ts",
