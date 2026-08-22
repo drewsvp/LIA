@@ -888,9 +888,10 @@ h3 {
   margin: 0 auto;
   padding: 10px 20px 12px;
   display: flex;
-  /* flex-start, not center: the right side is a two-row stack, so centering
-     would float the logo against the combined height of both rows. */
-  align-items: flex-start;
+  /* center: the right side is a two-row stack when logged in (top row +
+     link row) and a single row when logged out; centering aligns the stack
+     against the 119 px logo cleanly in both cases. */
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px 16px;
@@ -963,6 +964,10 @@ a.site-nav-btn {
   letter-spacing: 0.1em;
   text-decoration: none;
   white-space: nowrap;
+}
+
+.site-nav-link:hover {
+  color: var(--color-teal);
 }
 .site-nav-switcher {
   font-family: inherit;
