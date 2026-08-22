@@ -2895,22 +2895,112 @@ a.site-nav-btn {
   background: #fff;
   border-radius: 4px;
 }
-.adm-email-split {
+/* Row affordances for the email table */
+.adm-row-clickable {
+  cursor: pointer;
+}
+.adm-row-fixed {
+  cursor: default;
+}
+.adm-email-name-cell {
   display: flex;
-  gap: 16px;
   align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
 }
-.adm-email-table {
-  flex: 1 1 auto;
-  min-width: 0;
+.adm-row-chevron {
+  flex: 0 0 auto;
+  font-size: 1.1rem;
+  color: var(--color-muted);
+  line-height: 1.4;
+  transition: color 0.15s ease;
 }
-.adm-email-detail {
-  flex: 0 0 380px;
+.adm-row-clickable:hover .adm-row-chevron {
+  color: var(--color-teal);
+}
+
+/* Status pill */
+.adm-status-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: inherit;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.adm-status-pill--on {
+  background: #d4edda;
+  color: #1d6f42;
+}
+.adm-status-pill--on:hover {
+  background: #b8dfc4;
+}
+.adm-status-pill--off {
+  background: #e9ecef;
+  color: #555555;
+}
+.adm-status-pill--off:hover {
+  background: #d6d9dd;
+}
+.adm-status-always-on {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+/* Inline toggle confirm widget */
+.adm-status-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.adm-status-confirm-text {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-navy);
+  white-space: nowrap;
+}
+
+/* Full-width email editor below the table */
+.adm-email-editor {
+  position: relative;
+  margin-top: 0;
+  border-top: 2px solid var(--color-teal);
+  background: var(--color-surface);
+  padding: 24px 28px 32px;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.adm-email-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.adm-email-editor-header .adm-subheading {
+  margin: 0;
+}
+.adm-email-editor-close {
+  flex: 0 0 auto;
+  background: none;
   border: 1px solid #c8c4bc;
-  padding: 12px;
-  max-width: 380px;
-  border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  border-radius: 4px;
+  font-size: 1.3rem;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--color-muted);
+}
+.adm-email-editor-close:hover {
+  background: #f0f0f0;
+  color: var(--color-navy);
 }
 .adm-stuck {
   display: inline-block;

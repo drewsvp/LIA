@@ -120,19 +120,25 @@ export function EmailTemplatesPage(): ReactElement {
   const [oneTimeDate, setOneTimeDate] = useState("");
   const [oneTimeTime, setOneTimeTime] = useState("");
   const [savingSchedule, setSavingSchedule] = useState(false);
+  // Key of the row whose status pill is showing an inline confirm.
+  const [confirmToggleKey, setConfirmToggleKey] = useState<string | null>(null);
   // Incremented each time the selected template changes so stale in-flight
   // responses from a previous selection are discarded on arrival.
   const previewGenRef = useRef(0);
+  const editorRef = useRef<HTMLElement | null>(null);
+  // Map from row key to TR element so we can scroll back on close.
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   const templates = data?.templates ?? [];
   const selected = templates.find((t) => t.key === selectedKey) ?? null;
 
-  // (Re)initialize the editor and load the stored preview on selection.
+  // (Re)initialize the editor, load the stored preview, and auto-scroll on selection.
   useEffect(() => {
     setMessage(null);
     setErrors([]);
     setPreview(null);
     setPreviewing(false);
+    setConfirmToggleKey(null);
     if (!selected) {
       setDraft(null);
       setScheduleDraft(null);
@@ -145,6 +151,11 @@ export function EmailTemplatesPage(): ReactElement {
     setOneTimeDate(once.date);
     setOneTimeTime(once.time);
 
+    // Scroll the editor into view after the DOM has painted.
+    requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
     const gen = ++previewGenRef.current;
     void postJson(`/api/admin/email-templates/${selected.key}/preview`, {}).then(({ ok, data: body }) => {
       if (previewGenRef.current !== gen) return; // stale — a different template was selected
@@ -153,6 +164,15 @@ export function EmailTemplatesPage(): ReactElement {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, data]);
+
+  function handleClose(): void {
+    const prevKey = selectedKey;
+    setSelectedKey(null);
+    // Scroll the previously selected row back into view.
+    requestAnimationFrame(() => {
+      if (prevKey) rowRefs.current[prevKey]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
 
   async function refreshPreview(): Promise<void> {
     if (!selected || !draft || previewing) return;
@@ -209,6 +229,7 @@ export function EmailTemplatesPage(): ReactElement {
 
   async function toggleEnabled(row: TemplateRow): Promise<void> {
     setMessage(null);
+    setConfirmToggleKey(null);
     const { ok, data: body } = await postJson(`/api/admin/email-templates/${row.key}/enabled`, {
       enabled: !row.enabled,
     });
@@ -273,71 +294,118 @@ export function EmailTemplatesPage(): ReactElement {
         </ul>
       )}
 
-      <div className="adm-email-split">
-        <div className="adm-email-table">
-          {isLoading ? (
-            <p className="adm-muted">Loading…</p>
-          ) : (
-            <table className="adm-table">
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Sent when</th>
-                  <th>Goes to</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((row) => (
-                  <tr
-                    key={row.key}
-                    className={row.key === selectedKey ? "adm-row-selected" : undefined}
-                    onClick={() => setSelectedKey(row.key)}
-                  >
-                    <td>
-                      {row.name}
-                      {row.hasCopyOverride && <span className="adm-muted"> (edited)</span>}
-                      {row.authInfrastructure && <span className="adm-muted"> — authentication infrastructure</span>}
-                      {lastEditedLabel(row) && (
-                        <div className="adm-muted" style={{ fontSize: "0.85em", marginTop: 2 }}>
-                          {lastEditedLabel(row)}
-                        </div>
+      <div>
+        {isLoading ? (
+          <p className="adm-muted">Loading…</p>
+        ) : (
+          <table className="adm-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Sent when</th>
+                <th>Goes to</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {templates.map((row) => (
+                <tr
+                  key={row.key}
+                  ref={(el) => { rowRefs.current[row.key] = el; }}
+                  className={[
+                    row.key === selectedKey ? "adm-row-selected" : "",
+                    row.authInfrastructure ? "adm-row-fixed" : "adm-row-clickable",
+                  ].filter(Boolean).join(" ") || undefined}
+                  onClick={() => {
+                    if (row.authInfrastructure) return;
+                    setSelectedKey(row.key === selectedKey ? null : row.key);
+                  }}
+                >
+                  <td>
+                    <span className="adm-email-name-cell">
+                      <span>
+                        {row.name}
+                        {row.hasCopyOverride && <span className="adm-muted"> (edited)</span>}
+                        {row.authInfrastructure && <span className="adm-muted"> — authentication infrastructure</span>}
+                        {lastEditedLabel(row) && (
+                          <div className="adm-muted" style={{ fontSize: "0.85em", marginTop: 2 }}>
+                            {lastEditedLabel(row)}
+                          </div>
+                        )}
+                      </span>
+                      {!row.authInfrastructure && (
+                        <span className="adm-row-chevron" aria-hidden="true">›</span>
                       )}
-                    </td>
-                    <td>{row.deliveryType === "scheduled" ? `Scheduled — ${row.trigger}` : `Event-triggered — ${row.trigger}`}</td>
-                    <td>
-                      {row.recipients}
-                      {row.effectiveRecipients && <span className="adm-muted"> ({row.effectiveRecipients.join(", ")})</span>}
-                    </td>
-                    <td>
-                      {row.authInfrastructure ? (
-                        "always on"
-                      ) : (
+                    </span>
+                  </td>
+                  <td>{row.deliveryType === "scheduled" ? `Scheduled — ${row.trigger}` : `Event-triggered — ${row.trigger}`}</td>
+                  <td>
+                    {row.recipients}
+                    {row.effectiveRecipients && <span className="adm-muted"> ({row.effectiveRecipients.join(", ")})</span>}
+                  </td>
+                  <td>
+                    {row.authInfrastructure ? (
+                      <span className="adm-status-always-on">Always on</span>
+                    ) : confirmToggleKey === row.key ? (
+                      <span className="adm-status-confirm" onClick={(e) => e.stopPropagation()}>
+                        <span className="adm-status-confirm-text">
+                          {row.enabled ? "Turn off this email?" : "Turn on this email?"}
+                        </span>
                         <button
                           type="button"
-                          className="adm-btn-outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void toggleEnabled(row);
-                          }}
+                          className="adm-btn adm-btn-sm"
+                          onClick={(e) => { e.stopPropagation(); void toggleEnabled(row); }}
                         >
-                          {row.enabled ? "Enabled — turn off" : "Disabled — turn on"}
+                          Confirm
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                        <button
+                          type="button"
+                          className="adm-btn-outline adm-btn-sm"
+                          onClick={(e) => { e.stopPropagation(); setConfirmToggleKey(null); }}
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`adm-status-pill ${row.enabled ? "adm-status-pill--on" : "adm-status-pill--off"}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmToggleKey(row.key);
+                        }}
+                      >
+                        {row.enabled ? "Enabled" : "Disabled"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
 
         {selected && draft && (
-          <aside className="adm-email-detail">
-            <h2 className="adm-subheading">{selected.name}</h2>
+          <section
+            className="adm-email-editor"
+            ref={(el) => { editorRef.current = el; }}
+            aria-label={`Edit ${selected.name}`}
+          >
+            <div className="adm-email-editor-header">
+              <h2 className="adm-subheading">{selected.name}</h2>
+              <button
+                type="button"
+                className="adm-email-editor-close"
+                aria-label="Close editor"
+                onClick={handleClose}
+              >
+                ×
+              </button>
+            </div>
+
             <dl className="adm-detail-list">
               <dt>Sent when</dt>
-               <dd>{selected.deliveryType === "scheduled" ? selected.trigger : `Event-triggered: ${selected.trigger}`}</dd>
+              <dd>{selected.deliveryType === "scheduled" ? selected.trigger : `Event-triggered: ${selected.trigger}`}</dd>
               <dt>Goes to</dt>
               <dd>
                 {selected.recipients}
@@ -494,7 +562,7 @@ export function EmailTemplatesPage(): ReactElement {
                 />
               </>
             )}
-          </aside>
+          </section>
         )}
       </div>
     </div>
