@@ -6,6 +6,8 @@
  *   1a. Product template row with valid payload.vars → { subject, html } non-empty
  *   1b. auth_magic_link row → { previewUnavailable: true, reason mentions single-use tokens }
  *   1c. Product template row with missing payload.vars → { previewUnavailable: true }
+ *   1d. Product template row whose payload.vars omits one required field → previewUnavailable, reason names the missing var
+ *   1e. Product template row whose payload.vars has all required fields but one is an empty string → previewUnavailable
  *
  * Section 2 — Browser panel checks (Playwright):
  *   2a. Clicking a renderable row and switching to "Preview email" renders
@@ -122,11 +124,15 @@ async function main(): Promise<void> {
   const PRODUCT_EMAIL = "zz.preview-product@example.test";
   const AUTH_EMAIL = "zz.preview-auth@example.test";
   const EMPTY_VARS_EMAIL = "zz.preview-empty-vars@example.test";
+  const PARTIAL_VARS_EMAIL = "zz.preview-partial-vars@example.test";
+  const EMPTY_VAL_EMAIL = "zz.preview-empty-val@example.test";
 
   // Fictitious entity IDs using a reserved nil-prefix UUID block (ffff) that
   // will never exist in real data, so the once-only index can't collide.
   const ENTITY_ID_PRODUCT = "00000000-0000-0000-ffff-000000000101";
   const ENTITY_ID_EMPTY = "00000000-0000-0000-ffff-000000000103";
+  const ENTITY_ID_PARTIAL = "00000000-0000-0000-ffff-000000000104";
+  const ENTITY_ID_EMPTY_VAL = "00000000-0000-0000-ffff-000000000105";
 
   // org_approved required vars: organizationName, organizationPrimaryContact,
   // organizationPrimaryContactEmail, dashboardUrl
@@ -149,14 +155,16 @@ async function main(): Promise<void> {
     `delete from email_log
       where to_email = any($1::text[])
         and (payload->>'zz_fixture')::boolean is true`,
-    [[PRODUCT_EMAIL, AUTH_EMAIL, EMPTY_VARS_EMAIL]],
+    [[PRODUCT_EMAIL, AUTH_EMAIL, EMPTY_VARS_EMAIL, PARTIAL_VARS_EMAIL, EMPTY_VAL_EMAIL]],
   );
 
   let productRowId: string;
   let authRowId: string;
   let emptyVarsRowId: string;
+  let partialVarsRowId: string;
+  let emptyValRowId: string;
 
-  // Insert all three rows in a single transaction.
+  // Insert all five rows in a single transaction.
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -196,6 +204,61 @@ async function main(): Promise<void> {
     });
     emptyVarsRowId = r3.id;
     insertedIds.push(r3.id);
+
+    // Product template row with partial vars — required field dashboardUrl is
+    // intentionally omitted. The preview endpoint must detect it via
+    // unresolvedVariables and return previewUnavailable with the var name.
+    const r4 = await emailLog.insertQueuedInTx(client, {
+      templateKey: "org_approved",
+      toEmail: PARTIAL_VARS_EMAIL,
+      entityType: "organization",
+      entityId: ENTITY_ID_PARTIAL,
+      payload: {
+        zz_fixture: true,
+        vars: {
+          organizationName: "Fixture Partial Org",
+          orgAddress: null,
+          orgPhoneNumber: null,
+          websiteUrl: null,
+          missionStatement: null,
+          primaryPopulationServed: null,
+          organizationPrimaryContact: "Fixture Contact",
+          organizationPrimaryContactEmail: "contact@fixture.test",
+          organizationPrimaryContactPhone: null,
+          // dashboardUrl intentionally omitted — required field missing
+        },
+      },
+    });
+    partialVarsRowId = r4.id;
+    insertedIds.push(r4.id);
+
+    // Product template row with all required fields present but one value is
+    // an empty string. unresolvedVariables treats "" as unresolved (same gate
+    // the send pipeline uses), so the preview endpoint must return
+    // previewUnavailable even though the key exists in the vars object.
+    const r5 = await emailLog.insertQueuedInTx(client, {
+      templateKey: "org_approved",
+      toEmail: EMPTY_VAL_EMAIL,
+      entityType: "organization",
+      entityId: ENTITY_ID_EMPTY_VAL,
+      payload: {
+        zz_fixture: true,
+        vars: {
+          organizationName: "Fixture EmptyVal Org",
+          orgAddress: null,
+          orgPhoneNumber: null,
+          websiteUrl: null,
+          missionStatement: null,
+          primaryPopulationServed: null,
+          organizationPrimaryContact: "Fixture Contact",
+          organizationPrimaryContactEmail: "contact@fixture.test",
+          organizationPrimaryContactPhone: null,
+          dashboardUrl: "",  // empty string — treated as unresolved
+        },
+      },
+    });
+    emptyValRowId = r5.id;
+    insertedIds.push(r5.id);
 
     await client.query("commit");
   } catch (err) {
@@ -252,6 +315,40 @@ async function main(): Promise<void> {
     typeof r3body?.reason === "string" && (r3body.reason as string).length > 0,
     "1c: reason is a non-empty string",
     r3body?.reason,
+  );
+
+  // 1d. Product template row whose payload.vars omits one required field
+  // (dashboardUrl is absent). unresolvedVariables catches the gap and the
+  // endpoint must name the offending variable in its reason string.
+  const r4res = await apiGet(`/api/admin/email/${partialVarsRowId}/preview`, cookieHeader);
+  const r4body = r4res.body as Record<string, unknown> | null;
+  assert(r4res.status === 200, "1d: HTTP 200 for row with partial payload.vars");
+  assert(r4body?.previewUnavailable === true, "1d: previewUnavailable: true for partial vars");
+  assert(
+    typeof r4body?.reason === "string" && (r4body.reason as string).includes("dashboardUrl"),
+    "1d: reason names the missing variable (dashboardUrl)",
+    r4body?.reason,
+  );
+  assert(
+    r4body?.subject === undefined && r4body?.html === undefined,
+    "1d: no subject or html fields on unavailable response",
+  );
+
+  // 1e. Product template row with all required fields present but one value is
+  // an empty string (""). unresolvedVariables treats "" as unresolved, so the
+  // endpoint must return previewUnavailable even though the key exists.
+  const r5res = await apiGet(`/api/admin/email/${emptyValRowId}/preview`, cookieHeader);
+  const r5body = r5res.body as Record<string, unknown> | null;
+  assert(r5res.status === 200, "1e: HTTP 200 for row with empty-string required var");
+  assert(r5body?.previewUnavailable === true, "1e: previewUnavailable: true for empty-string var");
+  assert(
+    typeof r5body?.reason === "string" && (r5body.reason as string).includes("dashboardUrl"),
+    "1e: reason names the empty-string variable (dashboardUrl)",
+    r5body?.reason,
+  );
+  assert(
+    r5body?.subject === undefined && r5body?.html === undefined,
+    "1e: no subject or html fields on unavailable response",
   );
 
   // ── Section 2: Browser panel checks (Playwright) ──────────────────────────
