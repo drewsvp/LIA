@@ -8,6 +8,8 @@
  *   1c. Product template row with missing payload.vars → { previewUnavailable: true }
  *   1d. Product template row whose payload.vars omits one required field → previewUnavailable, reason names the missing var
  *   1e. Product template row whose payload.vars has all required fields but one is an empty string → previewUnavailable
+ *   1f. Product template row whose payload.vars has an extra key whose name appears as a literal {token} in the rendered
+ *       output (leftoverPlaceholders gate) → previewUnavailable, reason names the leftover key
  *
  * Section 2 — Browser panel checks (Playwright):
  *   2a. Clicking a renderable row and switching to "Preview email" renders
@@ -126,6 +128,7 @@ async function main(): Promise<void> {
   const EMPTY_VARS_EMAIL = "zz.preview-empty-vars@example.test";
   const PARTIAL_VARS_EMAIL = "zz.preview-partial-vars@example.test";
   const EMPTY_VAL_EMAIL = "zz.preview-empty-val@example.test";
+  const LEFTOVER_EMAIL = "zz.preview-leftover@example.test";
 
   // Fictitious entity IDs using a reserved nil-prefix UUID block (ffff) that
   // will never exist in real data, so the once-only index can't collide.
@@ -133,6 +136,7 @@ async function main(): Promise<void> {
   const ENTITY_ID_EMPTY = "00000000-0000-0000-ffff-000000000103";
   const ENTITY_ID_PARTIAL = "00000000-0000-0000-ffff-000000000104";
   const ENTITY_ID_EMPTY_VAL = "00000000-0000-0000-ffff-000000000105";
+  const ENTITY_ID_LEFTOVER = "00000000-0000-0000-ffff-000000000106";
 
   // org_approved required vars: organizationName, organizationPrimaryContact,
   // organizationPrimaryContactEmail, dashboardUrl
@@ -155,7 +159,7 @@ async function main(): Promise<void> {
     `delete from email_log
       where to_email = any($1::text[])
         and (payload->>'zz_fixture')::boolean is true`,
-    [[PRODUCT_EMAIL, AUTH_EMAIL, EMPTY_VARS_EMAIL, PARTIAL_VARS_EMAIL, EMPTY_VAL_EMAIL]],
+    [[PRODUCT_EMAIL, AUTH_EMAIL, EMPTY_VARS_EMAIL, PARTIAL_VARS_EMAIL, EMPTY_VAL_EMAIL, LEFTOVER_EMAIL]],
   );
 
   let productRowId: string;
@@ -163,8 +167,9 @@ async function main(): Promise<void> {
   let emptyVarsRowId: string;
   let partialVarsRowId: string;
   let emptyValRowId: string;
+  let leftoverVarRowId: string;
 
-  // Insert all five rows in a single transaction.
+  // Insert all six rows in a single transaction.
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -260,6 +265,38 @@ async function main(): Promise<void> {
     emptyValRowId = r5.id;
     insertedIds.push(r5.id);
 
+    // Product template row where all required fields are present and non-empty,
+    // but the organizationName value itself embeds a literal {leftoverVar} token.
+    // fillText is single-pass: it substitutes {organizationName} in the subject
+    // template ("…{organizationName}") with the value "Fixture {leftoverVar} Org",
+    // leaving "{leftoverVar}" literally in the rendered subject. Since leftoverVar
+    // is also a key in vars, leftoverPlaceholders detects the surviving token and
+    // the preview endpoint returns previewUnavailable.
+    const r6 = await emailLog.insertQueuedInTx(client, {
+      templateKey: "org_approved",
+      toEmail: LEFTOVER_EMAIL,
+      entityType: "organization",
+      entityId: ENTITY_ID_LEFTOVER,
+      payload: {
+        zz_fixture: true,
+        vars: {
+          organizationName: "Fixture {leftoverVar} Org",  // embeds a literal token
+          orgAddress: null,
+          orgPhoneNumber: null,
+          websiteUrl: null,
+          missionStatement: null,
+          primaryPopulationServed: null,
+          organizationPrimaryContact: "Fixture Contact",
+          organizationPrimaryContactEmail: "contact@fixture.test",
+          organizationPrimaryContactPhone: null,
+          dashboardUrl: "https://fixture.test/dashboard",
+          leftoverVar: "orphaned",  // key present → leftoverPlaceholders fires
+        },
+      },
+    });
+    leftoverVarRowId = r6.id;
+    insertedIds.push(r6.id);
+
     await client.query("commit");
   } catch (err) {
     await client.query("rollback").catch(() => undefined);
@@ -349,6 +386,26 @@ async function main(): Promise<void> {
   assert(
     r5body?.subject === undefined && r5body?.html === undefined,
     "1e: no subject or html fields on unavailable response",
+  );
+
+  // 1f. Product template row where all required vars are present and non-empty,
+  // but organizationName embeds a literal {leftoverVar} token. fillText is
+  // single-pass, so after substituting {organizationName} the rendered subject
+  // still contains "{leftoverVar}" literally. Because leftoverVar is also a key
+  // in vars, leftoverPlaceholders detects the surviving token and the endpoint
+  // must return previewUnavailable naming it.
+  const r6res = await apiGet(`/api/admin/email/${leftoverVarRowId}/preview`, cookieHeader);
+  const r6body = r6res.body as Record<string, unknown> | null;
+  assert(r6res.status === 200, "1f: HTTP 200 for row with leftover placeholder");
+  assert(r6body?.previewUnavailable === true, "1f: previewUnavailable: true for leftover placeholder");
+  assert(
+    typeof r6body?.reason === "string" && (r6body.reason as string).includes("leftoverVar"),
+    "1f: reason names the leftover placeholder key (leftoverVar)",
+    r6body?.reason,
+  );
+  assert(
+    r6body?.subject === undefined && r6body?.html === undefined,
+    "1f: no subject or html fields on unavailable response",
   );
 
   // ── Section 2: Browser panel checks (Playwright) ──────────────────────────
