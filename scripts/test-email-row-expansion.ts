@@ -12,6 +12,8 @@
  *   7. Confirm calls the toggle and updates the pill label.
  *   8. Editing copy and switching rows silently discards the draft (no guard
  *      dialog — current behavior pinned so a future guard addition is caught).
+ *   9. Editing copy and clicking close (×) silently discards the draft (no
+ *      guard dialog — close path pinned alongside Case 8).
  *
  * Usage:
  *   npm run test:email-row-expansion
@@ -401,6 +403,93 @@ async function main(): Promise<void> {
             !newSubjectValue.includes("UNSAVED_EDIT"),
             "after switching rows the subject shows the new row's stored value, not the unsaved edit",
             { newSubjectValue },
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    // ── Case 9: Editing copy and clicking close (×) silently discards the draft ──
+    //
+    // DOCUMENTED BEHAVIOR: The email editor has no dirty-state guard on the
+    // close (×) button path either. If a staff member edits the subject or body
+    // and then clicks close, the draft is reset to the stored value with no
+    // warning. This test pins that behavior — mirroring Case 8 for row switches
+    // — so that if a guard is added to handleClose in the future this test fails
+    // and must be updated to validate the guard's UX instead.
+    await runCase(
+      "editing copy and clicking close (×) silently discards the draft (no guard dialog)",
+      async () => {
+        const ctx = await newCtx(browser, cookie);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(`${BASE}/admin/emails`, { waitUntil: "networkidle" });
+
+          // Open the first row's editor.
+          await page.locator(".adm-row-clickable").first().click();
+          await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
+
+          // Edit the subject field.
+          const subjectInput = page
+            .locator(".adm-email-editor input[type='text']")
+            .first();
+          await subjectInput.waitFor({ state: "visible", timeout: 3_000 });
+          const originalSubject = await subjectInput.inputValue();
+          await subjectInput.fill(originalSubject + " UNSAVED_CLOSE_EDIT");
+
+          const editedValue = await subjectInput.inputValue();
+          assert(
+            editedValue.includes("UNSAVED_CLOSE_EDIT"),
+            "subject field contains the unsaved edit before clicking close",
+            editedValue,
+          );
+
+          // Click the close (×) button — expect no guard dialog.
+          const closeBtn = page.locator('[aria-label="Close editor"]');
+          await closeBtn.waitFor({ state: "visible", timeout: 3_000 });
+          await closeBtn.click();
+
+          // Allow a render cycle so any guard dialog would have mounted.
+          await page.waitForTimeout(500);
+
+          // DOCUMENTED BEHAVIOR: no guard dialog fires — the draft is silently
+          // discarded. If a guard is introduced on handleClose, this assertion
+          // will fail and the test must be updated to validate the guard instead.
+          const guardCount = await page
+            .locator('[role="alertdialog"], .adm-dirty-guard, .adm-unsaved-dialog')
+            .count();
+          assert(
+            guardCount === 0,
+            "no guard dialog appears when clicking close with unsaved edits (current behavior: silent loss)",
+            { guardCount },
+          );
+
+          // The editor should be gone — confirming the close happened without a
+          // guard blocking it.
+          assert(
+            (await page.locator(".adm-email-editor").count()) === 0,
+            "editor section is removed after clicking close with unsaved edits",
+          );
+
+          // Reopen the same row to prove the draft was actually discarded.
+          // A regression that secretly persisted the draft (or auto-saved it)
+          // would cause the subject to still contain the unsaved marker here.
+          await page.locator(".adm-row-clickable").first().click();
+          await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
+          const reopenedSubject = await page
+            .locator(".adm-email-editor input[type='text']")
+            .first()
+            .inputValue();
+          assert(
+            reopenedSubject === originalSubject,
+            "after close and reopen the subject shows the original stored value, not the discarded draft",
+            { reopenedSubject, originalSubject },
+          );
+          assert(
+            !reopenedSubject.includes("UNSAVED_CLOSE_EDIT"),
+            "the unsaved marker is absent after close — the draft was discarded",
+            { reopenedSubject },
           );
         } finally {
           await ctx.close();
