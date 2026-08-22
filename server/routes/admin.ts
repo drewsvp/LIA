@@ -30,6 +30,9 @@ import { MAY_HAVE_SENT_MARKER } from "../email/send";
 import { ENTITY_TYPE_NAMES } from "../../shared/transitions";
 import { getDbRoutineCheckResult } from "../db/startup-checks";
 import { parseProductUrl } from "../../shared/item-product-url";
+import { PRODUCT_TEMPLATES, isProductTemplateKey } from "../email/templates";
+import { effectiveCopy } from "../email/overrides";
+import { finalizeHtml } from "../email/render";
 
 /** ADMIN-05 §5: lowercase, hyphenated. Shared by add (validation) and promote (generation). */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -44,7 +47,7 @@ function slugify(name: string): string {
 import * as dal from "../dal";
 import { withDbContext, type DbContext } from "../db/client";
 import type { DeadlineType, MembershipRole } from "../../shared/types";
-import { dispatchQueuedEmails, type PendingDispatch } from "../email/send";
+import { dispatchQueuedEmails, headerImageDataUri, unresolvedVariables, leftoverPlaceholders, type PendingDispatch } from "../email/send";
 import { storeImage, deleteImage } from "../storage/object-storage";
 import { sourceNeedImage, NeedImageError } from "../services/need-image";
 import {
@@ -1955,6 +1958,109 @@ export function registerAdminRoutes(app: Express): void {
             }
           : null,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Preview: re-renders the email from stored payload.vars and returns
+  // { subject, html } on success, or { previewUnavailable, reason } (HTTP 200)
+  // for rows that cannot be re-rendered (non-product templates, missing vars,
+  // or render errors). Staff-gated, not staff-admin: same gate as the log page.
+  app.get("/api/admin/email/:id/preview", requireStaff, async (req: Request, res: Response, next) => {
+    try {
+      const id = req.params.id ?? "";
+      if (!UUID_RE.test(id)) {
+        sendNotFound(res);
+        return;
+      }
+      const ctx = staffCtx(req);
+      const row = await dal.emailLog.getById(ctx, id);
+      if (!row) {
+        sendNotFound(res);
+        return;
+      }
+
+      const key = row.templateKey;
+      if (!isProductTemplateKey(key)) {
+        // auth_magic_link and any future non-product keys cannot be re-rendered
+        // from stored vars because they use a different render path.
+        res.json({
+          previewUnavailable: true,
+          reason:
+            key === "auth_magic_link"
+              ? "Preview is not available for login-link emails — they contain single-use tokens that are no longer valid."
+              : `Preview is not available for the "${key}" template.`,
+        });
+        return;
+      }
+
+      const payload = row.payload as Record<string, unknown> | null;
+      const storedVars =
+        payload !== null &&
+        typeof payload === "object" &&
+        payload.vars !== null &&
+        typeof payload.vars === "object" &&
+        !Array.isArray(payload.vars)
+          ? (payload.vars as Record<string, unknown>)
+          : null;
+
+      if (!storedVars) {
+        res.json({
+          previewUnavailable: true,
+          reason: "This email row does not have stored variable data needed to re-render a preview.",
+        });
+        return;
+      }
+
+      const template = PRODUCT_TEMPLATES[key];
+
+      // Apply the same required-variable gate the send pipeline uses: a blank
+      // string, empty array, or empty list object counts as unresolved.
+      const missing = unresolvedVariables(template.required, storedVars);
+      if (missing.length > 0) {
+        res.json({
+          previewUnavailable: true,
+          reason: `Preview unavailable — the stored snapshot is missing required variable${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
+        });
+        return;
+      }
+
+      const ov = await dal.emailTemplateOverrides.getOverride(ctx, key);
+      let rendered: { subject: string; html: string; text: string };
+      try {
+        rendered = template.render(storedVars as never, effectiveCopy(key, ov));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.json({
+          previewUnavailable: true,
+          reason: `The email could not be re-rendered with the stored variables: ${message}`,
+        });
+        return;
+      }
+
+      // Apply the leftover-placeholder gate: a literal {token} surviving the
+      // render means a variable key was present but its value was not used,
+      // which indicates a template/vars mismatch.
+      const leftovers = leftoverPlaceholders(storedVars, rendered);
+      if (leftovers.length > 0) {
+        res.json({
+          previewUnavailable: true,
+          reason: `Preview unavailable — rendered output still contains literal placeholder${leftovers.length === 1 ? "" : "s"}: ${leftovers.join(", ")}.`,
+        });
+        return;
+      }
+
+      let html: string;
+      try {
+        html = finalizeHtml(rendered.html, headerImageDataUri());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.json({ previewUnavailable: true, reason: `The preview HTML could not be finalized: ${message}` });
+        return;
+      }
+
+      res.json({ subject: rendered.subject, html });
     } catch (err) {
       next(err);
     }

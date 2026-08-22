@@ -42,6 +42,10 @@ type ResendAttempt = {
 
 type ListResponse = { rows: LogRow[]; failureCount: number; anyExist: boolean };
 
+type PreviewResponse =
+  | { subject: string; html: string; previewUnavailable?: never }
+  | { previewUnavailable: true; reason: string; subject?: never; html?: never };
+
 type DetailResponse = LogRow & {
   payload: Record<string, unknown>;
   providerMessageId: string | null;
@@ -140,6 +144,7 @@ function StatusCell({ row }: { row: LogRow }): ReactElement {
 export function EmailLogPage(): ReactElement {
   const [filters, setFilters] = useState(initialFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"details" | "preview">("details");
   const [resendMsg, setResendMsg] = useState<string | null>(null);
   const [resendOk, setResendOk] = useState<boolean | null>(null);
   const [resending, setResending] = useState(false);
@@ -160,6 +165,16 @@ export function EmailLogPage(): ReactElement {
   const { data: detail } = useQuery<DetailResponse>({
     queryKey: [detailKey ?? "detail-none"],
     enabled: detailKey !== null,
+  });
+
+  const previewKey = selectedId ? `/api/admin/email/${selectedId}/preview` : null;
+  const {
+    data: previewData,
+    isLoading: previewLoading,
+    isError: previewError,
+  } = useQuery<PreviewResponse>({
+    queryKey: [previewKey ?? "preview-none"],
+    enabled: previewKey !== null && detailTab === "preview",
   });
 
   const templateOptions = useMemo(
@@ -290,6 +305,7 @@ export function EmailLogPage(): ReactElement {
                       .join(" ") || undefined}
                     onClick={() => {
                       setSelectedId(row.id);
+                      setDetailTab("details");
                       setResendMsg(null);
                       setResendOk(null);
                     }}
@@ -326,6 +342,53 @@ export function EmailLogPage(): ReactElement {
           <aside className="adm-email-detail">
             <h2 className="adm-subheading">{templateDisplayName(detail.templateKey)}</h2>
 
+            <div className="adm-tabs">
+              <button
+                type="button"
+                className={`adm-tab${detailTab === "details" ? " adm-tab-current" : ""}`}
+                onClick={() => setDetailTab("details")}
+              >
+                Details
+              </button>
+              <button
+                type="button"
+                className={`adm-tab${detailTab === "preview" ? " adm-tab-current" : ""}`}
+                onClick={() => setDetailTab("preview")}
+              >
+                Preview email
+              </button>
+            </div>
+
+            {detailTab === "preview" && (
+              <div className="adm-email-log-preview">
+                {previewLoading && <p className="adm-muted">Loading preview…</p>}
+                {previewError && (
+                  <p className="adm-result adm-result-fail">
+                    The preview could not be loaded. Check your connection and try again.
+                  </p>
+                )}
+                {previewData && previewData.previewUnavailable && (
+                  <p className="adm-muted">{previewData.reason}</p>
+                )}
+                {previewData && !previewData.previewUnavailable && (
+                  <>
+                    <dl className="adm-detail-list">
+                      <dt>Subject</dt>
+                      <dd>{previewData.subject}</dd>
+                    </dl>
+                    <iframe
+                      title="Email preview"
+                      srcDoc={previewData.html}
+                      sandbox="allow-same-origin"
+                      style={{ width: "100%", height: 480, border: "1px solid #ccc", background: "#fff" }}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
+            {detailTab === "details" && (
+              <>
             {/* Failure diagnosis block */}
             {detail.status === "failed" && (
               <div className="adm-failure-block">
@@ -405,6 +468,7 @@ export function EmailLogPage(): ReactElement {
                       className="adm-link-btn"
                       onClick={() => {
                         setSelectedId(detail.resendAttempt!.id);
+                        setDetailTab("details");
                         setResendMsg(null);
                         setResendOk(null);
                       }}
@@ -424,6 +488,7 @@ export function EmailLogPage(): ReactElement {
                   className="adm-link-btn"
                   onClick={() => {
                     setSelectedId(detail.resendOfId!);
+                    setDetailTab("details");
                     setResendMsg(null);
                     setResendOk(null);
                   }}
@@ -471,6 +536,8 @@ export function EmailLogPage(): ReactElement {
 
             <h3 className="adm-subheading">Payload</h3>
             <pre className="adm-payload">{JSON.stringify(detail.payload, null, 2)}</pre>
+              </>
+            )}
           </aside>
         )}
       </div>

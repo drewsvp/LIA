@@ -403,8 +403,12 @@ export type QueueProductEmailResult =
   /** Template disabled by a staff admin (ADMIN-10): a visible skipped row, never a silent drop. */
   | { outcome: "skipped_disabled"; emailLogId: string };
 
-/** A required variable is unresolved when null/empty (string, array, or list object). */
-function unresolvedVariables(required: readonly string[], vars: Record<string, unknown>): string[] {
+/**
+ * A required variable is unresolved when null/empty (string, array, or list
+ * object). Exported so the preview endpoint can apply the same gate before
+ * re-rendering a stored vars snapshot.
+ */
+export function unresolvedVariables(required: readonly string[], vars: Record<string, unknown>): string[] {
   const bad: string[] = [];
   for (const name of required) {
     const value = vars[name];
@@ -422,8 +426,11 @@ function unresolvedVariables(required: readonly string[], vars: Record<string, u
   return bad;
 }
 
-/** Leftover literal placeholders ({varName}) in rendered output block the send. */
-function leftoverPlaceholders(vars: Record<string, unknown>, rendered: { subject: string; html: string; text: string }): string[] {
+/**
+ * Leftover literal placeholders ({varName}) in rendered output block the send.
+ * Exported so the preview endpoint can apply the same gate after rendering.
+ */
+export function leftoverPlaceholders(vars: Record<string, unknown>, rendered: { subject: string; html: string; text: string }): string[] {
   const found: string[] = [];
   for (const name of Object.keys(vars)) {
     const token = `{${name}}`;
