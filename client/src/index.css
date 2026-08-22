@@ -2695,6 +2695,36 @@ a.site-nav-btn {
   background: rgba(2, 146, 143, 0.10);
 }
 
+/* Email log split layout — table on the left, detail panel on the right */
+.adm-email-split {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.adm-email-table {
+  flex: 1;
+  min-width: 0;
+}
+
+.adm-email-detail {
+  width: 400px;
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border-radius: 8px;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.08);
+  padding: 20px 24px 24px;
+  position: sticky;
+  top: 20px;
+}
+
+.adm-email-log-preview iframe {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
 .adm-detail {
   margin-top: 20px;
   background: var(--color-surface);

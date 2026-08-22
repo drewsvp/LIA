@@ -298,11 +298,12 @@ export function EmailLogPage(): ReactElement {
                   <tr
                     key={row.id}
                     className={[
+                      "adm-row",
                       row.id === selectedId ? "adm-row-selected" : "",
                       row.status === "failed" ? "adm-row-failed" : "",
                     ]
                       .filter(Boolean)
-                      .join(" ") || undefined}
+                      .join(" ")}
                     onClick={() => {
                       setSelectedId(row.id);
                       setDetailTab("details");

@@ -189,6 +189,22 @@ export function EmailTemplatesPage(): ReactElement {
   // Show the guard whenever a navigation or in-page action is pending confirmation.
   const showGuard = blocked || pendingKey !== null;
 
+  // True when the editor section is (or should be) in the DOM.
+  const editorVisible = selected !== null && draft !== null;
+
+  // Scroll the editor into view after it is actually in the DOM.
+  // This effect fires on the render AFTER draft is set, so editorRef.current is
+  // guaranteed to be attached. selectedKey in deps re-triggers on template switches
+  // (editorVisible stays true but the selected content changed).
+  useEffect(() => {
+    if (!editorVisible) return;
+    const id = requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorVisible, selectedKey]);
+
   // (Re)initialize the editor, load the stored preview, and auto-scroll on selection.
   // Intentionally omits `data` from deps: a background refetch (e.g. after toggling
   // status or saving schedule) must NOT reset a dirty copy/recipients draft.
@@ -209,11 +225,6 @@ export function EmailTemplatesPage(): ReactElement {
     const once = pacificDateTime(selected.schedule?.oneTimeAt ?? null);
     setOneTimeDate(once.date);
     setOneTimeTime(once.time);
-
-    // Scroll the editor into view after the DOM has painted.
-    requestAnimationFrame(() => {
-      editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
 
     const gen = ++previewGenRef.current;
     void postJson(`/api/admin/email-templates/${selected.key}/preview`, {}).then(({ ok, data: body }) => {
