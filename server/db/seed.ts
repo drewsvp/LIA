@@ -162,6 +162,12 @@ async function main(): Promise<void> {
     popIds.set(p.slug, row.id);
   }
   const allPops = await dal.populations.listAll(ctx);
+  const allPopSlugs = new Set(allPops.map((p) => p.slug));
+  for (const p of POPULATIONS) {
+    if (!allPopSlugs.has(p.slug)) {
+      fail(`required population slug "${p.slug}" is missing from the database after seeding — the slug may have drifted`);
+    }
+  }
   if (allPops.length < 11) fail(`expected at least 11 populations, found ${allPops.length}`);
 
   // -------------------------------------------------------------------------
