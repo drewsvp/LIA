@@ -780,6 +780,68 @@ async function main(): Promise<void> {
         }
       },
     );
+
+    // 2f. render-throw row → unavailable message is non-empty, no subject/iframe
+    // The fixture row passes all pre-render gates but causes template.render() to
+    // throw a TypeError at runtime. The preview panel must display the muted reason
+    // message and suppress the subject detail list and iframe entirely.
+    await runCase(
+      "panel renders a non-empty muted message when render() throws, and suppresses the subject list and iframe",
+      async () => {
+        const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+        await ctx.addCookies([cookie]);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(
+            `${BASE}/admin/email?recipient=${encodeURIComponent(RENDER_THROW_EMAIL)}`,
+            { waitUntil: "networkidle" },
+          );
+
+          const row = page.locator("table.adm-table tbody tr").first();
+          await row.waitFor({ state: "visible", timeout: 8_000 });
+          await row.click();
+
+          const detail = page.locator(".adm-email-detail");
+          await detail.waitFor({ state: "visible", timeout: 5_000 });
+
+          const previewTab = detail.locator("button", { hasText: "Preview email" });
+          await previewTab.waitFor({ state: "visible", timeout: 3_000 });
+          await previewTab.click();
+
+          const previewPanel = page.locator(".adm-email-log-preview");
+          await previewPanel.waitFor({ state: "visible", timeout: 5_000 });
+
+          // Wait for the preview query to settle: "Loading preview…" disappears
+          // and the actual unavailable reason (from the render() throw) appears.
+          await page.waitForFunction(
+            () => {
+              const el = document.querySelector(".adm-email-log-preview p.adm-muted");
+              return el !== null && el.textContent !== "Loading preview…";
+            },
+            { timeout: 10_000 },
+          );
+          const mutedMsg = previewPanel.locator("p.adm-muted");
+          const msgText = (await mutedMsg.textContent()) ?? "";
+          if (msgText.trim().length === 0) {
+            throw new Error(
+              `Expected a non-empty muted reason message when render() throws, got empty string`,
+            );
+          }
+
+          // No subject list or iframe should be present
+          const subjectList = previewPanel.locator("dl.adm-detail-list");
+          if (await subjectList.count() > 0) {
+            throw new Error("Unexpected subject/html panel rendered when render() throws");
+          }
+          const iframeEl = previewPanel.locator("iframe");
+          if (await iframeEl.count() > 0) {
+            throw new Error("Unexpected iframe rendered when render() throws");
+          }
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
   } finally {
     await browser.close();
   }
