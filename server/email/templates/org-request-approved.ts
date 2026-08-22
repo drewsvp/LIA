@@ -34,13 +34,13 @@ export type OrgRequestApprovedVars = {
 };
 
 const DEFAULT_COPY: TemplateCopy = {
-  subject: "Your Love in Action Request was Approved!",
+  subject: "Your {programName} Request was Approved!",
   heading: "Your Request Has Been Approved!",
   paragraphs: [
     "Hi {organizationName},",
-    "Your request was approved and published to the Love in Action Database!",
+    "Your request was approved and published to the {orgName} {programName} Database!",
     "For your convenience, here is the URL to your published need and a photo so you can share this request with your community and post it on your social media sites.",
-    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+    "Thank you,<br /><strong>{signature}</strong>",
   ],
 };
 

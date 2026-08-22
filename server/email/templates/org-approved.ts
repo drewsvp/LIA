@@ -34,14 +34,14 @@ export type OrgApprovedVars = {
 };
 
 const DEFAULT_COPY: TemplateCopy = {
-  subject: "Welcome to the Love in Action Database {organizationName}",
+  subject: "Welcome to the {orgName} {programName} Database {organizationName}",
   heading: "Your Organization Has Been Approved!",
   paragraphs: [
     "Hi {organizationName},",
-    "You've been approved to start using The Alliance's Love in Action Database! We can't wait to help get your donation needs and volunteer opportunities met by community members.",
+    "You've been approved to start using {orgName}'s {programName} Database! We can't wait to help get your donation needs and volunteer opportunities met by community members.",
     "Within the next few minutes you will be receiving a second email with instructions on how to log in to your new dashboard.",
     "Please review the information in your organization's profile below and save this email for your records.",
-    "If you have questions about using any of the features of this database, please email <strong>Christina Moe</strong>, our Love in Action Program Director, at christina@defendingthecause.org.",
+    "If you have questions about using any of the features of this database, please email <strong>{directorName}</strong>, our {directorTitle}, at {directorEmail}.",
   ],
 };
 

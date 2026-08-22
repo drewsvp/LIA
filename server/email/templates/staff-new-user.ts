@@ -29,7 +29,7 @@ const DEFAULT_COPY: TemplateCopy = {
   subject: "New Member Pending Approval: {memberName}",
   heading: "New Database User Pending Approval",
   paragraphs: [
-    "An Alliance Member has requested a new teammate be given access to the Love in Action Database. Here is their information:",
+    "An {orgName} Member has requested a new teammate be given access to the {programName} Database. Here is their information:",
   ],
 };
 

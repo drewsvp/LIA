@@ -15,7 +15,7 @@ import {
   fillText,
   copyPara,
   copyText,
-  NAVY,
+  getBrand,
   type TemplateCopy,
 } from "../render";
 import type { ProductTemplate } from "./types";
@@ -38,15 +38,16 @@ export type DigestNewNeedsVars = {
 };
 
 function needCardHtml(n: DigestNeed): string {
+  const color = getBrand().primaryColor;
   const image =
     n.imageUrl == null || n.imageUrl.trim() === ""
       ? ""
       : `        <img src="${escapeHtml(n.imageUrl)}" alt="${escapeHtml(n.name)}" width="280"
           style="display:block;max-width:280px;width:100%;height:auto;border-radius:5px;margin:0 0 8px;" />\n`;
-  return `      <div style="border:1px solid ${NAVY};border-radius:5px;padding:16px;margin:0 0 16px;">
+  return `      <div style="border:1px solid ${color};border-radius:5px;padding:16px;margin:0 0 16px;">
 ${image}        <div style="font-size:16px;font-weight:700;line-height:1.5;">${link(n.url, n.name)}</div>
-        <div style="font-size:15px;line-height:1.6;color:${NAVY};">Organization: ${escapeHtml(n.organizationName)}</div>
-        <div style="font-size:15px;line-height:1.6;color:${NAVY};">Type: ${escapeHtml(n.typeLabel)}</div>
+        <div style="font-size:15px;line-height:1.6;color:${color};">Organization: ${escapeHtml(n.organizationName)}</div>
+        <div style="font-size:15px;line-height:1.6;color:${color};">Type: ${escapeHtml(n.typeLabel)}</div>
       </div>`;
 }
 
@@ -60,11 +61,11 @@ function needsText(needs: DigestNeed[]): string[] {
 }
 
 const DEFAULT_COPY: TemplateCopy = {
-  subject: "New Needs from Love in Action",
+  subject: "New Needs from {programName}",
   heading: "New Needs This Week",
   paragraphs: [
     "Here are the needs our member organizations have published since the last digest. Every one of them is an opportunity to show love in action.",
-    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+    "Thank you,<br /><strong>{signature}</strong>",
   ],
 };
 
@@ -97,6 +98,8 @@ export const digestNewNeeds: ProductTemplate<DigestNewNeedsVars> = {
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
+    const color = getBrand().primaryColor;
+    const programName = getBrand().programName;
     const html = shell(
       fillText(copy.heading, vars),
       [
@@ -104,8 +107,8 @@ export const digestNewNeeds: ProductTemplate<DigestNewNeedsVars> = {
         ...vars.needs.map(needCardHtml),
         copyPara(copy.paragraphs[1] ?? "", vars),
         para(
-          `<span style="font-size:13px;">You are receiving this because you subscribed to the Love in Action weekly digest. ` +
-            `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${NAVY};text-decoration:underline;">Unsubscribe</a></span>`,
+          `<span style="font-size:13px;">You are receiving this because you subscribed to the ${escapeHtml(programName)} weekly digest. ` +
+            `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${color};text-decoration:underline;">Unsubscribe</a></span>`,
         ),
       ]
         .filter(Boolean)
@@ -117,7 +120,7 @@ export const digestNewNeeds: ProductTemplate<DigestNewNeedsVars> = {
       needsText(vars.needs),
       copyText(copy.paragraphs[1] ?? "", vars),
       [
-        "You are receiving this because you subscribed to the Love in Action weekly digest.",
+        `You are receiving this because you subscribed to the ${programName} weekly digest.`,
         `Unsubscribe: ${vars.unsubscribeUrl}`,
       ],
     );

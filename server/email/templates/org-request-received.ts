@@ -53,7 +53,7 @@ const DEFAULT_COPY: TemplateCopy = {
   heading: "Request Pending Approval",
   paragraphs: [
     "Hi {organizationName},",
-    "Thank you for submitting the following request through The Alliance's Love in Action Database. Our team will create a custom graphic with your logo and publish your need within 1–2 business days. Once your post goes live, you will receive a confirmation email with the information so you can share this need to your own community and social media platforms.",
+    "Thank you for submitting the following request through {orgName}'s {programName} Database. Our team will create a custom graphic with your logo and publish your need within 1–2 business days. Once your post goes live, you will receive a confirmation email with the information so you can share this need to your own community and social media platforms.",
   ],
 };
 

@@ -3015,6 +3015,44 @@ a.site-nav-btn {
   font-weight: 600;
   color: var(--color-navy);
 }
+
+/* Branding panel (Task 241) */
+.adm-brand-panel {
+  margin-bottom: 24px;
+  border: 1px solid #d0cdc6;
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 20px 24px;
+}
+.adm-brand-panel--collapsed .adm-brand-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.adm-brand-panel--open .adm-brand-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.adm-brand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px 28px;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+.adm-brand-grid h3.adm-subheading {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+.adm-brand-grid .adm-filter {
+  margin-bottom: 10px;
+}
+
 .adm-stuck {
   display: inline-block;
   margin-left: 8px;

@@ -40,7 +40,7 @@ const DEFAULT_COPY: TemplateCopy = {
   paragraphs: [
     "Hi {organizationName},",
     "Congratulations, someone is interested in donating items to your organization! Their details and which item(s) they've claimed are included below. This donor has been instructed to reach out to you in the <strong>next 2 weeks</strong> to set up delivery of the item(s) but you may also contact them directly.",
-    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+    "Thank you,<br /><strong>{signature}</strong>",
   ],
 };
 

@@ -4,7 +4,7 @@ import { requireOrganization, requireStaffAdmin, orgContext, staffContext } from
 import * as dal from "../dal";
 import { SYSTEM, type DbContext } from "../db/client";
 import {
-  EMAIL_HEADER_ATTACHMENT,
+  getEmailHeaderAttachment,
   EMAIL_HEADER_CID_URL,
   MAY_HAVE_SENT_MARKER,
   sendEmail,
@@ -331,7 +331,7 @@ export function registerEngagementReportingRoutes(app: Express): void {
             subject: parsed.value.subject,
             html: rendered.html,
             text: rendered.text,
-            attachments: [EMAIL_HEADER_ATTACHMENT],
+            attachments: [await getEmailHeaderAttachment()],
             oncePerPerson: true,
           });
           if (result.outcome === "sent") sent += 1;

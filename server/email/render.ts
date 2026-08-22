@@ -1,8 +1,8 @@
 /**
  * Shared rendering kit for the twelve product templates
  * (docs/email/TEMPLATES.md section 2):
- *   - navy and white from docs/Design.md, system font stack, single column,
- *     no background images;
+ *   - colour and font come from the DB-backed brand settings (single row,
+ *     in-process cache); defaults match the original hardcoded navy/system-font;
  *   - every template ships an HTML part and a WRITTEN plain-text part;
  *   - item/role lists render as tables in HTML (D51), never the on-screen
  *     "3x Blankets" string;
@@ -12,9 +12,84 @@
  *     return nothing), it never renders a blank.
  */
 
+/* ------------------------------------------------------------------ */
+/* Brand settings — module-level cache updated by the brand-settings   */
+/* DAL after a DB read or write. Render functions read _brand at call  */
+/* time so every outbound email uses the most-recently saved settings. */
+/* ------------------------------------------------------------------ */
+
+export type BrandSettings = {
+  primaryColor: string;
+  fontStack: string;
+  orgName: string;
+  programName: string;
+  signatureName: string;
+  directorName: string;
+  directorEmail: string;
+  directorTitle: string;
+  headerImageUrl: string | null;
+};
+
+/** Hardcoded defaults — match the original source-code constants exactly. */
+export const BRAND_DEFAULTS: BrandSettings = {
+  primaryColor: "rgb(6, 54, 93)",
+  fontStack: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+  orgName: "The Alliance",
+  programName: "Love in Action",
+  signatureName: "The Alliance Love in Action Team",
+  directorName: "Christina Moe",
+  directorEmail: "christina@defendingthecause.org",
+  directorTitle: "Love in Action Program Director",
+  headerImageUrl: null,
+};
+
+let _brand: BrandSettings = { ...BRAND_DEFAULTS };
+
+/** Replace the active brand settings (called by the brand-settings DAL). */
+export function setBrand(settings: BrandSettings): void {
+  _brand = { ...settings };
+}
+
+/** Read the currently active brand settings. */
+export function getBrand(): Readonly<BrandSettings> {
+  return _brand;
+}
+
+/**
+ * The six brand token vars injected into every template render, matching
+ * the {placeholder} names used in DEFAULT_COPY strings.
+ */
+export function brandTokenVars(): Record<string, string> {
+  return {
+    orgName: _brand.orgName,
+    programName: _brand.programName,
+    signature: _brand.signatureName,
+    directorName: _brand.directorName,
+    directorEmail: _brand.directorEmail,
+    directorTitle: _brand.directorTitle,
+  };
+}
+
+/**
+ * The set of brand-token placeholder names. Recognised by overrides.ts so
+ * staff copy editors may keep or replace them without triggering "unknown
+ * placeholder" validation errors.
+ */
+export const BRAND_TOKEN_NAMES = new Set([
+  "orgName",
+  "programName",
+  "signature",
+  "directorName",
+  "directorEmail",
+  "directorTitle",
+]);
+
+/**
+ * Legacy constant for backward compatibility — equals the default primary
+ * colour. Render helper functions use _brand.primaryColor at call time;
+ * prefer getBrand().primaryColor in new code.
+ */
 export const NAVY = "rgb(6, 54, 93)";
-const FONT_STACK =
-  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 export type Rendered = { subject: string; html: string; text: string };
 
@@ -45,19 +120,22 @@ export function finalizeHtml(html: string, headerImageUrl: string): string {
   if (!html.includes(HEADER_IMAGE_MARKER)) {
     throw new Error("finalizeHtml: header slot marker missing from rendered HTML");
   }
-  const img = `<img src="${escapeHtml(headerImageUrl)}" alt="Love in Action" width="560"
+  const altText = `${_brand.orgName} – ${_brand.programName}`;
+  const img = `<img src="${escapeHtml(headerImageUrl)}" alt="${escapeHtml(altText)}" width="560"
         style="display:block;width:100%;max-width:560px;height:auto;margin:0 0 24px;" />`;
   return html.replace(HEADER_IMAGE_MARKER, img);
 }
 
 /** Full HTML document: white page, LIA header banner, single navy-on-white column. */
 export function shell(heading: string, bodyHtml: string): string {
+  const color = _brand.primaryColor;
+  const font = _brand.fontStack;
   return `<!doctype html>
 <html>
-  <body style="margin:0;padding:24px;background:#ffffff;font-family:${FONT_STACK};color:${NAVY};">
+  <body style="margin:0;padding:24px;background:#ffffff;font-family:${font};color:${color};">
     <div style="max-width:560px;margin:0 auto;">
       ${HEADER_IMAGE_MARKER}
-      <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:${NAVY};">${escapeHtml(heading)}</h1>
+      <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:${color};">${escapeHtml(heading)}</h1>
 ${bodyHtml}
     </div>
   </body>
@@ -65,16 +143,19 @@ ${bodyHtml}
 }
 
 export function para(html: string): string {
-  return `      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:${NAVY};">${html}</p>`;
+  const color = _brand.primaryColor;
+  return `      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:${color};">${html}</p>`;
 }
 
 export function sectionHeading(text: string): string {
-  return `      <h2 style="margin:24px 0 8px;font-size:15px;font-weight:700;color:${NAVY};">${escapeHtml(text)}</h2>`;
+  const color = _brand.primaryColor;
+  return `      <h2 style="margin:24px 0 8px;font-size:15px;font-weight:700;color:${color};">${escapeHtml(text)}</h2>`;
 }
 
 /** "Label: value" detail line. Value is escaped. */
 export function kv(label: string, value: string): string {
-  return `      <div style="font-size:15px;line-height:1.6;color:${NAVY};">${escapeHtml(label)}: ${escapeHtml(value)}</div>`;
+  const color = _brand.primaryColor;
+  return `      <div style="font-size:15px;line-height:1.6;color:${color};">${escapeHtml(label)}: ${escapeHtml(value)}</div>`;
 }
 
 /** Detail line omitted entirely when the value is null/empty (section 2 rule). */
@@ -85,17 +166,20 @@ export function kvOpt(label: string, value: string | null | undefined): string {
 
 /** "Label: linked URL" detail line for URL values. */
 export function kvLink(label: string, url: string): string {
-  return `      <div style="font-size:15px;line-height:1.6;color:${NAVY};">${escapeHtml(label)}: <a href="${escapeHtml(url)}" style="color:${NAVY};text-decoration:underline;">${escapeHtml(url)}</a></div>`;
+  const color = _brand.primaryColor;
+  return `      <div style="font-size:15px;line-height:1.6;color:${color};">${escapeHtml(label)}: <a href="${escapeHtml(url)}" style="color:${color};text-decoration:underline;">${escapeHtml(url)}</a></div>`;
 }
 
 export function link(url: string, label?: string): string {
-  return `<a href="${escapeHtml(url)}" style="color:${NAVY};text-decoration:underline;">${escapeHtml(label ?? url)}</a>`;
+  const color = _brand.primaryColor;
+  return `<a href="${escapeHtml(url)}" style="color:${color};text-decoration:underline;">${escapeHtml(label ?? url)}</a>`;
 }
 
 export function button(label: string, url: string): string {
+  const color = _brand.primaryColor;
   return `      <p style="margin:24px 0;">
         <a href="${escapeHtml(url)}"
-           style="display:inline-block;background:${NAVY};color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:5px;">${escapeHtml(label)}</a>
+           style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 24px;border-radius:5px;">${escapeHtml(label)}</a>
       </p>`;
 }
 
@@ -104,18 +188,19 @@ export function itemsTable(
   rows: readonly { name: string; quantity: number }[],
   quantityHeader: string,
 ): string {
+  const color = _brand.primaryColor;
   const body = rows
     .map(
       (r) => `        <tr>
-          <td style="border:1px solid ${NAVY};padding:6px 10px;font-size:15px;color:${NAVY};">${escapeHtml(r.name)}</td>
-          <td style="border:1px solid ${NAVY};padding:6px 10px;font-size:15px;color:${NAVY};text-align:right;">${r.quantity}</td>
+          <td style="border:1px solid ${color};padding:6px 10px;font-size:15px;color:${color};">${escapeHtml(r.name)}</td>
+          <td style="border:1px solid ${color};padding:6px 10px;font-size:15px;color:${color};text-align:right;">${r.quantity}</td>
         </tr>`,
     )
     .join("\n");
   return `      <table style="border-collapse:collapse;margin:8px 0 16px;">
         <tr>
-          <th style="border:1px solid ${NAVY};padding:6px 10px;font-size:15px;color:${NAVY};text-align:left;">Item</th>
-          <th style="border:1px solid ${NAVY};padding:6px 10px;font-size:15px;color:${NAVY};text-align:left;">${escapeHtml(quantityHeader)}</th>
+          <th style="border:1px solid ${color};padding:6px 10px;font-size:15px;color:${color};text-align:left;">Item</th>
+          <th style="border:1px solid ${color};padding:6px 10px;font-size:15px;color:${color};text-align:left;">${escapeHtml(quantityHeader)}</th>
         </tr>
 ${body}
       </table>`;
@@ -123,8 +208,9 @@ ${body}
 
 /** Role list under its own heading (D51): one line per role. */
 export function rolesList(rows: readonly string[]): string {
+  const color = _brand.primaryColor;
   const items = rows
-    .map((r) => `        <li style="font-size:15px;line-height:1.6;color:${NAVY};">${escapeHtml(r)}</li>`)
+    .map((r) => `        <li style="font-size:15px;line-height:1.6;color:${color};">${escapeHtml(r)}</li>`)
     .join("\n");
   return `      <ul style="margin:8px 0 16px;padding-left:20px;">
 ${items}

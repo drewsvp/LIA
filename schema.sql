@@ -848,6 +848,31 @@ ALTER TABLE ONLY public.email_template_overrides FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: email_brand_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_brand_settings (
+    id integer NOT NULL,
+    primary_color text DEFAULT 'rgb(6, 54, 93)'::text NOT NULL,
+    font_stack text DEFAULT '-apple-system, BlinkMacSystemFont, ''Segoe UI'', Roboto, Helvetica, Arial, sans-serif'::text NOT NULL,
+    org_name text DEFAULT 'The Alliance'::text NOT NULL,
+    program_name text DEFAULT 'Love in Action'::text NOT NULL,
+    signature_name text DEFAULT 'The Alliance Love in Action Team'::text NOT NULL,
+    director_name text DEFAULT 'Christina Moe'::text NOT NULL,
+    director_email text DEFAULT 'christina@defendingthecause.org'::text NOT NULL,
+    director_title text DEFAULT 'Love in Action Program Director'::text NOT NULL,
+    header_image_url text,
+    updated_at timestamp with time zone,
+    updated_by uuid,
+    CONSTRAINT email_brand_settings_pkey PRIMARY KEY (id),
+    CONSTRAINT email_brand_settings_singleton CHECK ((id = 1)),
+    CONSTRAINT email_brand_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL
+);
+
+ALTER TABLE ONLY public.email_brand_settings FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: item_pledges; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2580,6 +2605,19 @@ ALTER TABLE public.email_template_overrides ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY email_template_overrides_system_staff_all ON public.email_template_overrides USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: email_brand_settings; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.email_brand_settings ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: email_brand_settings email_brand_settings_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY email_brand_settings_system_staff_all ON public.email_brand_settings USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --

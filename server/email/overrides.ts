@@ -12,7 +12,7 @@ import type { PoolClient } from "pg";
 import type { DbContext } from "../db/client";
 import * as dal from "../dal";
 import type { EmailTemplateOverride } from "../dal/email-template-overrides";
-import { copyPlaceholders, type TemplateCopy } from "./render";
+import { copyPlaceholders, BRAND_TOKEN_NAMES, type TemplateCopy } from "./render";
 import { PRODUCT_TEMPLATES, type ProductTemplateKey } from "./templates";
 
 /** The copy the render should use: the override when present, else the hardcoded default. */
@@ -43,7 +43,11 @@ export function validateCopy(key: ProductTemplateKey, copy: TemplateCopy): strin
 
   const defaults = new Set(copyPlaceholders(template.defaultCopy));
   const used = new Set(copyPlaceholders(copy));
-  const known = new Set<string>([...defaults, ...Object.keys(template.sample)]);
+  // Brand tokens ({orgName}, {programName}, {signature}, etc.) are global and
+  // always valid — they resolve from brand settings at render time, not from
+  // template-specific vars. Any default copy that uses them must keep them;
+  // editors may also freely add/remove them.
+  const known = new Set<string>([...defaults, ...Object.keys(template.sample), ...BRAND_TOKEN_NAMES]);
   for (const name of defaults) {
     if (!used.has(name)) errors.push(`The placeholder {${name}} is required by this template and must remain in the copy.`);
   }

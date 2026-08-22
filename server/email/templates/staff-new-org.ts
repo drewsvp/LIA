@@ -29,7 +29,7 @@ export type StaffNewOrgVars = {
 const DEFAULT_COPY: TemplateCopy = {
   subject: "Organization Pending Approval: {organizationName}",
   heading: "New Organization Pending Approval",
-  paragraphs: ["The following organization has requested approval to use the Love in Action Database:"],
+  paragraphs: ["The following organization has requested approval to use the {programName} Database:"],
 };
 
 export const staffNewOrg: ProductTemplate<StaffNewOrgVars> = {

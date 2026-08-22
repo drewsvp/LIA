@@ -26,6 +26,7 @@ export * as pledges from "./pledges";
 export * as signups from "./signups";
 export * as approvalEvents from "./approval-events";
 export * as emailLog from "./email-log";
+export * as emailBrandSettings from "./email-brand-settings";
 export * as emailTemplateOverrides from "./email-template-overrides";
 export * as emailSchedules from "./email-schedules";
 export * as emailResendData from "./email-resend-data";

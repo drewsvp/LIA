@@ -14,7 +14,7 @@ import { magicLink } from "better-auth/plugins";
 import { pool, SYSTEM } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as authProvider from "../dal/auth-provider";
-import { sendEmail, EMAIL_HEADER_CID_URL, EMAIL_HEADER_ATTACHMENT } from "../email/send";
+import { sendEmail, EMAIL_HEADER_CID_URL, getEmailHeaderAttachment } from "../email/send";
 import { finalizeHtml } from "../email/render";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
 
@@ -118,7 +118,7 @@ export const auth = betterAuth({
           subject: rendered.subject,
           html,
           text: rendered.text,
-          attachments: [EMAIL_HEADER_ATTACHMENT],
+          attachments: [await getEmailHeaderAttachment()],
         });
       },
     }),

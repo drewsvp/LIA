@@ -30,7 +30,7 @@ export type OrgMemberApprovedVars = {
 };
 
 const DEFAULT_COPY: TemplateCopy = {
-  subject: "Love in Action Database Login Info for {memberName}",
+  subject: "{programName} Database Login Info for {memberName}",
   heading: "Lorem Ipsum Dolor Sit Amet",
   paragraphs: [
     "Dear {memberName},",

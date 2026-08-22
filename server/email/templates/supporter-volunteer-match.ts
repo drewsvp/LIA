@@ -14,7 +14,7 @@ import {
   copyPara,
   copyText,
   escapeHtml,
-  NAVY,
+  getBrand,
   type TemplateCopy,
 } from "../render";
 import type { ProductTemplate } from "./types";
@@ -33,8 +33,8 @@ const DEFAULT_COPY: TemplateCopy = {
   heading: "A Volunteer Opportunity for You",
   paragraphs: [
     "Hi {supporterFirstName},",
-    "{organizationName} just posted a volunteer opportunity that matches the interests you saved with Love in Action.",
-    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+    "{organizationName} just posted a volunteer opportunity that matches the interests you saved with {programName}.",
+    "Thank you,<br /><strong>{signature}</strong>",
   ],
 };
 
@@ -63,6 +63,7 @@ export const supporterVolunteerMatch: ProductTemplate<SupporterVolunteerMatchVar
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
+    const color = getBrand().primaryColor;
     const html = shell(
       fillText(copy.heading, vars),
       [
@@ -76,7 +77,7 @@ export const supporterVolunteerMatch: ProductTemplate<SupporterVolunteerMatchVar
         copyPara(copy.paragraphs[2] ?? "", vars),
         para(
           `<span style="font-size:13px;">You are receiving this because you turned on matching volunteer alerts. ` +
-            `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${NAVY};text-decoration:underline;">Stop these alerts</a></span>`,
+            `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${color};text-decoration:underline;">Stop these alerts</a></span>`,
         ),
       ]
         .filter(Boolean)

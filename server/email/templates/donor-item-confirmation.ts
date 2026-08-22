@@ -44,10 +44,10 @@ const DEFAULT_COPY: TemplateCopy = {
   paragraphs: [
     "Hi {donorName},",
     "Thank you so much for signing up to meet a need through {organizationName}! Please collect or purchase the item(s) within the <strong>next 2 weeks</strong> and reach out to {requestContactName} at ({requestContactEmail}) to coordinate delivery. You are welcome to mail the item(s) or set up a time to drop off. If you have questions regarding this donation, please feel free to reach out directly to {requestContactName}.",
-    "By participating in The Alliance's <strong>Love in Action Program</strong>, you are making a difference for local kids and families!",
+    "By participating in {orgName}'s <strong>{programName} Program</strong>, you are making a difference for local kids and families!",
     "Here are the details of the need you are meeting:",
-    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
-    "If you have any questions or you email the contact and do not hear back from them within 1 week, please email <strong>Christina Moe</strong>, our Love in Action Program Director, at christina@defendingthecause.org.",
+    "Thank you,<br /><strong>{signature}</strong>",
+    "If you have any questions or you email the contact and do not hear back from them within 1 week, please email <strong>{directorName}</strong>, our {directorTitle}, at {directorEmail}.",
   ],
 };
 

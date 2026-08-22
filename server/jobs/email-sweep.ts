@@ -29,10 +29,12 @@ import {
   dispatchQueuedEmail,
   MAY_HAVE_SENT_MARKER,
   EMAIL_HEADER_CID_URL,
-  EMAIL_HEADER_ATTACHMENT,
+  getEmailHeaderAttachment,
   type PendingDispatch,
 } from "../email/send";
-import { finalizeHtml } from "../email/render";
+import { finalizeHtml, brandTokenVars } from "../email/render";
+import { effectiveCopy } from "../email/overrides";
+import * as dal from "../dal";
 import { PRODUCT_TEMPLATES, type ProductTemplateKey } from "../email/templates";
 
 /** A row must be at least this old before the sweep touches it — a fresh
@@ -44,12 +46,12 @@ const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 export type SweepSummary = { redispatched: number; failed: number; total: number };
 
-function rebuildDispatch(entry: {
+async function rebuildDispatch(entry: {
   id: string;
   templateKey: string;
   toEmail: string;
   payload: unknown;
-}): PendingDispatch | { error: string } {
+}): Promise<PendingDispatch | { error: string }> {
   const template = (PRODUCT_TEMPLATES as Record<string, (typeof PRODUCT_TEMPLATES)[ProductTemplateKey] | undefined>)[
     entry.templateKey
   ];
@@ -61,7 +63,13 @@ function rebuildDispatch(entry: {
     return { error: "payload has no vars snapshot — cannot re-render for re-dispatch" };
   }
   try {
-    const rendered = template.render(payload.vars as never);
+    // Merge brand tokens so {orgName}, {signature}, etc. resolve correctly even
+    // if the default copy now uses them. Fetch the current copy override so the
+    // re-dispatched email uses whatever copy is saved, not the original send-time
+    // copy (consistent with how a fresh queue would render it).
+    const ov = await dal.emailTemplateOverrides.getOverride(SYSTEM, entry.templateKey as ProductTemplateKey);
+    const allVars = { ...brandTokenVars(), ...payload.vars } as Record<string, unknown>;
+    const rendered = template.render(allVars as never, effectiveCopy(entry.templateKey as ProductTemplateKey, ov));
     // Inject the header banner via CID so the logo doesn't depend on the app
     // being publicly reachable — same approach as normal product sends.
     const html = finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL);
@@ -71,7 +79,7 @@ function rebuildDispatch(entry: {
       subject: rendered.subject,
       html,
       text: rendered.text,
-      attachments: [EMAIL_HEADER_ATTACHMENT],
+      attachments: [await getEmailHeaderAttachment()],
       ...(typeof payload.replyTo === "string" && payload.replyTo ? { replyTo: payload.replyTo } : {}),
     };
   } catch (err) {
@@ -112,7 +120,7 @@ export async function sweepStrandedEmails(): Promise<SweepSummary> {
       }
 
       // status === 'queued': provider never called — safe to re-dispatch.
-      const rebuilt = rebuildDispatch(entry);
+      const rebuilt = await rebuildDispatch(entry);
       if ("error" in rebuilt) {
         const message = `stranded at 'queued' (dispatch never ran, likely a process stop after commit); ${rebuilt.error}`;
         // Guarded: only while still 'queued' — a concurrent dispatch may have claimed/resolved it.

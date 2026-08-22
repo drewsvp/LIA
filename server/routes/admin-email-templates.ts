@@ -6,6 +6,9 @@
  * preview. The hardcoded template is always the fallback; saving refuses
  * loudly when a required placeholder is missing. The login-link email is
  * authentication infrastructure: listed, previewable, view-only.
+ *
+ * Also hosts the brand-settings API (GET/PUT /api/admin/email-brand and
+ * POST /api/admin/email-brand/reset) used by the Branding panel in the UI.
  */
 import type { Express, Request, Response } from "express";
 import { requireStaffAdmin, staffContext, sendNotFound } from "../auth/guards";
@@ -13,7 +16,7 @@ import * as dal from "../dal";
 import type { DbContext } from "../db/client";
 import { PRODUCT_TEMPLATES, isProductTemplateKey, type ProductTemplateKey } from "../email/templates";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
-import { copyPlaceholders, finalizeHtml, type TemplateCopy } from "../email/render";
+import { copyPlaceholders, finalizeHtml, brandTokenVars, getBrand, type TemplateCopy } from "../email/render";
 import { absoluteUrl, headerImageDataUri } from "../email/send";
 import { effectiveCopy, envStaffRecipients, parseRecipientOverride, validateCopy } from "../email/overrides";
 import { templateDisplayName } from "../../shared/email-templates";
@@ -44,6 +47,8 @@ function parseCopyBody(raw: unknown): { ok: true; copy: TemplateCopy | null } | 
 
 const EMAILISH_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Basic CSS colour validation: hex (#rgb / #rrggbb) or rgb(r,g,b). */
+const COLOR_RE = /^(#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))$/;
 
 function isCalendarDate(value: string): boolean {
   if (!CALENDAR_DATE_RE.test(value)) return false;
@@ -56,7 +61,23 @@ function isCalendarDate(value: string): boolean {
   );
 }
 
+function isValidColor(value: string): boolean {
+  return COLOR_RE.test(value.trim());
+}
+
+/** Resolve the best header image src for a browser preview. */
+function previewHeaderSrc(): string {
+  const url = getBrand().headerImageUrl;
+  return url && url.trim() !== "" ? url : headerImageDataUri();
+}
+
 export function registerEmailTemplateAdminRoutes(app: Express): void {
+
+  // Warm up brand settings cache when routes are registered (server startup).
+  void dal.emailBrandSettings.refreshBrandCache({ kind: "system" }).catch((err) =>
+    console.warn("[admin] brand settings warmup failed:", err),
+  );
+
   // ---- List every automated email with metadata + current override state.
   app.get("/api/admin/email-templates", requireStaffAdmin, async (req: Request, res: Response, next) => {
     try {
@@ -305,6 +326,7 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
 
   // ---- Rendered preview with sample data. Accepts optional draft copy so
   // edits can be previewed before saving; draft copy is validated first.
+  // Brand tokens are injected into sample vars so {orgName} etc. resolve.
   app.post("/api/admin/email-templates/:key/preview", requireStaffAdmin, async (req: Request, res: Response, next) => {
     const key = req.params.key ?? "";
     try {
@@ -312,8 +334,7 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         const rendered = renderMagicLinkEmail({ firstName: "Maria", url: absoluteUrl("/login") });
         res.json({
           subject: rendered.subject,
-          // Preview: data URI so the logo renders in the browser regardless of APP_BASE_URL.
-          html: finalizeHtml(rendered.html, headerImageDataUri()),
+          html: finalizeHtml(rendered.html, previewHeaderSrc()),
           text: rendered.text,
         });
         return;
@@ -344,13 +365,101 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         copy = effectiveCopy(key, ov);
       }
 
-      const rendered = template.render(template.sample as never, copy);
+      // Inject brand tokens so {orgName}, {programName}, etc. resolve in sample renders.
+      const sampleVars = { ...brandTokenVars(), ...(template.sample as Record<string, unknown>) };
+      const rendered = template.render(sampleVars as never, copy);
       res.json({
         subject: rendered.subject,
-        // Preview: data URI so the logo renders in the browser regardless of APP_BASE_URL.
-        html: finalizeHtml(rendered.html, headerImageDataUri()),
+        html: finalizeHtml(rendered.html, previewHeaderSrc()),
         text: rendered.text,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ------------------------------------------------------------------ //
+  // Brand settings                                                       //
+  // ------------------------------------------------------------------ //
+
+  // ---- Read the current brand settings row.
+  app.get("/api/admin/email-brand", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const settings = await dal.emailBrandSettings.getBrandSettingsAdmin(staffCtx(req));
+      res.json({ settings });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Save brand settings. All editable fields are required.
+  app.put("/api/admin/email-brand", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const errors: string[] = [];
+
+      if (typeof body.primaryColor !== "string" || body.primaryColor.trim() === "") {
+        errors.push("Primary color is required.");
+      } else if (!isValidColor(body.primaryColor.trim())) {
+        errors.push("Primary color must be rgb(r, g, b) or a hex value (#rrggbb or #rgb).");
+      }
+      if (typeof body.fontStack !== "string" || body.fontStack.trim() === "") {
+        errors.push("Font stack is required.");
+      }
+      if (typeof body.orgName !== "string" || body.orgName.trim() === "") {
+        errors.push("Organisation name is required.");
+      }
+      if (typeof body.programName !== "string" || body.programName.trim() === "") {
+        errors.push("Program name is required.");
+      }
+      if (typeof body.signatureName !== "string" || body.signatureName.trim() === "") {
+        errors.push("Signature sign-off is required.");
+      }
+      if (typeof body.directorName !== "string" || body.directorName.trim() === "") {
+        errors.push("Director name is required.");
+      }
+      if (typeof body.directorEmail !== "string" || !EMAILISH_RE.test(body.directorEmail.trim())) {
+        errors.push("Director email must be a valid email address.");
+      }
+      if (typeof body.directorTitle !== "string" || body.directorTitle.trim() === "") {
+        errors.push("Director title is required.");
+      }
+      const rawHeaderUrl = body.headerImageUrl;
+      if (rawHeaderUrl != null && rawHeaderUrl !== "" && typeof rawHeaderUrl !== "string") {
+        errors.push("Header image URL must be a URL string or left blank.");
+      }
+
+      if (errors.length > 0) {
+        res.status(400).json({ message: "Brand settings were not saved.", errors });
+        return;
+      }
+
+      const saved = await dal.emailBrandSettings.upsertBrandSettings(staffCtx(req), {
+        primaryColor: (body.primaryColor as string).trim(),
+        fontStack: (body.fontStack as string).trim(),
+        orgName: (body.orgName as string).trim(),
+        programName: (body.programName as string).trim(),
+        signatureName: (body.signatureName as string).trim(),
+        directorName: (body.directorName as string).trim(),
+        directorEmail: (body.directorEmail as string).trim(),
+        directorTitle: (body.directorTitle as string).trim(),
+        headerImageUrl:
+          rawHeaderUrl && typeof rawHeaderUrl === "string" && rawHeaderUrl.trim() !== ""
+            ? rawHeaderUrl.trim()
+            : null,
+        updatedByUserId: staffContext(req).userId,
+      });
+      res.json({ ok: true, settings: saved });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Reset brand settings to the hardcoded defaults.
+  app.post("/api/admin/email-brand/reset", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const saved = await dal.emailBrandSettings.resetToDefaults(staffCtx(req), staffContext(req).userId);
+      res.json({ ok: true, settings: saved });
     } catch (err) {
       next(err);
     }

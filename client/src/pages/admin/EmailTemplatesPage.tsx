@@ -5,6 +5,10 @@
  * preview with sample data. The login-link email appears marked as
  * authentication infrastructure, view-only. Saving refuses with a stated
  * error when a required placeholder is missing — the server validates too.
+ *
+ * Also hosts the Branding panel (Task 241) where staff-admins can edit the
+ * primary colour, fonts, org identity strings, director details, and header
+ * image URL that all outbound emails use.
  */
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -44,10 +48,26 @@ type Schedule = {
   updatedByName: string | null;
 };
 
+type BrandSettings = {
+  primaryColor: string;
+  fontStack: string;
+  orgName: string;
+  programName: string;
+  signatureName: string;
+  directorName: string;
+  directorEmail: string;
+  directorTitle: string;
+  headerImageUrl: string | null;
+  updatedAt: string | null;
+  updatedByName: string | null;
+};
 type ListResponse = { templates: TemplateRow[] };
 type PreviewResponse = { subject: string; html: string; text: string };
 
+type BrandResponse = { settings: BrandSettings };
 const LIST_KEY = "/api/admin/email-templates";
+
+const BRAND_KEY = "/api/admin/email-brand";
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
 
 function fmtDate(iso: string): string {
@@ -116,6 +136,19 @@ async function postJson(url: string, body: unknown, method = "POST"): Promise<{ 
   return { ok: res.ok, data };
 }
 
+const BRAND_DEFAULTS: BrandSettings = {
+  primaryColor: "rgb(6, 54, 93)",
+  fontStack: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+  orgName: "The Alliance",
+  programName: "Love in Action",
+  signatureName: "The Alliance Love in Action Team",
+  directorName: "Christina Moe",
+  directorEmail: "christina@defendingthecause.org",
+  directorTitle: "Love in Action Program Director",
+  headerImageUrl: null,
+  updatedAt: null,
+  updatedByName: null,
+};
 export function EmailTemplatesPage(): ReactElement {
   const { data, isLoading } = useQuery<ListResponse>({ queryKey: [LIST_KEY] });
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -389,6 +422,8 @@ export function EmailTemplatesPage(): ReactElement {
         curly braces like {"{organizationName}"} is filled in when the email is sent and must stay in the copy. A
         disabled email is recorded in the email log as skipped, never dropped silently.
       </p>
+
+      <BrandingPanel />
 
       {message && (
         <p className="adm-result" role="status">
@@ -676,5 +711,261 @@ export function EmailTemplatesPage(): ReactElement {
         )}
       </div>
     </div>
+  );
+}
+
+function BrandingPanel(): ReactElement {
+  const { data: brandData, isLoading: brandLoading } = useQuery<BrandResponse>({ queryKey: [BRAND_KEY] });
+  const brand = brandData?.settings ?? BRAND_DEFAULTS;
+
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<BrandSettings | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  // Initialise draft when brand loads.
+  useEffect(() => {
+    if (brandData?.settings && !draft) {
+      setDraft({ ...brandData.settings });
+    }
+  }, [brandData, draft]);
+
+  function openPanel(): void {
+    setExpanded(true);
+    setMessage(null);
+    setErrors([]);
+    setDraft({ ...brand });
+  }
+
+  function closePanel(): void {
+    setExpanded(false);
+    setMessage(null);
+    setErrors([]);
+  }
+
+  async function saveBrand(): Promise<void> {
+    if (!draft || saving) return;
+    setSaving(true);
+    setMessage(null);
+    setErrors([]);
+    try {
+      const { ok, data } = await postJson(BRAND_KEY, {
+        primaryColor: draft.primaryColor,
+        fontStack: draft.fontStack,
+        orgName: draft.orgName,
+        programName: draft.programName,
+        signatureName: draft.signatureName,
+        directorName: draft.directorName,
+        directorEmail: draft.directorEmail,
+        directorTitle: draft.directorTitle,
+        headerImageUrl: draft.headerImageUrl && draft.headerImageUrl.trim() !== "" ? draft.headerImageUrl.trim() : null,
+      }, "PUT");
+      if (ok) {
+        setMessage("Brand settings saved. All future emails will use these values.");
+        await queryClient.invalidateQueries({ queryKey: [BRAND_KEY] });
+      } else {
+        const b = data as { errors?: string[]; message?: string } | null;
+        setErrors(b?.errors ?? []);
+        setMessage(b?.message ?? SAVE_FAILURE);
+      }
+    } catch {
+      setMessage(SAVE_FAILURE);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetBrand(): Promise<void> {
+    if (saving) return;
+    setSaving(true);
+    setMessage(null);
+    setErrors([]);
+    try {
+      const { ok, data } = await postJson(`${BRAND_KEY}/reset`, {});
+      if (ok) {
+        const saved = (data as { settings: BrandSettings }).settings;
+        setDraft({ ...saved });
+        setMessage("Brand settings reset to built-in defaults.");
+        await queryClient.invalidateQueries({ queryKey: [BRAND_KEY] });
+      } else {
+        const b = data as { message?: string } | null;
+        setMessage(b?.message ?? SAVE_FAILURE);
+      }
+    } catch {
+      setMessage(SAVE_FAILURE);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const lastEdited = brand.updatedAt
+    ? `Last saved by ${brand.updatedByName ?? "a staff member"} on ${fmtDate(brand.updatedAt)}`
+    : "Using built-in defaults — not yet customised.";
+
+  if (!expanded) {
+    return (
+      <section className="adm-brand-panel adm-brand-panel--collapsed">
+        <div className="adm-brand-panel-header">
+          <div>
+            <h2 className="adm-subheading" style={{ margin: 0 }}>Branding</h2>
+            <span className="adm-muted" style={{ fontSize: "0.875em" }}>{lastEdited}</span>
+          </div>
+          <button type="button" className="adm-btn-outline" onClick={openPanel}>
+            Edit branding
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (brandLoading || !draft) {
+    return <section className="adm-brand-panel"><p className="adm-muted">Loading…</p></section>;
+  }
+
+  return (
+    <section className="adm-brand-panel adm-brand-panel--open">
+      <div className="adm-brand-panel-header">
+        <h2 className="adm-subheading" style={{ margin: 0 }}>Branding</h2>
+        <button type="button" className="adm-email-editor-close" aria-label="Close branding panel" onClick={closePanel}>×</button>
+      </div>
+      <p className="adm-muted">
+        These values appear in every outbound email. Changes take effect immediately — no redeploy required.
+        Tokens like <code>{"{orgName}"}</code> and <code>{"{signature}"}</code> in email copy resolve from these settings.
+      </p>
+
+      {message && <p className="adm-result" role="status">{message}</p>}
+      {errors.length > 0 && (
+        <ul className="adm-error-text" role="alert">
+          {errors.map((e) => <li key={e}>{e}</li>)}
+        </ul>
+      )}
+
+      <div className="adm-brand-grid">
+        <div>
+          <h3 className="adm-subheading">Identity</h3>
+          <label className="adm-filter">
+            Organisation name <span className="adm-muted">— <code>{"{orgName}"}</code></span>
+            <input
+              type="text"
+              value={draft.orgName}
+              onChange={(e) => setDraft({ ...draft, orgName: e.target.value })}
+            />
+          </label>
+          <label className="adm-filter">
+            Program name <span className="adm-muted">— <code>{"{programName}"}</code></span>
+            <input
+              type="text"
+              value={draft.programName}
+              onChange={(e) => setDraft({ ...draft, programName: e.target.value })}
+            />
+          </label>
+          <label className="adm-filter">
+            Email sign-off <span className="adm-muted">— <code>{"{signature}"}</code></span>
+            <input
+              type="text"
+              value={draft.signatureName}
+              onChange={(e) => setDraft({ ...draft, signatureName: e.target.value })}
+            />
+          </label>
+        </div>
+
+        <div>
+          <h3 className="adm-subheading">Director contact</h3>
+          <label className="adm-filter">
+            Name <span className="adm-muted">— <code>{"{directorName}"}</code></span>
+            <input
+              type="text"
+              value={draft.directorName}
+              onChange={(e) => setDraft({ ...draft, directorName: e.target.value })}
+            />
+          </label>
+          <label className="adm-filter">
+            Email <span className="adm-muted">— <code>{"{directorEmail}"}</code></span>
+            <input
+              type="email"
+              value={draft.directorEmail}
+              onChange={(e) => setDraft({ ...draft, directorEmail: e.target.value })}
+            />
+          </label>
+          <label className="adm-filter">
+            Title <span className="adm-muted">— <code>{"{directorTitle}"}</code></span>
+            <input
+              type="text"
+              value={draft.directorTitle}
+              onChange={(e) => setDraft({ ...draft, directorTitle: e.target.value })}
+            />
+          </label>
+        </div>
+
+        <div>
+          <h3 className="adm-subheading">Visual</h3>
+          <label className="adm-filter">
+            Primary colour <span className="adm-muted">(rgb(r,g,b) or #hex)</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="color"
+                value={(() => {
+                  // Convert rgb(...) to #hex for the colour picker.
+                  const m = draft.primaryColor.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+                  if (m) return `#${[m[1],m[2],m[3]].map(n => Number(n).toString(16).padStart(2,"0")).join("")}`;
+                  return draft.primaryColor;
+                })()}
+                style={{ width: 40, height: 32, padding: 2, border: "1px solid #ccc", cursor: "pointer" }}
+                onChange={(e) => {
+                  const hex = e.target.value;
+                  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+                  setDraft({ ...draft, primaryColor: `rgb(${r}, ${g}, ${b})` });
+                }}
+              />
+              <input
+                type="text"
+                value={draft.primaryColor}
+                style={{ flex: 1 }}
+                onChange={(e) => setDraft({ ...draft, primaryColor: e.target.value })}
+              />
+            </div>
+          </label>
+          <label className="adm-filter">
+            Font stack
+            <input
+              type="text"
+              value={draft.fontStack}
+              onChange={(e) => setDraft({ ...draft, fontStack: e.target.value })}
+            />
+          </label>
+          <label className="adm-filter">
+            Header image URL <span className="adm-muted">(leave blank to use the built-in PNG)</span>
+            <input
+              type="url"
+              value={draft.headerImageUrl ?? ""}
+              placeholder="https://…"
+              onChange={(e) => setDraft({ ...draft, headerImageUrl: e.target.value || null })}
+            />
+          </label>
+          {(draft.headerImageUrl ?? "").trim() !== "" && (
+            <div style={{ marginTop: 8 }}>
+              <p className="adm-muted" style={{ marginBottom: 4 }}>Preview:</p>
+              <img
+                src={draft.headerImageUrl ?? ""}
+                alt="Header preview"
+                style={{ maxWidth: "100%", maxHeight: 80, border: "1px solid #ccc", borderRadius: 4 }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <p className="adm-muted" style={{ marginTop: 8 }}>{lastEdited}</p>
+
+      <div className="adm-btn-row">
+        <button type="button" className="adm-btn" disabled={saving} onClick={() => void saveBrand()}>
+          {saving ? "Saving…" : "Save branding"}
+        </button>
+        <button type="button" className="adm-btn-outline" disabled={saving} onClick={() => void resetBrand()}>
+          Reset to defaults
+        </button>
+      </div>
+    </section>
   );
 }

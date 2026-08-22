@@ -29,3 +29,4 @@
 - [Publish schema after restores](publish-schema-after-restores.md) — restoring code does not roll back dev DB; orphaned schema can reappear in Publish, and new parent keys may be emitted after dependent FKs.
 - [Publish and database routines](publish-db-routines.md) — table parity is not routine parity (42883 at runtime); publish also strands the migration ledger, and running migrations in the deploy build takes publishing down.
 - [Out-of-band need photos](managed-openai-availability.md) — externally produced photos still go through prompt builder + storage adapter + DAL write; pick rows by null image URL, never by gen status.
+- [Email brand settings](email-brand-settings.md) — singleton table (CHECK id=1), updated_by must be uuid not text; _brand module cache in render.ts; merge brandTokenVars() before template.render(), template vars win on collision.

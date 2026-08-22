@@ -32,7 +32,7 @@ import { getDbRoutineCheckResult } from "../db/startup-checks";
 import { parseProductUrl } from "../../shared/item-product-url";
 import { PRODUCT_TEMPLATES, isProductTemplateKey } from "../email/templates";
 import { effectiveCopy } from "../email/overrides";
-import { finalizeHtml } from "../email/render";
+import { finalizeHtml, brandTokenVars } from "../email/render";
 
 /** ADMIN-05 §5: lowercase, hyphenated. Shared by add (validation) and promote (generation). */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -2027,9 +2027,12 @@ export function registerAdminRoutes(app: Express): void {
       }
 
       const ov = await dal.emailTemplateOverrides.getOverride(ctx, key);
+      // Merge brand tokens so {orgName}, {signature}, etc. resolve in the
+      // preview even if the stored vars pre-date the brand-settings feature.
+      const allVars = { ...brandTokenVars(), ...storedVars };
       let rendered: { subject: string; html: string; text: string };
       try {
-        rendered = template.render(storedVars as never, effectiveCopy(key, ov));
+        rendered = template.render(allVars as never, effectiveCopy(key, ov));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         res.json({
@@ -2042,7 +2045,7 @@ export function registerAdminRoutes(app: Express): void {
       // Apply the leftover-placeholder gate: a literal {token} surviving the
       // render means a variable key was present but its value was not used,
       // which indicates a template/vars mismatch.
-      const leftovers = leftoverPlaceholders(storedVars, rendered);
+      const leftovers = leftoverPlaceholders(allVars, rendered);
       if (leftovers.length > 0) {
         res.json({
           previewUnavailable: true,

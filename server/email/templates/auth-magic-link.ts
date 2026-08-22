@@ -6,8 +6,13 @@
  * Carries the shared LIA header banner slot: like the product templates, the
  * html embeds HEADER_IMAGE_MARKER and the caller (auth.ts) swaps in the
  * absolute image URL via finalizeHtml() before sending.
+ *
+ * The bespoke grey/teal card layout stays in code (out of scope for brand-
+ * settings overrides per task 241), but the org name and primary colour
+ * are read from the live brand settings so they stay consistent when staff
+ * update them.
  */
-import { HEADER_IMAGE_MARKER } from "../render";
+import { HEADER_IMAGE_MARKER, getBrand } from "../render";
 
 export type MagicLinkEmailVars = {
   firstName: string;
@@ -15,23 +20,24 @@ export type MagicLinkEmailVars = {
 };
 
 export function renderMagicLinkEmail(vars: MagicLinkEmailVars): { subject: string; html: string; text: string } {
-  const subject = "Your sign-in link for Love in Action";
+  const brand = getBrand();
+  const subject = `Your sign-in link for ${brand.programName}`;
   const text = [
     `Hi ${vars.firstName},`,
     "",
-    "Use the link below to sign in to the Love in Action member portal. It expires in 15 minutes.",
+    `Use the link below to sign in to the ${brand.programName} member portal. It expires in 15 minutes.`,
     "",
     vars.url,
     "",
     "If you did not request this link, you can ignore this email.",
-    "The Alliance",
+    brand.orgName,
   ].join("\n");
   const html = `<!doctype html>
 <html>
-  <body style="margin:0;padding:24px;background:#f5f5f5;font-family:'Open Sans',Arial,sans-serif;color:#333333;">
+  <body style="margin:0;padding:24px;background:#f5f5f5;font-family:${escapeHtml(brand.fontStack)};color:#333333;">
     <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:5px;padding:32px;">
       ${HEADER_IMAGE_MARKER}
-      <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:rgb(6,54,93);">Sign in to Love in Action</h1>
+      <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:${escapeHtml(brand.primaryColor)};">Sign in to ${escapeHtml(brand.programName)}</h1>
       <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">Hi ${escapeHtml(vars.firstName)},</p>
       <p style="margin:0 0 24px;font-size:14px;line-height:1.6;">
         Use the button below to sign in to the member portal. This link expires in 15 minutes.
@@ -49,7 +55,7 @@ export function renderMagicLinkEmail(vars: MagicLinkEmailVars): { subject: strin
         <a href="${vars.url}" style="color:rgb(2,146,143);">${vars.url}</a>
       </p>
       <p style="margin:0;font-size:12px;color:#666666;">
-        If you did not request this link, you can ignore this email.<br />The Alliance
+        If you did not request this link, you can ignore this email.<br />${escapeHtml(brand.orgName)}
       </p>
     </div>
   </body>

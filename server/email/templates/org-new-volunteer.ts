@@ -42,7 +42,7 @@ const DEFAULT_COPY: TemplateCopy = {
   paragraphs: [
     "Hi {organizationName},",
     "Congratulations, someone is interested in volunteering with your organization! Their details and which role(s) they are interested in are included below. Please reach out to this person in the <strong>next 1–3 business days</strong> to confirm the requirements for this volunteer opportunity and provide any additional details they need for participating.",
-    "Thank you,<br /><strong>The Alliance Love in Action Team</strong>",
+    "Thank you,<br /><strong>{signature}</strong>",
   ],
 };
 

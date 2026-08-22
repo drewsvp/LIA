@@ -27,7 +27,7 @@ import { SYSTEM, type DbContext } from "../db/client";
 import * as emailLog from "../dal/email-log";
 import * as dal from "../dal";
 import { PRODUCT_TEMPLATES, type ProductTemplateKey } from "./templates";
-import { finalizeHtml } from "./render";
+import { finalizeHtml, brandTokenVars, getBrand } from "./render";
 import { effectiveCopy } from "./overrides";
 import type { ProductEntityType } from "./templates/types";
 export class EmailConfigError extends Error {
@@ -68,6 +68,12 @@ function loadHeaderImage(): { base64: string; dataUri: string } {
 
 const _headerImage = loadHeaderImage();
 
+// Warm up brand settings from DB at startup so the first send uses saved
+// values. Safe to fail: render.ts _brand defaults match the DB defaults.
+void dal.emailBrandSettings.refreshBrandCache(SYSTEM).catch((err) =>
+  console.warn("[email] brand settings warmup failed (using defaults):", err),
+);
+
 /**
  * CID src value used in outbound email HTML when the header is sent as an
  * inline attachment. Mail clients fetch the image from the message itself,
@@ -78,14 +84,19 @@ export const EMAIL_HEADER_CID_URL = "cid:lia-email-header";
 /**
  * Base64 data URI for use in browser-rendered admin previews. Browsers
  * handle data URIs fine; mail clients do not, so real sends use CID instead.
+ * When a brand header_image_url is configured, returns that URL directly so
+ * the preview renders the new logo without a round-trip encode.
  */
 export function headerImageDataUri(): string {
-  return _headerImage.dataUri;
+  const url = getBrand().headerImageUrl;
+  return url && url.trim() !== "" ? url : _headerImage.dataUri;
 }
 
 /**
  * Postmark inline-attachment descriptor that pairs with EMAIL_HEADER_CID_URL.
  * Include this in every real send so the logo is embedded in the message.
+ * When brand.headerImageUrl is set, fetches and encodes that URL; falls back
+ * to the disk PNG if the fetch fails.
  */
 export const EMAIL_HEADER_ATTACHMENT = {
   Name: "email-header.png",
@@ -94,6 +105,10 @@ export const EMAIL_HEADER_ATTACHMENT = {
   ContentID: EMAIL_HEADER_CID_URL,
 } as const;
 
+/** In-process cache for the brand-configured header image URL. */
+let _urlHeaderCache: { url: string; base64: string } | null = null;
+
+const MAX_HEADER_IMAGE_BYTES = 2 * 1024 * 1024; // 2 MB
 export class EmailSendError extends Error {
   constructor(message: string) {
     super(message);
@@ -442,15 +457,6 @@ export function leftoverPlaceholders(vars: Record<string, unknown>, rendered: { 
 }
 
 /**
- * Queue one product email inside the caller's DB context: the email_log row
- * is written at 'queued' BEFORE the response goes out; the caller dispatches
- * the returned PendingDispatch after responding (dispatchQueuedEmails).
- *
- * Variable resolution happens here, before anything can go out: a missing
- * required value, a render error, or a leftover literal placeholder marks
- * the row failed with the reason and returns { outcome: "blocked" }.
- */
-/**
  * Transaction-composable product-email queue (MP-03 §3: the staff email_log
  * rows belong inside the signup transaction). Render-FIRST: an unresolved
  * required variable, a render error, or a leftover literal placeholder throws
@@ -485,14 +491,17 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
   if (missing.length > 0) {
     throw new EmailConfigError(`${template.key}: unresolved variable(s): ${missing.join(", ")}`);
   }
+  // Inject brand tokens ({orgName}, {programName}, etc.) before rendering.
+  // Template-specific vars take priority over brand tokens if names collide.
+  const allVars = { ...brandTokenVars(), ...input.vars } as Record<string, unknown>;
   let rendered: ReturnType<typeof template.render>;
   try {
-    rendered = template.render(input.vars as never, effectiveCopy(input.key, override));
+    rendered = template.render(allVars as never, effectiveCopy(input.key, override));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new EmailConfigError(`${template.key}: render failed: ${msg}`);
   }
-  const leftovers = leftoverPlaceholders(input.vars, rendered);
+  const leftovers = leftoverPlaceholders(allVars, rendered);
   if (leftovers.length > 0) {
     throw new EmailConfigError(`${template.key}: literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
   }
@@ -509,13 +518,14 @@ export async function queueProductEmailInTx(c: PoolClient, input: QueueProductEm
     entityId: input.entityId,
     payload: { vars: input.vars, ...(input.replyTo ? { replyTo: input.replyTo } : {}) },
   });
+  const headerAttachment = await getEmailHeaderAttachment();
   return {
     emailLogId: entry.id,
     toEmail: input.toEmail,
     subject: rendered.subject,
     html,
     text: rendered.text,
-    attachments: [EMAIL_HEADER_ATTACHMENT],
+    attachments: [headerAttachment],
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
   };
 }
@@ -568,15 +578,18 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
     return block(`unresolved variable(s): ${missing.join(", ")}`);
   }
 
+  // Inject brand tokens before rendering; template vars take priority.
+  const allVars = { ...brandTokenVars(), ...input.vars } as Record<string, unknown>;
+
   let rendered: { subject: string; html: string; text: string };
   try {
-    rendered = template.render(input.vars as never, effectiveCopy(input.key, override));
+    rendered = template.render(allVars as never, effectiveCopy(input.key, override));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return block(`template render failed: ${message}`);
   }
 
-  const leftovers = leftoverPlaceholders(input.vars, rendered);
+  const leftovers = leftoverPlaceholders(allVars, rendered);
   if (leftovers.length > 0) {
     return block(`literal placeholder(s) left in rendered output: ${leftovers.join(", ")}`);
   }
@@ -591,6 +604,7 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
     return block(`header image injection failed: ${message}`);
   }
 
+  const headerAttachment = await getEmailHeaderAttachment();
   return {
     outcome: "queued",
     dispatch: {
@@ -599,8 +613,147 @@ export async function queueProductEmail(ctx: DbContext, input: QueueProductEmail
       subject: rendered.subject,
       html,
       text: rendered.text,
-      attachments: [EMAIL_HEADER_ATTACHMENT],
+      attachments: [headerAttachment],
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     },
   };
+}
+
+/**
+ * Resolve the CID attachment to use for a real send. If brand.headerImageUrl
+ * is set, fetches (with SSRF-safe validation and cache) and encodes it;
+ * falls back to the disk PNG when no URL is configured or the fetch fails.
+ * Exported so every send path (product queue, magic-link, sweep, outreach)
+ * picks up the brand logo without duplicating logic.
+ */
+export async function getEmailHeaderAttachment(): Promise<EmailInlineAttachment> {
+  const brandUrl = getBrand().headerImageUrl;
+  if (!brandUrl || brandUrl.trim() === "") {
+    return { Name: "email-header.png", Content: _headerImage.base64, ContentType: "image/png", ContentID: EMAIL_HEADER_CID_URL };
+  }
+  if (_urlHeaderCache?.url === brandUrl) {
+    return { Name: "email-header.png", Content: _urlHeaderCache.base64, ContentType: "image/png", ContentID: EMAIL_HEADER_CID_URL };
+  }
+  try {
+    const base64 = await fetchSafeHeaderImage(brandUrl);
+    _urlHeaderCache = { url: brandUrl, base64 };
+    return { Name: "email-header.png", Content: base64, ContentType: "image/png", ContentID: EMAIL_HEADER_CID_URL };
+  } catch (err) {
+    console.warn(`[email] brand header image fetch failed (${brandUrl}), falling back to disk PNG:`, err);
+    return { Name: "email-header.png", Content: _headerImage.base64, ContentType: "image/png", ContentID: EMAIL_HEADER_CID_URL };
+  }
+}
+
+/**
+ * Returns true when the IP address (IPv4 dotted-quad or IPv6 string) belongs
+ * to a private, loopback, link-local, or otherwise reserved range that must
+ * not be reachable from the server. Used to prevent SSRF via brand image URLs.
+ */
+function isPrivateIp(ip: string): boolean {
+  if (ip.includes(":")) {
+    // IPv6
+    const lower = ip.toLowerCase();
+    if (lower === "::1" || lower === "::") return true;
+    if (lower.startsWith("fe80:") || lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    if (lower.startsWith("::ffff:")) return isPrivateIp(lower.slice(7)); // IPv4-mapped
+    return false;
+  }
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) return true;
+  const [a, b, c] = parts as [number, number, number, number];
+  if (a === 0 || a === 10 || a === 127) return true;         // 0.x, 10.x, loopback
+  if (a === 169 && b === 254) return true;                    // link-local
+  if (a === 172 && b >= 16 && b <= 31) return true;          // RFC 1918
+  if (a === 192 && b === 168) return true;                    // RFC 1918
+  if (a === 100 && b >= 64 && b <= 127) return true;         // RFC 6598 shared
+  if (a >= 224) return true;                                  // multicast + reserved
+  if (a === 192 && b === 0 && c === 2) return true;          // TEST-NET-1
+  if (a === 198 && b === 51 && c === 100) return true;        // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return true;         // TEST-NET-3
+  return false;
+}
+
+/**
+ * Validates that a brand header image URL is safe to fetch server-side.
+ * Enforces HTTPS, blocks private/loopback/reserved IPs via DNS pre-resolution,
+ * and rejects literal-IP addresses in the private ranges.
+ * Throws a user-facing Error when the URL is unsafe.
+ */
+async function assertSafeImageUrl(urlStr: string): Promise<void> {
+  let parsed: URL;
+  try { parsed = new URL(urlStr); } catch {
+    throw new Error("Header image URL is not a valid URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(`Header image URL must use HTTPS (not ${parsed.protocol}).`);
+  }
+  const hostname = parsed.hostname;
+  // Reject bare IP literal addresses in private ranges.
+  const isIpLiteral = /^\d+\.\d+\.\d+\.\d+$/.test(hostname) || /^\[.+\]$/.test(hostname);
+  if (isIpLiteral) {
+    const raw = hostname.replace(/^\[|\]$/g, "");
+    if (isPrivateIp(raw)) throw new Error("Header image URL must not point to a private or reserved IP address.");
+  }
+  // Resolve hostname and block any returned private IP.
+  const { resolve4, resolve6 } = await import("node:dns/promises");
+  const ips: string[] = [];
+  await Promise.allSettled([
+    resolve4(hostname).then((r) => ips.push(...r)),
+    resolve6(hostname).then((r) => ips.push(...r)),
+  ]);
+  if (ips.length === 0) throw new Error(`Header image URL hostname "${hostname}" could not be resolved.`);
+  for (const ip of ips) {
+    if (isPrivateIp(ip)) throw new Error(`Header image URL resolves to a private/reserved IP address (${ip}).`);
+  }
+}
+
+/**
+ * Fetches a brand header image URL safely: HTTPS-only, no private IPs,
+ * redirect destination must also be HTTPS, content-type must be image/*,
+ * and response body is capped at MAX_HEADER_IMAGE_BYTES.
+ * Returns base64-encoded image data. Throws on any violation.
+ */
+async function fetchSafeHeaderImage(url: string): Promise<string> {
+  // Follow redirects manually so every hop is validated for SSRF safety.
+  let currentUrl = url;
+  let hopCount = 0;
+  const MAX_REDIRECTS = 5;
+  let response: Response;
+  await assertSafeImageUrl(currentUrl);
+  for (;;) {
+    response = await fetch(currentUrl, { signal: AbortSignal.timeout(10_000), redirect: "manual" });
+    if (response.status >= 300 && response.status < 400) {
+      if (++hopCount > MAX_REDIRECTS) throw new Error("Header image URL exceeded the maximum redirect depth (5).");
+      const location = response.headers.get("location");
+      if (!location) throw new Error("Header image URL redirect had no Location header.");
+      const nextUrl = new URL(location, currentUrl).href;
+      await assertSafeImageUrl(nextUrl); // full HTTPS + DNS/IP validation on every hop
+      currentUrl = nextUrl;
+      continue;
+    }
+    break;
+  }
+  if (!response.ok) throw new Error(`Header image URL returned HTTP ${response.status}.`);
+  const ct = response.headers.get("content-type") ?? "";
+  if (!ct.startsWith("image/")) {
+    throw new Error(`Header image URL returned non-image content (${ct || "unknown type"}).`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Header image URL returned an empty body.");
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.length;
+    if (totalBytes > MAX_HEADER_IMAGE_BYTES) {
+      void reader.cancel();
+      throw new Error("Header image is too large (max 2 MB).");
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.length; }
+  return Buffer.from(merged).toString("base64");
 }
