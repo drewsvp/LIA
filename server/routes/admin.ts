@@ -32,8 +32,7 @@ import { getDbRoutineCheckResult } from "../db/startup-checks";
 import { parseProductUrl } from "../../shared/item-product-url";
 import { PRODUCT_TEMPLATES, isProductTemplateKey } from "../email/templates";
 import { effectiveCopy } from "../email/overrides";
-import { finalizeHtml, brandTokenVars } from "../email/render";
-
+import { finalizeHtml, HEADER_IMAGE_MARKER, brandTokenVars } from "../email/render";
 /** ADMIN-05 §5: lowercase, hyphenated. Shared by add (validation) and promote (generation). */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -2056,7 +2055,15 @@ export function registerAdminRoutes(app: Express): void {
 
       let html: string;
       try {
-        html = finalizeHtml(rendered.html, headerImageDataUri());
+        // Dev-only: strip the header-slot marker from the rendered HTML so
+        // that finalizeHtml itself throws. All product templates call shell()
+        // which always embeds HEADER_IMAGE_MARKER, so no fixture data can
+        // naturally reach this error path. Has no effect outside development.
+        const htmlToFinalize =
+          process.env.NODE_ENV === "development" && req.query._test_finalize_throw === "1"
+            ? rendered.html.replace(HEADER_IMAGE_MARKER, "")
+            : rendered.html;
+        html = finalizeHtml(htmlToFinalize, headerImageDataUri());
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         res.json({ previewUnavailable: true, reason: `The preview HTML could not be finalized: ${message}` });

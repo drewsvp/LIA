@@ -12,6 +12,8 @@
  *       output (leftoverPlaceholders gate) → previewUnavailable, reason names the leftover key
  *   1g. Product template row whose payload.vars passes all pre-render gates but causes template.render() to throw
  *       at runtime → previewUnavailable: true, reason non-empty and contains an actionable term (render/error)
+ *   1h. finalizeHtml catch path — dev-only ?_test_finalize_throw=1 gate forces the throw on a valid row;
+ *       confirms HTTP 200, previewUnavailable: true, reason contains "finalized" or "error"
  *
  * Section 2 — Browser panel checks (Playwright):
  *   2a. Clicking a renderable row and switching to "Preview email" renders
@@ -489,6 +491,33 @@ async function main(): Promise<void> {
   assert(
     r7body?.subject === undefined && r7body?.html === undefined,
     "1g: no subject or html fields on render-throw response",
+  );
+
+  // 1h. finalizeHtml catch path.
+  // All product templates call shell(), which always embeds HEADER_IMAGE_MARKER,
+  // so no fixture data can naturally cause finalizeHtml to throw. A dev-only
+  // query gate (?_test_finalize_throw=1) in the endpoint lets us force the
+  // throw and exercise the real catch block with a fully-renderable row.
+  const r8res = await apiGet(
+    `/api/admin/email/${productRowId}/preview?_test_finalize_throw=1`,
+    cookieHeader,
+  );
+  const r8body = r8res.body as Record<string, unknown> | null;
+  assert(r8res.status === 200, "1h: HTTP 200 when finalizeHtml throws (not a 500)");
+  assert(
+    r8body?.previewUnavailable === true,
+    "1h: previewUnavailable: true when finalizeHtml throws",
+  );
+  assert(
+    typeof r8body?.reason === "string" &&
+      (r8body.reason as string).length > 0 &&
+      /finali[sz]ed|error/i.test(r8body.reason as string),
+    "1h: reason is non-empty and contains an actionable term (finalized/error)",
+    r8body?.reason,
+  );
+  assert(
+    r8body?.subject === undefined && r8body?.html === undefined,
+    "1h: no subject or html fields on finalize-throw response",
   );
 
   // ── Section 2: Browser panel checks (Playwright) ──────────────────────────
