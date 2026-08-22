@@ -10,6 +10,8 @@
  *   1e. Product template row whose payload.vars has all required fields but one is an empty string → previewUnavailable
  *   1f. Product template row whose payload.vars has an extra key whose name appears as a literal {token} in the rendered
  *       output (leftoverPlaceholders gate) → previewUnavailable, reason names the leftover key
+ *   1g. Product template row whose payload.vars passes all pre-render gates but causes template.render() to throw
+ *       at runtime → previewUnavailable: true, reason non-empty and contains an actionable term (render/error)
  *
  * Section 2 — Browser panel checks (Playwright):
  *   2a. Clicking a renderable row and switching to "Preview email" renders
@@ -464,8 +466,10 @@ async function main(): Promise<void> {
   assert(r7res.status === 200, "1g: HTTP 200 when render() throws (not a 500)");
   assert(r7body?.previewUnavailable === true, "1g: previewUnavailable: true when render() throws");
   assert(
-    typeof r7body?.reason === "string" && (r7body.reason as string).length > 0,
-    "1g: reason is a non-empty string containing the error text",
+    typeof r7body?.reason === "string" &&
+      (r7body.reason as string).length > 0 &&
+      /finali[sz]ed|render|error/i.test(r7body.reason as string),
+    "1g: reason is non-empty and contains an actionable term (render/error/finalized)",
     r7body?.reason,
   );
   assert(
