@@ -30,6 +30,7 @@
     "test:send-pipeline-leftover": "tsx scripts/test-send-pipeline-leftover.ts",
     "test:send-pipeline-render-throw": "tsx scripts/test-send-pipeline-render-throw.ts",
     "test:send-pipeline-intx-render-throw": "tsx scripts/test-send-pipeline-intx-render-throw.ts",
+    "test:send-pipeline-intx-finalize-throw": "tsx scripts/test-send-pipeline-intx-finalize-throw.ts",
     "test:staff-admin-access": "tsx scripts/test-staff-admin-access.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",
     "db:seed": "tsx server/db/seed.ts",
