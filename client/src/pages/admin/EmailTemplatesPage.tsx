@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
+import { useNavigationGuard } from "../../hooks/useNavigationGuard";
 
 type Copy = { subject: string; heading: string; paragraphs: string[] };
 
@@ -95,6 +96,15 @@ function fmtPacific(iso: string | null): string {
   });
 }
 
+function copyEqual(a: Copy, b: Copy): boolean {
+  return (
+    a.subject === b.subject &&
+    a.heading === b.heading &&
+    a.paragraphs.length === b.paragraphs.length &&
+    a.paragraphs.every((p, i) => p === b.paragraphs[i])
+  );
+}
+
 async function postJson(url: string, body: unknown, method = "POST"): Promise<{ ok: boolean; data: unknown }> {
   const res = await fetch(url, {
     method,
@@ -122,6 +132,9 @@ export function EmailTemplatesPage(): ReactElement {
   const [savingSchedule, setSavingSchedule] = useState(false);
   // Key of the row whose status pill is showing an inline confirm.
   const [confirmToggleKey, setConfirmToggleKey] = useState<string | null>(null);
+  // When non-null, a row switch or close is waiting for dirty-state confirmation.
+  // "__CLOSE__" means the close button was clicked; any other value is the target row key.
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
   // Incremented each time the selected template changes so stale in-flight
   // responses from a previous selection are discarded on arrival.
   const previewGenRef = useRef(0);
@@ -132,7 +145,20 @@ export function EmailTemplatesPage(): ReactElement {
   const templates = data?.templates ?? [];
   const selected = templates.find((t) => t.key === selectedKey) ?? null;
 
+  // True when the draft copy or recipients differ from what is stored on the selected template.
+  const isDirty =
+    (draft !== null && selected !== null && !copyEqual(draft, selected.copy)) ||
+    (selected !== null && draftRecipients !== (selected.recipientsOverride ?? ""));
+
+  // Guards browser Back, admin nav clicks, and hard refresh while edits are unsaved.
+  const { blocked, confirmLeave, cancelLeave } = useNavigationGuard(isDirty);
+
+  // Show the guard whenever a navigation or in-page action is pending confirmation.
+  const showGuard = blocked || pendingKey !== null;
+
   // (Re)initialize the editor, load the stored preview, and auto-scroll on selection.
+  // Intentionally omits `data` from deps: a background refetch (e.g. after toggling
+  // status or saving schedule) must NOT reset a dirty copy/recipients draft.
   useEffect(() => {
     setMessage(null);
     setErrors([]);
@@ -163,15 +189,55 @@ export function EmailTemplatesPage(): ReactElement {
       // silently ignore errors on the initial auto-load; the user can click Preview to retry
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, data]);
+  }, [selectedKey]);
 
-  function handleClose(): void {
+  function doClose(): void {
     const prevKey = selectedKey;
     setSelectedKey(null);
     // Scroll the previously selected row back into view.
     requestAnimationFrame(() => {
       if (prevKey) rowRefs.current[prevKey]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
+  }
+
+  function handleClose(): void {
+    if (isDirty) {
+      setPendingKey("__CLOSE__");
+      return;
+    }
+    doClose();
+  }
+
+  function handleRowClick(key: string): void {
+    const next = key === selectedKey ? null : key;
+    if (isDirty && next !== null) {
+      // Switching to a different row with unsaved edits — ask first.
+      setPendingKey(key);
+      return;
+    }
+    if (isDirty && next === null) {
+      // Toggling the current row closed — treat like close.
+      setPendingKey("__CLOSE__");
+      return;
+    }
+    setSelectedKey(next);
+  }
+
+  function commitPending(): void {
+    const pk = pendingKey;
+    setPendingKey(null);
+    // Also replay any intercepted browser/router navigation.
+    confirmLeave();
+    if (pk === "__CLOSE__") {
+      doClose();
+    } else if (pk !== null) {
+      setSelectedKey(pk);
+    }
+  }
+
+  function dismissPending(): void {
+    setPendingKey(null);
+    cancelLeave();
   }
 
   async function refreshPreview(): Promise<void> {
@@ -214,6 +280,17 @@ export function EmailTemplatesPage(): ReactElement {
       );
       if (ok) {
         setMessage(resetToDefault ? "Restored the built-in copy." : "Saved. All future sends use this copy.");
+        // Explicitly sync the draft so isDirty returns false without relying on the
+        // editor-init effect (which intentionally omits `data` from its deps).
+        // For a restore-default, adopt the built-in copy. For a normal save, the
+        // draft already matches the saved copy — just normalise recipients so that
+        // any server-side trimming doesn't leave a phantom dirty flag.
+        if (resetToDefault) {
+          setDraft({ ...selected.defaultCopy, paragraphs: [...selected.defaultCopy.paragraphs] });
+          setDraftRecipients("");
+        } else if (selected.recipientsConfigurable) {
+          setDraftRecipients(draftRecipients.trim() === "" ? "" : draftRecipients.trim());
+        }
         await queryClient.invalidateQueries({ queryKey: [LIST_KEY] });
       } else {
         const b = body as { errors?: string[]; message?: string } | null;
@@ -274,6 +351,38 @@ export function EmailTemplatesPage(): ReactElement {
 
   return (
     <div className="adm-page">
+      {showGuard && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 200,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            className="adm-dirty-guard"
+            role="alertdialog"
+            aria-label="Unsaved changes"
+            style={{ background: "#fff", padding: "24px 28px", maxWidth: 420, width: "100%", borderRadius: 6, boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}
+          >
+            <p className="adm-dirty-guard-text">
+              You have unsaved changes. Discard them?
+            </p>
+            <div className="adm-btn-row">
+              <button type="button" className="adm-btn" onClick={commitPending}>
+                Discard changes
+              </button>
+              <button type="button" className="adm-btn-outline" onClick={dismissPending}>
+                Keep editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <h1 className="adm-heading">Automated emails</h1>
       <p className="adm-muted">
         These emails are sent automatically. You can edit the subject and body copy, and turn each one off. Text in
@@ -318,7 +427,7 @@ export function EmailTemplatesPage(): ReactElement {
                   ].filter(Boolean).join(" ") || undefined}
                   onClick={() => {
                     if (row.authInfrastructure) return;
-                    setSelectedKey(row.key === selectedKey ? null : row.key);
+                    handleRowClick(row.key);
                   }}
                 >
                   <td>
@@ -402,6 +511,7 @@ export function EmailTemplatesPage(): ReactElement {
                 ×
               </button>
             </div>
+
 
             <dl className="adm-detail-list">
               <dt>Sent when</dt>

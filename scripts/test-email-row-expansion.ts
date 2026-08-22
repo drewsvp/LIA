@@ -10,10 +10,11 @@
  *   5. Clicking a status pill shows the inline confirm dialog.
  *   6. Cancel dismisses the confirm without changing state.
  *   7. Confirm calls the toggle and updates the pill label.
- *   8. Editing copy and switching rows silently discards the draft (no guard
- *      dialog — current behavior pinned so a future guard addition is caught).
- *   9. Editing copy and clicking close (×) silently discards the draft (no
- *      guard dialog — close path pinned alongside Case 8).
+ *   8. Editing copy and switching rows shows a dirty-state guard dialog;
+ *      "Keep editing" preserves the draft, "Discard changes" proceeds.
+ *   9. Editing copy and clicking close (×) shows the same dirty-state guard;
+ *      "Keep editing" keeps the editor open, "Discard changes" closes it.
+ *  10. Restoring built-in copy syncs the draft — no phantom dirty flag on close.
  *
  * Usage:
  *   npm run test:email-row-expansion
@@ -23,7 +24,6 @@
  */
 import { execFileSync } from "node:child_process";
 import { chromium, type BrowserContext } from "playwright";
-
 const BASE = process.env.REPLIT_DEV_DOMAIN
   ? `https://${process.env.REPLIT_DEV_DOMAIN}`
   : "http://127.0.0.1:5000";
@@ -330,15 +330,16 @@ async function main(): Promise<void> {
       },
     );
 
-    // ── Case 8: Editing copy and switching rows silently discards the draft ──
+    // ── Case 8: Dirty-state guard fires when switching rows or closing with unsaved edits ──
     //
-    // DOCUMENTED BEHAVIOR: The email editor has no dirty-state guard. If a
-    // staff member edits the subject or body and then clicks a different row,
-    // the draft is reset to the stored value with no warning. This test pins
-    // that behavior so that if a guard is added in the future the test fails
-    // and must be updated to validate the guard instead.
+    // When a staff member edits the subject or body and then clicks a different
+    // row (or the close button), the editor must show a guard dialog
+    // (.adm-dirty-guard) before discarding the draft. The guard offers:
+    //   • "Keep editing" — dismisses the dialog, leaves the current editor open
+    //     with the unsaved edit still present.
+    //   • "Discard changes" — proceeds with the row switch and resets the draft.
     await runCase(
-      "editing copy and clicking a different row silently discards the draft (no guard dialog)",
+      "editing copy and clicking a different row shows the dirty-state guard dialog",
       async () => {
         const ctx = await newCtx(browser, cookie);
         try {
@@ -357,10 +358,13 @@ async function main(): Promise<void> {
           await rows.first().click();
           await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
 
-          // Edit the subject field.
+          // Edit the subject field to make the draft dirty.
+          // Use the label text to avoid accidentally targeting a recipients input
+          // that appears before the subject when recipientsConfigurable is true.
           const subjectInput = page
-            .locator(".adm-email-editor input[type='text']")
-            .first();
+            .locator(".adm-email-editor label")
+            .filter({ hasText: /^Subject/ })
+            .locator("input[type='text']");
           await subjectInput.waitFor({ state: "visible", timeout: 3_000 });
           const originalSubject = await subjectInput.inputValue();
           await subjectInput.fill(originalSubject + " UNSAVED_EDIT");
@@ -372,36 +376,62 @@ async function main(): Promise<void> {
             editedValue,
           );
 
-          // Click a different row — expect no guard dialog.
+          // Click a different row — guard must appear.
           await rows.nth(1).click();
 
-          // Allow a render cycle so any guard dialog would have mounted.
-          await page.waitForTimeout(500);
-
-          // DOCUMENTED BEHAVIOR: no guard dialog fires — the draft is silently
-          // discarded. If a guard is introduced, this assertion will fail and
-          // the test must be updated to validate the guard's UX instead.
-          const guardCount = await page
-            .locator('[role="alertdialog"], .adm-dirty-guard, .adm-unsaved-dialog')
-            .count();
+          const guard = page.locator(".adm-dirty-guard");
+          await guard.waitFor({ state: "visible", timeout: 3_000 });
           assert(
-            guardCount === 0,
-            "no guard dialog appears when switching rows with unsaved edits (current behavior: silent loss)",
-            { guardCount },
+            await guard.isVisible(),
+            "dirty-state guard dialog appears after clicking a different row with unsaved edits",
           );
 
-          // The editor should now show the second row — its subject must not
-          // contain the unsaved edit, confirming the draft was reset.
+          // ── Sub-case A: "Keep editing" dismisses the guard and preserves the draft ──
+          const keepBtn = guard.locator("text=Keep editing");
+          await keepBtn.waitFor({ state: "visible", timeout: 3_000 });
+          await keepBtn.click();
+
+          await page.locator(".adm-dirty-guard").waitFor({ state: "hidden", timeout: 3_000 });
+          assert(
+            (await page.locator(".adm-dirty-guard").count()) === 0,
+            "guard dialog is gone after clicking 'Keep editing'",
+          );
+
+          // Editor must still show the first row's unsaved edit.
+          const stillEditing = await page
+            .locator(".adm-email-editor label")
+            .filter({ hasText: /^Subject/ })
+            .locator("input[type='text']")
+            .inputValue();
+          assert(
+            stillEditing.includes("UNSAVED_EDIT"),
+            "'Keep editing' leaves the unsaved edit intact in the editor",
+            { stillEditing },
+          );
+
+          // ── Sub-case B: "Discard changes" proceeds with the row switch ──
+          // Click the second row again to re-trigger the guard.
+          await rows.nth(1).click();
+          const guard2 = page.locator(".adm-dirty-guard");
+          await guard2.waitFor({ state: "visible", timeout: 3_000 });
+
+          const discardBtn = guard2.locator("text=Discard changes");
+          await discardBtn.waitFor({ state: "visible", timeout: 3_000 });
+          await discardBtn.click();
+
+          // Guard must disappear and the editor must now show the second row.
+          await page.locator(".adm-dirty-guard").waitFor({ state: "hidden", timeout: 3_000 });
           await page
             .locator(".adm-email-editor")
             .waitFor({ state: "visible", timeout: 5_000 });
+
           const newSubjectValue = await page
             .locator(".adm-email-editor input[type='text']")
             .first()
             .inputValue();
           assert(
             !newSubjectValue.includes("UNSAVED_EDIT"),
-            "after switching rows the subject shows the new row's stored value, not the unsaved edit",
+            "'Discard changes' switches to the new row and the unsaved edit is gone",
             { newSubjectValue },
           );
         } finally {
@@ -410,16 +440,15 @@ async function main(): Promise<void> {
       },
     );
 
-    // ── Case 9: Editing copy and clicking close (×) silently discards the draft ──
+    // ── Case 9: Dirty-state guard fires when clicking close (×) with unsaved edits ──
     //
-    // DOCUMENTED BEHAVIOR: The email editor has no dirty-state guard on the
-    // close (×) button path either. If a staff member edits the subject or body
-    // and then clicks close, the draft is reset to the stored value with no
-    // warning. This test pins that behavior — mirroring Case 8 for row switches
-    // — so that if a guard is added to handleClose in the future this test fails
-    // and must be updated to validate the guard's UX instead.
+    // The guard introduced for row switches (Case 8) also covers the close (×)
+    // button. Clicking close with a dirty draft must show the .adm-dirty-guard
+    // modal. "Keep editing" dismisses it and leaves the editor open with the
+    // unsaved edit intact. "Discard changes" closes the editor and discards the
+    // draft.
     await runCase(
-      "editing copy and clicking close (×) silently discards the draft (no guard dialog)",
+      "editing copy and clicking close (×) shows the dirty-state guard dialog",
       async () => {
         const ctx = await newCtx(browser, cookie);
         try {
@@ -430,65 +459,77 @@ async function main(): Promise<void> {
           await page.locator(".adm-row-clickable").first().click();
           await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
 
-          // Edit the subject field.
+          // Edit the subject field to make the draft dirty.
           const subjectInput = page
-            .locator(".adm-email-editor input[type='text']")
-            .first();
+            .locator(".adm-email-editor label")
+            .filter({ hasText: /^Subject/ })
+            .locator("input[type='text']");
           await subjectInput.waitFor({ state: "visible", timeout: 3_000 });
           const originalSubject = await subjectInput.inputValue();
           await subjectInput.fill(originalSubject + " UNSAVED_CLOSE_EDIT");
 
-          const editedValue = await subjectInput.inputValue();
           assert(
-            editedValue.includes("UNSAVED_CLOSE_EDIT"),
+            (await subjectInput.inputValue()).includes("UNSAVED_CLOSE_EDIT"),
             "subject field contains the unsaved edit before clicking close",
-            editedValue,
           );
 
-          // Click the close (×) button — expect no guard dialog.
+          // Click the close (×) button — guard must appear.
           const closeBtn = page.locator('[aria-label="Close editor"]');
           await closeBtn.waitFor({ state: "visible", timeout: 3_000 });
           await closeBtn.click();
 
-          // Allow a render cycle so any guard dialog would have mounted.
-          await page.waitForTimeout(500);
-
-          // DOCUMENTED BEHAVIOR: no guard dialog fires — the draft is silently
-          // discarded. If a guard is introduced on handleClose, this assertion
-          // will fail and the test must be updated to validate the guard instead.
-          const guardCount = await page
-            .locator('[role="alertdialog"], .adm-dirty-guard, .adm-unsaved-dialog')
-            .count();
+          const guard = page.locator(".adm-dirty-guard");
+          await guard.waitFor({ state: "visible", timeout: 3_000 });
           assert(
-            guardCount === 0,
-            "no guard dialog appears when clicking close with unsaved edits (current behavior: silent loss)",
-            { guardCount },
+            await guard.isVisible(),
+            "dirty-state guard dialog appears after clicking close with unsaved edits",
           );
 
-          // The editor should be gone — confirming the close happened without a
-          // guard blocking it.
+          // ── Sub-case A: "Keep editing" dismisses the guard, editor stays open ──
+          const keepBtn = guard.locator("text=Keep editing");
+          await keepBtn.waitFor({ state: "visible", timeout: 3_000 });
+          await keepBtn.click();
+
+          await page.locator(".adm-dirty-guard").waitFor({ state: "hidden", timeout: 3_000 });
+          assert(
+            (await page.locator(".adm-email-editor").count()) > 0,
+            "'Keep editing' leaves the editor open",
+          );
+          assert(
+            (await page
+              .locator(".adm-email-editor label")
+              .filter({ hasText: /^Subject/ })
+              .locator("input[type='text']")
+              .inputValue()).includes("UNSAVED_CLOSE_EDIT"),
+            "'Keep editing' leaves the unsaved edit intact",
+          );
+
+          // ── Sub-case B: "Discard changes" closes the editor ──
+          await closeBtn.click();
+          const guard2 = page.locator(".adm-dirty-guard");
+          await guard2.waitFor({ state: "visible", timeout: 3_000 });
+
+          const discardBtn = guard2.locator("text=Discard changes");
+          await discardBtn.waitFor({ state: "visible", timeout: 3_000 });
+          await discardBtn.click();
+
+          await page.locator(".adm-dirty-guard").waitFor({ state: "hidden", timeout: 3_000 });
           assert(
             (await page.locator(".adm-email-editor").count()) === 0,
-            "editor section is removed after clicking close with unsaved edits",
+            "'Discard changes' closes the editor",
           );
 
-          // Reopen the same row to prove the draft was actually discarded.
-          // A regression that secretly persisted the draft (or auto-saved it)
-          // would cause the subject to still contain the unsaved marker here.
+          // Reopen the row to confirm the draft was discarded (not auto-saved).
           await page.locator(".adm-row-clickable").first().click();
           await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
           const reopenedSubject = await page
-            .locator(".adm-email-editor input[type='text']")
-            .first()
+            .locator(".adm-email-editor label")
+            .filter({ hasText: /^Subject/ })
+            .locator("input[type='text']")
             .inputValue();
           assert(
-            reopenedSubject === originalSubject,
-            "after close and reopen the subject shows the original stored value, not the discarded draft",
-            { reopenedSubject, originalSubject },
-          );
-          assert(
             !reopenedSubject.includes("UNSAVED_CLOSE_EDIT"),
-            "the unsaved marker is absent after close — the draft was discarded",
+            "after discard and reopen the subject shows the stored value, not the discarded draft",
             { reopenedSubject },
           );
         } finally {
@@ -548,6 +589,83 @@ async function main(): Promise<void> {
             },
             [".adm-status-pill", originalLabel] as [string, string],
             { timeout: 8_000 },
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+    // ── Case 10: Restoring built-in copy syncs the draft — no phantom dirty flag ──
+    //
+    // After clicking "Restore built-in copy", the editor must show the default
+    // copy (not the old override), isDirty must be false (no guard on close),
+    // and reopening the template must still show the default copy.
+    await runCase(
+      "restoring built-in copy syncs the editor draft and leaves no unsaved-edit guard on close",
+      async () => {
+        const ctx = await newCtx(browser, cookie);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(`${BASE}/admin/emails`, { waitUntil: "networkidle" });
+
+          // Open the first clickable row.
+          const rows = page.locator(".adm-row-clickable");
+          await rows.first().click();
+          await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
+
+          // Capture the default subject before any edits.
+          const subjectLocator = page
+            .locator(".adm-email-editor label")
+            .filter({ hasText: /^Subject/ })
+            .locator("input[type='text']");
+          await subjectLocator.waitFor({ state: "visible", timeout: 3_000 });
+          const defaultSubject = await subjectLocator.inputValue();
+
+          // Save a custom override so "Restore built-in copy" appears.
+          await subjectLocator.fill(defaultSubject + " OVERRIDE_FOR_RESTORE_TEST");
+          const saveBtn = page.locator(".adm-email-editor .adm-btn-row .adm-btn").first();
+          await saveBtn.waitFor({ state: "visible", timeout: 3_000 });
+          await saveBtn.click();
+          // Wait for the success message to confirm the save landed.
+          await page.locator(".adm-result").waitFor({ state: "visible", timeout: 8_000 });
+
+          // "Restore built-in copy" button must now be visible.
+          const restoreBtn = page.locator("button", { hasText: "Restore built-in copy" });
+          await restoreBtn.waitFor({ state: "visible", timeout: 5_000 });
+          await restoreBtn.click();
+          await page.locator(".adm-result").waitFor({ state: "visible", timeout: 8_000 });
+
+          // The draft must now show the default subject, not the saved override.
+          const restoredSubject = await subjectLocator.inputValue();
+          assert(
+            !restoredSubject.includes("OVERRIDE_FOR_RESTORE_TEST"),
+            "draft subject shows default copy after restore, not the saved override",
+            { restoredSubject },
+          );
+          assert(
+            restoredSubject === defaultSubject,
+            "draft subject matches the original default subject after restore",
+            { restoredSubject, defaultSubject },
+          );
+
+          // isDirty must be false — clicking close must NOT show the guard.
+          const closeBtn = page.locator('[aria-label="Close editor"]');
+          await closeBtn.click();
+          await page.waitForTimeout(400);
+          assert(
+            (await page.locator(".adm-dirty-guard").count()) === 0,
+            "no dirty-state guard appears on close after restore — draft is clean",
+          );
+          await page.locator(".adm-email-editor").waitFor({ state: "hidden", timeout: 5_000 });
+
+          // Reopen the row to confirm the override is truly gone server-side.
+          await rows.first().click();
+          await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
+          const reopenedSubject = await subjectLocator.inputValue();
+          assert(
+            !reopenedSubject.includes("OVERRIDE_FOR_RESTORE_TEST"),
+            "reopening after restore still shows default copy — override was not re-applied",
+            { reopenedSubject },
           );
         } finally {
           await ctx.close();

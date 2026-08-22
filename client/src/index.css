@@ -3002,6 +3002,19 @@ a.site-nav-btn {
   background: #f0f0f0;
   color: var(--color-navy);
 }
+.adm-dirty-guard {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fff8e1;
+  border: 1px solid #f0c040;
+  border-radius: 6px;
+}
+.adm-dirty-guard-text {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-navy);
+}
 .adm-stuck {
   display: inline-block;
   margin-left: 8px;
