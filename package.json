@@ -34,6 +34,7 @@
     "test:send-pipeline-finalize-throw": "tsx scripts/test-send-pipeline-finalize-throw.ts",
     "test:send-pipeline-intx-leftover": "tsx scripts/test-send-pipeline-intx-leftover.ts",
     "test:magic-link-finalize-throw": "tsx scripts/test-magic-link-finalize-throw.ts",
+    "test:magic-link-http-error": "tsx scripts/test-magic-link-http-error.ts",
     "test:staff-admin-access": "tsx scripts/test-staff-admin-access.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",
     "db:seed": "tsx server/db/seed.ts",
