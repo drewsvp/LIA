@@ -26,6 +26,7 @@
     "test:email-row-expansion": "tsx scripts/test-email-row-expansion.ts",
     "test:email-admin-guard": "tsx scripts/test-email-admin-guard.ts",
     "test:email-preview-panel": "tsx scripts/test-email-preview-panel.ts",
+    "test:staff-admin-access": "tsx scripts/test-staff-admin-access.ts",
     "db:seed": "tsx server/db/seed.ts",
     "db:apply-auth-schema": "tsx server/auth/apply-auth-schema.ts",
     "db:apply-migrations": "tsx server/db/apply-migrations.ts",
