@@ -16,6 +16,10 @@
  *       subject line and an iframe with a non-empty srcDoc
  *   2b. Clicking an auth_magic_link row and switching to "Preview email"
  *       renders the unavailable message and no subject/iframe
+ *   2c. Clicking a partial-vars row renders the unavailable message naming the missing var
+ *   2d. Clicking an empty-string-var row renders the unavailable message naming the offending var
+ *   2e. Clicking a no-vars row (payload.vars absent entirely) renders the unavailable message
+ *       with a non-empty reason and no subject/iframe
  *
  * Usage:
  *   npm run test:email-preview-panel
@@ -576,6 +580,65 @@ async function main(): Promise<void> {
           if (!msgText.includes("dashboardUrl")) {
             throw new Error(
               `Expected reason mentioning dashboardUrl, got: ${JSON.stringify(msgText)}`,
+            );
+          }
+
+          // No subject list or iframe should be present
+          const subjectList = previewPanel.locator("dl.adm-detail-list");
+          if (await subjectList.count() > 0) {
+            throw new Error("Unexpected subject/html panel rendered for unavailable preview");
+          }
+          const iframeEl = previewPanel.locator("iframe");
+          if (await iframeEl.count() > 0) {
+            throw new Error("Unexpected iframe rendered for unavailable preview");
+          }
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    // 2e. empty-vars row (no vars key in payload) → unavailable message, no subject/iframe
+    await runCase(
+      "panel renders the unavailable message when the email row has no vars at all",
+      async () => {
+        const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+        await ctx.addCookies([cookie]);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(
+            `${BASE}/admin/email?recipient=${encodeURIComponent(EMPTY_VARS_EMAIL)}`,
+            { waitUntil: "networkidle" },
+          );
+
+          const row = page.locator("table.adm-table tbody tr").first();
+          await row.waitFor({ state: "visible", timeout: 8_000 });
+          await row.click();
+
+          const detail = page.locator(".adm-email-detail");
+          await detail.waitFor({ state: "visible", timeout: 5_000 });
+
+          const previewTab = detail.locator("button", { hasText: "Preview email" });
+          await previewTab.waitFor({ state: "visible", timeout: 3_000 });
+          await previewTab.click();
+
+          const previewPanel = page.locator(".adm-email-log-preview");
+          await previewPanel.waitFor({ state: "visible", timeout: 5_000 });
+
+          // Wait for the preview query to settle: "Loading preview…" disappears
+          // and the actual unavailable reason appears.
+          await page.waitForFunction(
+            () => {
+              const el = document.querySelector(".adm-email-log-preview p.adm-muted");
+              return el !== null && el.textContent !== "Loading preview…";
+            },
+            { timeout: 10_000 },
+          );
+          const mutedMsg = previewPanel.locator("p.adm-muted");
+          const msgText = (await mutedMsg.textContent()) ?? "";
+          if (msgText.trim().length === 0) {
+            throw new Error(
+              `Expected a non-empty unavailable reason, got empty string`,
             );
           }
 
