@@ -10,6 +10,8 @@
  *   5. Clicking a status pill shows the inline confirm dialog.
  *   6. Cancel dismisses the confirm without changing state.
  *   7. Confirm calls the toggle and updates the pill label.
+ *   8. Editing copy and switching rows silently discards the draft (no guard
+ *      dialog — current behavior pinned so a future guard addition is caught).
  *
  * Usage:
  *   npm run test:email-row-expansion
@@ -319,6 +321,86 @@ async function main(): Promise<void> {
             restoredLabel === originalLabel,
             "pill label is unchanged after Cancel",
             { originalLabel, restoredLabel },
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    // ── Case 8: Editing copy and switching rows silently discards the draft ──
+    //
+    // DOCUMENTED BEHAVIOR: The email editor has no dirty-state guard. If a
+    // staff member edits the subject or body and then clicks a different row,
+    // the draft is reset to the stored value with no warning. This test pins
+    // that behavior so that if a guard is added in the future the test fails
+    // and must be updated to validate the guard instead.
+    await runCase(
+      "editing copy and clicking a different row silently discards the draft (no guard dialog)",
+      async () => {
+        const ctx = await newCtx(browser, cookie);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(`${BASE}/admin/emails`, { waitUntil: "networkidle" });
+
+          const rows = page.locator(".adm-row-clickable");
+          const rowCount = await rows.count();
+          assert(
+            rowCount >= 2,
+            "page must have at least two clickable rows to test row switching",
+            rowCount,
+          );
+
+          // Open the first row's editor.
+          await rows.first().click();
+          await page.locator(".adm-email-editor").waitFor({ state: "visible", timeout: 5_000 });
+
+          // Edit the subject field.
+          const subjectInput = page
+            .locator(".adm-email-editor input[type='text']")
+            .first();
+          await subjectInput.waitFor({ state: "visible", timeout: 3_000 });
+          const originalSubject = await subjectInput.inputValue();
+          await subjectInput.fill(originalSubject + " UNSAVED_EDIT");
+
+          const editedValue = await subjectInput.inputValue();
+          assert(
+            editedValue.includes("UNSAVED_EDIT"),
+            "subject field contains the unsaved edit before row switch",
+            editedValue,
+          );
+
+          // Click a different row — expect no guard dialog.
+          await rows.nth(1).click();
+
+          // Allow a render cycle so any guard dialog would have mounted.
+          await page.waitForTimeout(500);
+
+          // DOCUMENTED BEHAVIOR: no guard dialog fires — the draft is silently
+          // discarded. If a guard is introduced, this assertion will fail and
+          // the test must be updated to validate the guard's UX instead.
+          const guardCount = await page
+            .locator('[role="alertdialog"], .adm-dirty-guard, .adm-unsaved-dialog')
+            .count();
+          assert(
+            guardCount === 0,
+            "no guard dialog appears when switching rows with unsaved edits (current behavior: silent loss)",
+            { guardCount },
+          );
+
+          // The editor should now show the second row — its subject must not
+          // contain the unsaved edit, confirming the draft was reset.
+          await page
+            .locator(".adm-email-editor")
+            .waitFor({ state: "visible", timeout: 5_000 });
+          const newSubjectValue = await page
+            .locator(".adm-email-editor input[type='text']")
+            .first()
+            .inputValue();
+          assert(
+            !newSubjectValue.includes("UNSAVED_EDIT"),
+            "after switching rows the subject shows the new row's stored value, not the unsaved edit",
+            { newSubjectValue },
           );
         } finally {
           await ctx.close();
