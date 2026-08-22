@@ -16,7 +16,7 @@
  * - Promote (D19/D20): the operator may edit the name first; case and
  *   whitespace variants of a value group and promote together.
  */
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type PopulationRow = {
@@ -132,6 +132,7 @@ export function PopulationsPage() {
           {populations.length === 0 ? (
             <p className="adm-muted">{LIST_EMPTY}</p>
           ) : (
+            <div className="adm-table-wrap">
             <table className="adm-table">
               <thead>
                 <tr>
@@ -145,109 +146,97 @@ export function PopulationsPage() {
               </thead>
               <tbody>
                 {populations.map((p, i) => (
-                  <tr key={p.id} className="adm-row">
-                    <td>
-                      <button
-                        className="adm-btn"
-                        aria-label={`Move ${p.name} up`}
-                        disabled={busy || i === 0}
-                        onClick={() => void moveRow(i, -1)}
-                      >
-                        ↑
-                      </button>{" "}
-                      <button
-                        className="adm-btn"
-                        aria-label={`Move ${p.name} down`}
-                        disabled={busy || i === populations.length - 1}
-                        onClick={() => void moveRow(i, 1)}
-                      >
-                        ↓
-                      </button>
-                    </td>
-                    <td>
-                      {renameId === p.id ? (
-                        <span>
-                          <input
-                            value={renameValue}
-                            disabled={busy}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            aria-label={`New name for ${p.name}`}
-                          />
-                          {/* §8 verbatim rename note. */}
-                          <span className="adm-muted" style={{ display: "block", fontSize: 12 }}>
-                            {RENAME_NOTE}
-                          </span>
+                  <Fragment key={p.id}>
+                    <tr className="adm-row">
+                      <td>
+                        {/* Step 1: ↑/↓ buttons stacked vertically. */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                           <button
-                            className="adm-btn adm-btn-primary"
-                            disabled={busy || renameValue.trim() === "" || renameValue.trim() === p.name}
-                            onClick={() => {
-                              void (async () => {
-                                const ok = await act(`/api/admin/populations/${p.id}/rename`, {
-                                  name: renameValue.trim(),
-                                });
-                                if (ok) setRenameId(null);
-                              })();
-                            }}
+                            className="adm-btn adm-btn-sm"
+                            aria-label={`Move ${p.name} up`}
+                            disabled={busy || i === 0}
+                            onClick={() => void moveRow(i, -1)}
                           >
-                            Save
-                          </button>{" "}
-                          <button className="adm-btn" disabled={busy} onClick={() => setRenameId(null)}>
-                            Cancel
+                            ↑
                           </button>
-                        </span>
-                      ) : (
-                        <span>
-                          {p.name}{" "}
                           <button
-                            className="adm-btn"
-                            disabled={busy}
-                            onClick={() => {
-                              setRenameId(p.id);
-                              setRenameValue(p.name);
-                              setConfirmDeactivateId(null);
-                              setResult(null);
-                            }}
+                            className="adm-btn adm-btn-sm"
+                            aria-label={`Move ${p.name} down`}
+                            disabled={busy || i === populations.length - 1}
+                            onClick={() => void moveRow(i, 1)}
                           >
-                            Rename
+                            ↓
                           </button>
-                        </span>
-                      )}
-                    </td>
-                    <td>{p.slug}</td>
-                    {/* §7: zero-org rows are deactivation candidates at a glance. */}
-                    <td>{p.orgCount === 0 ? <span className="adm-muted">{ZERO_ORGS}</span> : p.orgCount}</td>
-                    <td>{p.isActive ? "Active" : <strong>Inactive</strong>}</td>
-                    <td>
-                      {p.slug === "other" ? (
-                        /* §6/§8: permanent infrastructure, stated reason. */
-                        <span className="adm-muted" style={{ fontSize: 12 }}>
-                          {OTHER_BLOCKED}
-                        </span>
-                      ) : p.isActive ? (
-                        confirmDeactivateId === p.id ? (
-                          <span>
-                            {/* §8 verbatim deactivate confirmation. */}
-                            <span style={{ display: "block" }}>
-                              Deactivate {p.name}? {p.orgCount} organizations already using it keep it. New
-                              organizations will not see it as an option.
+                        </div>
+                      </td>
+                      <td>
+                        {renameId === p.id ? (
+                          /* Step 3: rename editing state — vertical stack. */
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <input
+                              style={{ width: "100%" }}
+                              value={renameValue}
+                              disabled={busy}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              aria-label={`New name for ${p.name}`}
+                            />
+                            {/* §8 verbatim rename note. */}
+                            <span className="adm-muted" style={{ fontSize: 12 }}>
+                              {RENAME_NOTE}
                             </span>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button
+                                className="adm-btn adm-btn-primary"
+                                disabled={busy || renameValue.trim() === "" || renameValue.trim() === p.name}
+                                onClick={() => {
+                                  void (async () => {
+                                    const ok = await act(`/api/admin/populations/${p.id}/rename`, {
+                                      name: renameValue.trim(),
+                                    });
+                                    if (ok) setRenameId(null);
+                                  })();
+                                }}
+                              >
+                                Save
+                              </button>
+                              <button className="adm-btn" disabled={busy} onClick={() => setRenameId(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Step 2: name on its own line, Rename button below. */
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                            <div>{p.name}</div>
                             <button
-                              className="adm-btn adm-btn-primary"
+                              className="adm-btn adm-btn-sm"
                               disabled={busy}
                               onClick={() => {
-                                void (async () => {
-                                  const ok = await act(`/api/admin/populations/${p.id}/deactivate`);
-                                  if (ok) setConfirmDeactivateId(null);
-                                })();
+                                setRenameId(p.id);
+                                setRenameValue(p.name);
+                                setConfirmDeactivateId(null);
+                                setResult(null);
                               }}
                             >
-                              Deactivate
-                            </button>{" "}
-                            <button className="adm-btn" disabled={busy} onClick={() => setConfirmDeactivateId(null)}>
-                              Cancel
+                              Rename
                             </button>
+                          </div>
+                        )}
+                      </td>
+                      <td>{p.slug}</td>
+                      {/* §7: zero-org rows are deactivation candidates at a glance. */}
+                      <td>{p.orgCount === 0 ? <span className="adm-muted">{ZERO_ORGS}</span> : p.orgCount}</td>
+                      <td>{p.isActive ? "Active" : <strong>Inactive</strong>}</td>
+                      <td>
+                        {p.slug === "other" ? (
+                          /* Step 5: §6/§8: permanent infrastructure — compact muted note. */
+                          <span
+                            className="adm-muted"
+                            style={{ fontSize: 12, maxWidth: 220, whiteSpace: "normal", display: "inline-block" }}
+                          >
+                            {OTHER_BLOCKED}
                           </span>
-                        ) : (
+                        ) : p.isActive ? (
                           <button
                             className="adm-btn"
                             disabled={busy}
@@ -259,13 +248,47 @@ export function PopulationsPage() {
                           >
                             Deactivate
                           </button>
-                        )
-                      ) : null}
-                    </td>
-                  </tr>
+                        ) : null}
+                      </td>
+                    </tr>
+                    {/* Step 4: Deactivate confirmation as an expansion row. */}
+                    {confirmDeactivateId === p.id && (
+                      <tr>
+                        <td colSpan={6} style={{ background: "#fff8f0", padding: "10px 16px" }}>
+                          {/* §8 verbatim deactivate confirmation. */}
+                          <p style={{ margin: "0 0 8px" }}>
+                            Deactivate {p.name}? {p.orgCount} organizations already using it keep it. New organizations
+                            will not see it as an option.
+                          </p>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              className="adm-btn adm-btn-primary"
+                              disabled={busy}
+                              onClick={() => {
+                                void (async () => {
+                                  const ok = await act(`/api/admin/populations/${p.id}/deactivate`);
+                                  if (ok) setConfirmDeactivateId(null);
+                                })();
+                              }}
+                            >
+                              Deactivate
+                            </button>
+                            <button
+                              className="adm-btn"
+                              disabled={busy}
+                              onClick={() => setConfirmDeactivateId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           {/* §4 region 2 — add form. Slug generated, editable until save (D18). */}
