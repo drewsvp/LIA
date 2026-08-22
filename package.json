@@ -10,6 +10,7 @@
     "build": "vite build",
     "check": "tsc --noEmit",
     "test:admin-tabs": "tsx scripts/test-admin-tabs.ts",
+    "test:admin-requests-filter": "tsx scripts/test-admin-requests-filter.ts",
     "test:nav-guard": "tsx scripts/test-nav-guard.ts",
     "test:responsive-nav": "tsx scripts/test-responsive-nav.ts",
     "test:volunteer-interests": "tsx scripts/test-volunteer-interests.ts",
