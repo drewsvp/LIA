@@ -1,6 +1,6 @@
 /**
- * Integration test: Task 286 — magic-link send path aborts cleanly when
- * finalizeHtml() cannot find the header slot marker in the rendered HTML.
+ * Integration test: Task 287 — magic-link send path writes a failed
+ * email_log row when finalizeHtml() throws (broken HTML shell).
  *
  * Exercises the real sendMagicLinkEmail() function (extracted from auth.ts)
  * with a registered fixture user from the seed and a patched render function
@@ -11,13 +11,16 @@
  *     → findByEmail (gate — finds the seeded user, passes the gate)
  *     → renderFn (returns HTML without the slot marker)
  *     → finalizeHtml (throws — slot marker missing)
+ *     → insertQueued + markFailed (failed audit row written)
+ *     → re-throws
  *     → sendEmail  ← NEVER REACHED
  *
  * Checks:
  *   1a. The call throws (not a silent return or no-op).
  *   1b. The thrown error message mentions "header slot marker missing".
- *   2a. The email_log row count for the fixture user + template is unchanged
- *       after the call — sendEmail() was never reached and wrote no row.
+ *   2a. One new email_log row is written for the fixture user + template.
+ *   2b. The new row has status='failed'.
+ *   2c. The new row has failure_category='render'.
  *
  * Prerequisite: the seed must have been run so that the fixture user exists
  * and is active. The test emits a clear skip message if the user is absent.
@@ -25,8 +28,9 @@
  * Usage:
  *   npm run test:magic-link-finalize-throw
  *
- * No rows are written (the throw fires before sendEmail), so there is nothing
- * to clean up after a clean run.
+ * The failed row written by the test remains in the DB — it is the audit
+ * trail the task demands. Re-running the test adds another row each time
+ * (no once-only index applies: entity_id is null for magic-link rows).
  */
 import { pool } from "../server/db/client";
 import { sendMagicLinkEmail } from "../server/auth/auth";
@@ -64,8 +68,23 @@ async function countEmailLogRows(): Promise<number> {
   return parseInt(rows[0]!.count, 10);
 }
 
+async function latestEmailLogRow(): Promise<{ status: string; failureCategory: string | null; error: string | null } | null> {
+  const { rows } = await pool.query<{ status: string; failureCategory: string | null; error: string | null }>(
+    `select status,
+            failure_category as "failureCategory",
+            error
+       from email_log
+      where to_email = $1
+        and template_key = $2
+      order by created_at desc
+      limit 1`,
+    [FIXTURE_EMAIL, TEMPLATE_KEY],
+  );
+  return rows[0] ?? null;
+}
+
 async function main(): Promise<void> {
-  console.log("\nTask 286 — magic-link sendMagicLinkEmail finalizeHtml-throw → abort + no row\n");
+  console.log("\nTask 287 — magic-link sendMagicLinkEmail finalizeHtml-throw → failed audit row written\n");
 
   // Pre-flight: confirm the fixture user exists in the seeded DB.
   const { rows: userRows } = await pool.query<{ status: string }>(
@@ -107,7 +126,8 @@ async function main(): Promise<void> {
   try {
     // This runs the full sendMagicLink control flow:
     //   findByEmail → user gate passes → brokenRender → finalizeHtml (throws)
-    // sendEmail() is never reached, so no email_log row is written.
+    //   → insertQueued + markFailed (failed audit row written) → re-throws
+    // sendEmail() is never reached.
     await sendMagicLinkEmail(FIXTURE_EMAIL, FIXTURE_URL, brokenRender);
   } catch (err) {
     thrownError = err;
@@ -127,14 +147,26 @@ async function main(): Promise<void> {
     thrownError instanceof Error ? thrownError.message : undefined,
   );
 
-  // ── Section 2: no email_log row written ───────────────────────────────────
-  console.log("\n2. No email_log row written — sendEmail() was never reached");
+  // ── Section 2: failed email_log row written ───────────────────────────────
+  console.log("\n2. Failed email_log row written — staff can see the attempted send in ADMIN-06");
 
   const countAfter = await countEmailLogRows();
   assert(
-    countAfter === countBefore,
-    "2a: email_log row count unchanged — sendEmail() was never reached",
+    countAfter === countBefore + 1,
+    "2a: one new email_log row written for the fixture user + template",
     { countBefore, countAfter },
+  );
+
+  const latestRow = await latestEmailLogRow();
+  assert(
+    latestRow?.status === "failed",
+    "2b: the new row has status='failed'",
+    latestRow ?? undefined,
+  );
+  assert(
+    latestRow?.failureCategory === "render",
+    "2c: the new row has failure_category='render'",
+    latestRow ?? undefined,
   );
 
   // ── Summary ───────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { magicLink } from "better-auth/plugins";
 import { pool, SYSTEM } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as authProvider from "../dal/auth-provider";
+import * as emailLog from "../dal/email-log";
 import { sendEmail, EMAIL_HEADER_CID_URL, getEmailHeaderAttachment } from "../email/send";
 import { finalizeHtml } from "../email/render";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
@@ -111,10 +112,42 @@ export async function sendMagicLinkEmail(
   const user = await usersDal.findByEmail(SYSTEM, email);
   if (!user || user.status === "disabled") return;
   const rendered = renderFn({ firstName: user.firstName, url });
+
   // LIA header banner: embedded via CID so mail clients never need to fetch
-  // from the app's origin. Throws if the slot marker is absent — the caller
-  // (sendMagicLink callback or test) must handle this propagation.
-  const html = finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL);
+  // from the app's origin. Wrap both finalizeHtml and sendEmail in a
+  // try/catch: if finalizeHtml throws (broken shell — slot marker missing),
+  // write a failed email_log row so staff can see the attempted send in
+  // ADMIN-06 instead of finding no trace of the failure at all.
+  let html: string;
+  try {
+    html = finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Best-effort: write a failed row before re-throwing. A secondary failure
+    // (e.g. DB down) must not mask the original render error.
+    try {
+      const queued = await emailLog.insertQueued(SYSTEM, {
+        templateKey: "auth_magic_link",
+        toEmail: email,
+        toPersonId: user.personId,
+        entityType: null,
+        entityId: null,
+        payload: {},
+      });
+      if (!queued.duplicate) {
+        await emailLog.markFailed(
+          SYSTEM,
+          queued.entry.id,
+          `magic-link render failed: ${message}`,
+          "render",
+        );
+      }
+    } catch (logErr) {
+      console.error("[email] magic-link: failed to write failure log row:", logErr);
+    }
+    throw err;
+  }
+
   await sendEmail({
     templateKey: "auth_magic_link",
     toEmail: email,
