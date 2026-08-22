@@ -43,6 +43,10 @@ args = "responsive-nav"
 task = "workflow.run"
 args = "nav-guard"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "request-engagement"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -87,6 +91,17 @@ args = "npm run test:nav-guard"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "request-engagement"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run test:request-engagement"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[ports]]
 localPort = 5000

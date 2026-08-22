@@ -2,7 +2,7 @@
  * End-to-end privacy/authorization regression coverage for request engagement.
  * Requires the development workflow and seeded quick-login accounts.
  *
- * Usage: NODE_ENV=development npx tsx scripts/test-request-engagement.ts
+ * Usage: npm run test:request-engagement
  */
 import { randomUUID } from "node:crypto";
 import { pool } from "../server/db/client";
@@ -79,6 +79,23 @@ async function main(): Promise<void> {
     "/api/session",
     ownerCookie,
   )).body;
+
+  // A member-org session must not be able to rediscover the removed
+  // per-request analytics endpoints through their old API paths.
+  const [removedEngagement, removedEngagementExport] = await Promise.all([
+    fetch(`${BASE}/api/dashboard/engagement`, { headers: { Cookie: ownerCookie } }),
+    fetch(`${BASE}/api/dashboard/engagement/export`, { headers: { Cookie: ownerCookie } }),
+  ]);
+  assert(
+    removedEngagement.status === 404,
+    "member organizations cannot access the removed engagement endpoint",
+    removedEngagement.status,
+  );
+  assert(
+    removedEngagementExport.status === 404,
+    "member organizations cannot access the removed engagement export endpoint",
+    removedEngagementExport.status,
+  );
 
   const browse = (
     await json<{
