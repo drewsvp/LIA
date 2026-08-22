@@ -217,13 +217,14 @@ ${items}
       </ul>`;
 }
 
-/* ------------------------------------------------------------------ */
-/* Editable copy (ADMIN-10). Each product template exposes its free-   */
-/* text copy — subject, heading, paragraphs — as strings carrying      */
-/* {placeholder} tokens. Staff-admin overrides replace those strings;  */
-/* the hardcoded defaults remain the fallback.                         */
-/* ------------------------------------------------------------------ */
-
+/**
+ * A single block in a rich email body. Stored as JSONB in body_blocks.
+ * - paragraph: staff-authored HTML prose (may contain {placeholder} tokens).
+ * - section:   references a named auto-generated section declared by the template.
+ */
+export type BodyBlock =
+  | { kind: "paragraph"; html: string }
+  | { kind: "section"; name: string };
 export type TemplateCopy = {
   /** Subject line with {placeholder} tokens. */
   subject: string;
@@ -235,14 +236,33 @@ export type TemplateCopy = {
    * values are always escaped on substitution.
    */
   paragraphs: string[];
+  /**
+   * Rich-body blocks. When present the render path uses these instead of
+   * paragraphs; the hardcoded section order becomes the fallback only when
+   * bodyBlocks is absent (backward compatibility).
+   */
+  bodyBlocks?: BodyBlock[];
 };
 
 const PLACEHOLDER_RE = /\{([a-zA-Z][a-zA-Z0-9_]*)\}/g;
 
-/** Unique placeholder names used anywhere in a copy block. */
+/**
+ * Unique placeholder names used anywhere in a copy block.
+ *
+ * When `bodyBlocks` is present and non-empty it IS the active body content —
+ * scan its paragraph blocks instead of the legacy `paragraphs` array so that
+ * placeholder-presence validation is not fooled by stale text the editor has
+ * already replaced. The default copy (which never has bodyBlocks) continues to
+ * use the paragraphs array, giving an accurate reference set for validation.
+ */
 export function copyPlaceholders(copy: TemplateCopy): string[] {
   const found = new Set<string>();
-  for (const s of [copy.subject, copy.heading, ...copy.paragraphs]) {
+  const bodyTexts =
+    copy.bodyBlocks && copy.bodyBlocks.length > 0
+      ? copy.bodyBlocks.filter((b): b is { kind: "paragraph"; html: string } => b.kind === "paragraph").map((b) => b.html)
+      : copy.paragraphs;
+  const sources = [copy.subject, copy.heading, ...bodyTexts];
+  for (const s of sources) {
     for (const m of s.matchAll(PLACEHOLDER_RE)) {
       const name = m[1];
       if (name) found.add(name);
@@ -251,6 +271,24 @@ export function copyPlaceholders(copy: TemplateCopy): string[] {
   return [...found];
 }
 
+/**
+ * Render a bodyBlocks array to HTML body, calling the template's declared
+ * sections for section blocks and copyPara for paragraph blocks.
+ */
+export function renderBodyBlocksHtml<TVars extends Record<string, unknown>>(
+  blocks: BodyBlock[],
+  vars: TVars,
+  sections: TemplateSectionDef<TVars>[],
+): string {
+  return blocks
+    .map((block) => {
+      if (block.kind === "paragraph") return copyPara(block.html, vars);
+      const sec = sections.find((s) => s.name === block.name);
+      return sec ? sec.renderHtml(vars) : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
 /**
  * Substitute {name} tokens with raw values (subject/plain-text use). A
  * missing or non-scalar value leaves the token literal, which the send
@@ -332,4 +370,35 @@ export function textBody(...blocks: (string | string[] | null)[]): string {
     flat.push(...lines);
   }
   return flat.join("\n");
+}
+
+/**
+ * Named, reusable section declared by a ProductTemplate. The editor exposes
+ * each one as an insertable chip; the render path calls renderHtml/renderText
+ * when it encounters a section block.
+ */
+export type TemplateSectionDef<TVars> = {
+  name: string;
+  label: string;
+  renderHtml(vars: TVars): string;
+  renderText(vars: TVars): string[];
+};
+
+/**
+ * Expand a bodyBlocks array to text-body blocks (suitable as spread args for
+ * textBody). Heading is NOT included — add it as the first textBody argument.
+ */
+export function renderBodyBlocksToTextBlocks<TVars extends Record<string, unknown>>(
+  blocks: BodyBlock[],
+  vars: TVars,
+  sections: TemplateSectionDef<TVars>[],
+): (string | string[] | null)[] {
+  return blocks.map((block) => {
+    if (block.kind === "paragraph") {
+      const t = copyText(block.html, vars);
+      return t || null;
+    }
+    const sec = sections.find((s) => s.name === block.name);
+    return sec ? sec.renderText(vars) : null;
+  });
 }

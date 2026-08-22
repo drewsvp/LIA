@@ -1,18 +1,20 @@
 /**
  * email_template_overrides DAL (ADMIN-10). One row per template key holding
- * the staff-admin overrides: copy (subject/heading/paragraphs — all set
- * together, or all null = default copy), the enabled flag, and the recipient
- * override honored only for the staff-notification templates. The hardcoded
- * TypeScript template is always the fallback.
+ * the staff-admin overrides: copy (subject/heading/paragraphs/body_blocks —
+ * all set together, or all null = default copy), the enabled flag, and the
+ * recipient override honored only for the staff-notification templates. The
+ * hardcoded TypeScript template is always the fallback.
  */
 import type { PoolClient } from "pg";
 import { q, withDbContext, type DbContext } from "../db/client";
+import type { BodyBlock } from "../email/render";
 
 export type EmailTemplateOverride = {
   templateKey: string;
   subject: string | null;
   heading: string | null;
   paragraphs: string[] | null;
+  bodyBlocks: BodyBlock[] | null;
   recipients: string | null;
   enabled: boolean;
   updatedAt: string;
@@ -31,6 +33,7 @@ const ADMIN_COLS = `
   o.subject,
   o.heading,
   o.paragraphs,
+  o.body_blocks    as "bodyBlocks",
   o.recipients,
   o.enabled,
   o.updated_at     as "updatedAt",
@@ -45,7 +48,8 @@ const ADMIN_COLS = `
  * copy/enabled state and don't require the actor join.
  */
 const INTERNAL_COLS = `
-  template_key as "templateKey", subject, heading, paragraphs, recipients, enabled,
+  template_key as "templateKey", subject, heading, paragraphs,
+  body_blocks as "bodyBlocks", recipients, enabled,
   updated_at as "updatedAt", updated_by as "updatedBy", null::text as "updatedByName"`;
 
 export async function listOverrides(ctx: DbContext): Promise<EmailTemplateOverride[]> {
@@ -87,7 +91,12 @@ export async function getOverrideInTx(c: PoolClient, templateKey: string): Promi
 
 export type SaveOverrideInput = {
   /** null clears the copy override (fall back to the hardcoded copy). */
-  copy: { subject: string; heading: string; paragraphs: string[] } | null;
+  copy: {
+    subject: string;
+    heading: string;
+    paragraphs: string[];
+    bodyBlocks?: BodyBlock[] | null;
+  } | null;
   /** null clears the recipient override. */
   recipients: string | null;
   /** users.id of the staff member performing the save; null for system operations. */
@@ -103,21 +112,23 @@ export async function saveOverride(
   const rows = await withDbContext(ctx, (c) =>
     q<EmailTemplateOverride>(
       c,
-      `insert into email_template_overrides (template_key, subject, heading, paragraphs, recipients, updated_by)
-       values ($1, $2, $3, $4::jsonb, $5, $6)
+      `insert into email_template_overrides (template_key, subject, heading, paragraphs, body_blocks, recipients, updated_by)
+       values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
        on conflict (template_key) do update
-         set subject    = excluded.subject,
-             heading    = excluded.heading,
-             paragraphs = excluded.paragraphs,
-             recipients = excluded.recipients,
-             updated_at = now(),
-             updated_by = excluded.updated_by
+         set subject     = excluded.subject,
+             heading     = excluded.heading,
+             paragraphs  = excluded.paragraphs,
+             body_blocks = excluded.body_blocks,
+             recipients  = excluded.recipients,
+             updated_at  = now(),
+             updated_by  = excluded.updated_by
        returning ${INTERNAL_COLS}`,
       [
         templateKey,
         input.copy?.subject ?? null,
         input.copy?.heading ?? null,
         input.copy ? JSON.stringify(input.copy.paragraphs) : null,
+        input.copy?.bodyBlocks != null ? JSON.stringify(input.copy.bodyBlocks) : null,
         input.recipients,
         input.updatedByUserId,
       ],

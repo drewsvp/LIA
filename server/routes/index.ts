@@ -377,6 +377,21 @@ export function registerRoutes(app: Express): void {
   // verification row is written directly to the DB (same schema Better Auth
   // uses) and immediately consumed via magicLinkVerify. No email is dispatched.
 
+  // Dev-only: reset rate-limit buckets for the requesting IP so repeated test
+  // runs don't exhaust the window budget and produce spurious 429s.
+  app.post("/api/dev/reset-rate-limits", (req: Request, res: Response) => {
+    if (!isQuickLoginEnabled()) {
+      res.status(404).json(NOT_FOUND_BODY);
+      return;
+    }
+    // Clear all buckets rather than a single IP key — dev-only endpoint,
+    // no need to be surgical; eliminates any IP-normalisation mismatch.
+    quickLoginIpLimiter.resetAll();
+    magicLinkIpLimiter.resetAll();
+    magicLinkVerifyIpLimiter.resetAll();
+    res.json({ ok: true });
+  });
+
   // Status endpoint — lets the client know whether to show the quick-login UI
   // and whether the seed accounts are present.
   app.get("/api/login/quick/status", async (_req: Request, res: Response) => {

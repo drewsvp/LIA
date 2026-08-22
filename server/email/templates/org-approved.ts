@@ -16,7 +16,10 @@ import {
   fillText,
   copyPara,
   copyText,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate } from "./types";
 
@@ -45,6 +48,56 @@ const DEFAULT_COPY: TemplateCopy = {
   ],
 };
 
+const SECTIONS: TemplateSectionDef<OrgApprovedVars>[] = [
+  {
+    name: "dashboard_button",
+    label: "Dashboard button",
+    renderHtml: (vars) => button("Go to Your Dashboard", vars.dashboardUrl),
+    renderText: (vars) => [textKv("Go to Your Dashboard", vars.dashboardUrl)],
+  },
+  {
+    name: "org_details",
+    label: "Organization Details",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Organization Details"),
+        kv("Name", vars.organizationName),
+        kvOpt("Address", vars.orgAddress),
+        kvOpt("Phone", vars.orgPhoneNumber),
+        kvOpt("Website", vars.websiteUrl),
+        kvOpt("Mission Statement", vars.missionStatement),
+        kvOpt("Population Served", vars.primaryPopulationServed),
+        `      <div style="height:16px;"></div>`,
+        kv("Primary Contact", vars.organizationPrimaryContact),
+        kv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
+        kvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Organization Details",
+      textKv("Name", vars.organizationName),
+      ...textKvOpt("Address", vars.orgAddress),
+      ...textKvOpt("Phone", vars.orgPhoneNumber),
+      ...textKvOpt("Website", vars.websiteUrl),
+      ...textKvOpt("Mission Statement", vars.missionStatement),
+      ...textKvOpt("Population Served", vars.primaryPopulationServed),
+      textKv("Primary Contact", vars.organizationPrimaryContact),
+      textKv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
+      ...textKvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
+    ],
+  },
+];
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[2]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[3]! },
+  { kind: "section",   name: "dashboard_button" },
+  { kind: "section",   name: "org_details" },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[4]! },
+];
+
 export const orgApproved: ProductTemplate<OrgApprovedVars> = {
   key: "org_approved",
   entityType: "organization",
@@ -53,6 +106,8 @@ export const orgApproved: ProductTemplate<OrgApprovedVars> = {
   recipients: "The organization's primary contact",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     organizationName: "Hope Community Center",
     orgAddress: "123 Main St, Los Angeles, CA 90012",
@@ -67,53 +122,53 @@ export const orgApproved: ProductTemplate<OrgApprovedVars> = {
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        copyPara(copy.paragraphs[2] ?? "", vars),
-        copyPara(copy.paragraphs[3] ?? "", vars),
-        button("Go to Your Dashboard", vars.dashboardUrl),
-        sectionHeading("Organization Details"),
-        kv("Name", vars.organizationName),
-        kvOpt("Address", vars.orgAddress),
-        kvOpt("Phone", vars.orgPhoneNumber),
-        kvOpt("Website", vars.websiteUrl),
-        kvOpt("Mission Statement", vars.missionStatement),
-        kvOpt("Population Served", vars.primaryPopulationServed),
-        `      <div style="height:16px;"></div>`,
-        kv("Primary Contact", vars.organizationPrimaryContact),
-        kv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
-        kvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
-        copyPara(copy.paragraphs[4] ?? "", vars),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      copyText(copy.paragraphs[2] ?? "", vars),
-      copyText(copy.paragraphs[3] ?? "", vars),
-      textKv("Go to Your Dashboard", vars.dashboardUrl),
-      [
-        "Organization Details",
-        textKv("Name", vars.organizationName),
-        ...textKvOpt("Address", vars.orgAddress),
-        ...textKvOpt("Phone", vars.orgPhoneNumber),
-        ...textKvOpt("Website", vars.websiteUrl),
-        ...textKvOpt("Mission Statement", vars.missionStatement),
-        ...textKvOpt("Population Served", vars.primaryPopulationServed),
-      ],
-      [
-        textKv("Primary Contact", vars.organizationPrimaryContact),
-        textKv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
-        ...textKvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
-      ],
-      copyText(copy.paragraphs[4] ?? "", vars),
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          copyPara(copy.paragraphs[2] ?? "", vars),
+          copyPara(copy.paragraphs[3] ?? "", vars),
+          button("Go to Your Dashboard", vars.dashboardUrl),
+          sectionHeading("Organization Details"),
+          kv("Name", vars.organizationName),
+          kvOpt("Address", vars.orgAddress),
+          kvOpt("Phone", vars.orgPhoneNumber),
+          kvOpt("Website", vars.websiteUrl),
+          kvOpt("Mission Statement", vars.missionStatement),
+          kvOpt("Population Served", vars.primaryPopulationServed),
+          `      <div style="height:16px;"></div>`,
+          kv("Primary Contact", vars.organizationPrimaryContact),
+          kv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
+          kvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
+          copyPara(copy.paragraphs[4] ?? "", vars),
+        ]
+          .filter(Boolean)
+          .join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          copyText(copy.paragraphs[2] ?? "", vars),
+          copyText(copy.paragraphs[3] ?? "", vars),
+          textKv("Go to Your Dashboard", vars.dashboardUrl),
+          [
+            "Organization Details",
+            textKv("Name", vars.organizationName),
+            ...textKvOpt("Address", vars.orgAddress),
+            ...textKvOpt("Phone", vars.orgPhoneNumber),
+            ...textKvOpt("Website", vars.websiteUrl),
+            ...textKvOpt("Mission Statement", vars.missionStatement),
+            ...textKvOpt("Population Served", vars.primaryPopulationServed),
+            textKv("Primary Contact", vars.organizationPrimaryContact),
+            textKv("Primary Contact's Email", vars.organizationPrimaryContactEmail),
+            ...textKvOpt("Primary Contact's Phone #", vars.organizationPrimaryContactPhone),
+          ],
+          copyText(copy.paragraphs[4] ?? "", vars),
+        );
     return { subject, html, text };
   },
 };

@@ -530,6 +530,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Reset rate-limit buckets for this IP so repeated validation runs don't
+  // exhaust the 15-minute window and produce spurious 429s on later roles.
+  await fetch(`${BASE}/api/dev/reset-rate-limits`, { method: "POST" }).catch(() => undefined);
+
   const supporterFixture = await ensureSupporterFixture();
   try {
     // Schema guard: catches column renames / type changes before touching HTTP.

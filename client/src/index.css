@@ -2797,8 +2797,20 @@ a.site-nav-btn {
 }
 
 .adm-btn-outline {
+  border: 1px solid var(--color-navy);
   background: var(--color-surface);
   color: var(--color-navy);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 8px 18px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.adm-btn-outline:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .adm-confirm {
@@ -2993,6 +3005,26 @@ a.site-nav-btn {
   white-space: nowrap;
 }
 
+/* Detail metadata list (Sent when / Goes to / Last change) */
+.adm-detail-list {
+  margin: 0 0 16px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  align-items: baseline;
+  font-size: 0.875rem;
+}
+.adm-detail-list dt {
+  color: var(--color-muted);
+  font-weight: 700;
+  margin: 0;
+  white-space: nowrap;
+}
+.adm-detail-list dd {
+  margin: 0;
+  color: var(--color-text);
+}
+
 /* Full-width email editor below the table */
 .adm-email-editor {
   position: relative;
@@ -3083,6 +3115,116 @@ a.site-nav-btn {
   margin-bottom: 10px;
 }
 
+/* Textareas inside the email editor inherit the UI font */
+.adm-email-editor textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ---- Email body rich-text editor (EmailBodyEditor component) ---- */
+.email-editor-wrap {
+  border: 1px solid #d7dde4;
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 0 0 16px;
+}
+.email-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #d7dde4;
+  background: #f8f9fa;
+  flex-wrap: wrap;
+}
+.email-editor-toolbar-btn {
+  border: 1px solid #c8cdd4;
+  background: #ffffff;
+  color: var(--color-navy);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  border-radius: 4px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.email-editor-toolbar-btn:hover:not(:disabled) {
+  background: #e8ecf0;
+}
+.email-editor-toolbar-btn.is-active {
+  background: var(--color-navy);
+  color: #ffffff;
+  border-color: var(--color-navy);
+}
+.email-editor-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.email-editor-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: #d7dde4;
+  flex: 0 0 auto;
+  margin: 0 2px;
+}
+.email-editor-toolbar-label {
+  font-size: 12px;
+  color: var(--color-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.email-editor-content .ProseMirror {
+  min-height: 160px;
+  padding: 10px 14px;
+  outline: none;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--color-text);
+  font-family: inherit;
+}
+.email-editor-content .ProseMirror p {
+  margin: 0 0 8px;
+}
+.email-editor-content .ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+.email-editor-content .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-muted);
+  pointer-events: none;
+  height: 0;
+}
+/* Section chip — styled block atom */
+.email-section-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  margin: 6px 0;
+  border: 1.5px solid var(--color-teal);
+  border-radius: 6px;
+  background: rgba(2, 146, 143, 0.07);
+  color: var(--color-navy);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: default;
+  user-select: none;
+  line-height: 1.4;
+}
+.email-section-chip-icon {
+  color: var(--color-teal);
+  font-size: 14px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+/* Selected chip gets a teal outline */
+.ProseMirror .email-section-chip.ProseMirror-selectednode {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 1px;
+}
 .adm-stuck {
   display: inline-block;
   margin-left: 8px;

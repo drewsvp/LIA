@@ -18,7 +18,10 @@ import {
   fillText,
   copyPara,
   copyText,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate, ItemLine } from "./types";
 
@@ -57,6 +60,44 @@ const DEFAULT_COPY: TemplateCopy = {
   ],
 };
 
+const SECTIONS: TemplateSectionDef<OrgRequestReceivedVars>[] = [
+  {
+    name: "request_details",
+    label: "Request Details",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Request Details"),
+        kv("Name", vars.requestName),
+        kvOpt("Description", vars.requestDescription),
+        `      <div style="height:16px;"></div>`,
+        kv("Request Contact", vars.requestContactName),
+        kv("Contact's Email", vars.requestContactEmail),
+        kvOpt("Contact's Phone", vars.requestContactPhone),
+        kv("Unique ID", vars.requestId),
+        sectionHeading(`${vars.itemOrVolunteer}s Details`),
+        childrenHtml(vars.itemsOrRoles),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Request Details",
+      textKv("Name", vars.requestName),
+      ...textKvOpt("Description", vars.requestDescription),
+      textKv("Request Contact", vars.requestContactName),
+      textKv("Contact's Email", vars.requestContactEmail),
+      ...textKvOpt("Contact's Phone", vars.requestContactPhone),
+      textKv("Unique ID", vars.requestId),
+      `${vars.itemOrVolunteer}s Details`,
+      ...childrenText(vars.itemsOrRoles),
+    ],
+  },
+];
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "section",   name: "request_details" },
+];
+
 export const orgRequestReceived: ProductTemplate<OrgRequestReceivedVars> = {
   key: "org_request_received",
   // entityType is set per queue call: "item_request" or "volunteer_request".
@@ -74,6 +115,8 @@ export const orgRequestReceived: ProductTemplate<OrgRequestReceivedVars> = {
   recipients: "The member who submitted the request",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     itemOrVolunteer: "Item",
     organizationName: "Hope Community Center",
@@ -93,42 +136,43 @@ export const orgRequestReceived: ProductTemplate<OrgRequestReceivedVars> = {
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        sectionHeading("Request Details"),
-        kv("Name", vars.requestName),
-        kvOpt("Description", vars.requestDescription),
-        `      <div style="height:16px;"></div>`,
-        kv("Request Contact", vars.requestContactName),
-        kv("Contact's Email", vars.requestContactEmail),
-        kvOpt("Contact's Phone", vars.requestContactPhone),
-        kv("Unique ID", vars.requestId),
-        sectionHeading(`${vars.itemOrVolunteer}s Details`),
-        childrenHtml(vars.itemsOrRoles),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      [
-        "Request Details",
-        textKv("Name", vars.requestName),
-        ...textKvOpt("Description", vars.requestDescription),
-      ],
-      [
-        textKv("Request Contact", vars.requestContactName),
-        textKv("Contact's Email", vars.requestContactEmail),
-        ...textKvOpt("Contact's Phone", vars.requestContactPhone),
-        textKv("Unique ID", vars.requestId),
-      ],
-      [`${vars.itemOrVolunteer}s Details`, ...childrenText(vars.itemsOrRoles)],
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          sectionHeading("Request Details"),
+          kv("Name", vars.requestName),
+          kvOpt("Description", vars.requestDescription),
+          `      <div style="height:16px;"></div>`,
+          kv("Request Contact", vars.requestContactName),
+          kv("Contact's Email", vars.requestContactEmail),
+          kvOpt("Contact's Phone", vars.requestContactPhone),
+          kv("Unique ID", vars.requestId),
+          sectionHeading(`${vars.itemOrVolunteer}s Details`),
+          childrenHtml(vars.itemsOrRoles),
+        ]
+          .filter(Boolean)
+          .join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          [
+            "Request Details",
+            textKv("Name", vars.requestName),
+            ...textKvOpt("Description", vars.requestDescription),
+            textKv("Request Contact", vars.requestContactName),
+            textKv("Contact's Email", vars.requestContactEmail),
+            ...textKvOpt("Contact's Phone", vars.requestContactPhone),
+            textKv("Unique ID", vars.requestId),
+            `${vars.itemOrVolunteer}s Details`,
+            ...childrenText(vars.itemsOrRoles),
+          ],
+        );
     return { subject, html, text };
   },
 };

@@ -19,6 +19,11 @@ export class FixedWindowLimiter {
     private readonly windowMs: number,
   ) {}
 
+  /** Reset all buckets. Development/test use only. */
+  resetAll(): void {
+    this.buckets.clear();
+  }
+
   /** Consume one unit for `key`; false when the key is over budget in the current window. */
   consume(key: string): boolean {
     const now = Date.now();
@@ -30,6 +35,15 @@ export class FixedWindowLimiter {
     }
     bucket.count += 1;
     return bucket.count <= this.limit;
+  }
+
+  /**
+   * Reset the bucket for a specific key. Allows test teardown to reclaim quota
+   * consumed during the run without waiting for the window to expire.
+   * Development use only — never call from production paths.
+   */
+  resetKey(key: string): void {
+    this.buckets.delete(key);
   }
 
   private sweep(now: number): void {

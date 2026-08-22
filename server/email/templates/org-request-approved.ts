@@ -1,8 +1,4 @@
-/**
- * org_request_approved — request approved at ADMIN-02 (TEMPLATES.md §5).
- * Two recipients (primary contact + creator), one email each; the dedup
- * index collapses them to one when they are the same address.
- */
+/** org_request_approved — request approved at ADMIN-02 (TEMPLATES.md §5). */
 import {
   shell,
   sectionHeading,
@@ -16,7 +12,10 @@ import {
   fillText,
   copyPara,
   copyText,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate } from "./types";
 import { childrenHtml, childrenText, type RequestChildren } from "./org-request-received";
@@ -44,6 +43,76 @@ const DEFAULT_COPY: TemplateCopy = {
   ],
 };
 
+const SECTIONS: TemplateSectionDef<OrgRequestApprovedVars>[] = [
+  {
+    name: "request_url",
+    label: "Request URL",
+    renderHtml: (vars) => kvLink("URL", vars.viewRequestUrl),
+    renderText: (vars) => [textKv("URL", vars.viewRequestUrl)],
+  },
+  {
+    name: "request_details",
+    label: "Request Details",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Request Details"),
+        kv("Name", vars.requestName),
+        kvOpt("Description", vars.requestDescription),
+        kvLink("URL", vars.viewRequestUrl),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Request Details",
+      textKv("Name", vars.requestName),
+      ...textKvOpt("Description", vars.requestDescription),
+      textKv("URL", vars.viewRequestUrl),
+    ],
+  },
+  {
+    name: "request_contact",
+    label: "Request Contact",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Request Contact"),
+        kv("Request's Contact", vars.requestContactName),
+        kv("Contact's Email", vars.requestContactEmail),
+        kvOpt("Contact's Phone", vars.requestContactPhone),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Request Contact",
+      textKv("Request's Contact", vars.requestContactName),
+      textKv("Contact's Email", vars.requestContactEmail),
+      ...textKvOpt("Contact's Phone", vars.requestContactPhone),
+    ],
+  },
+  {
+    name: "items_or_roles",
+    label: "Items/Roles Details",
+    renderHtml: (vars) =>
+      [sectionHeading(`${vars.itemOrVolunteer}s Details`), childrenHtml(vars.itemsOrRoles)].join("\n"),
+    renderText: (vars) => [`${vars.itemOrVolunteer}s Details`, ...childrenText(vars.itemsOrRoles)],
+  },
+  {
+    name: "view_button",
+    label: "View Your Request button",
+    renderHtml: (vars) => button("View Your Request", vars.viewRequestUrl),
+    renderText: (vars) => [textKv("View Your Request", vars.viewRequestUrl)],
+  },
+];
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[2]! },
+  { kind: "section",   name: "request_details" },
+  { kind: "section",   name: "request_contact" },
+  { kind: "section",   name: "items_or_roles" },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[3]! },
+  { kind: "section",   name: "view_button" },
+];
+
 export const orgRequestApproved: ProductTemplate<OrgRequestApprovedVars> = {
   key: "org_request_approved",
   // entityType is set per queue call: "item_request" or "volunteer_request".
@@ -61,6 +130,8 @@ export const orgRequestApproved: ProductTemplate<OrgRequestApprovedVars> = {
   recipients: "The request's contact person",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     organizationName: "Hope Community Center",
     viewRequestUrl: "https://example.org/needs/10432",
@@ -80,49 +151,51 @@ export const orgRequestApproved: ProductTemplate<OrgRequestApprovedVars> = {
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        copyPara(copy.paragraphs[2] ?? "", vars),
-        kvLink("URL", vars.viewRequestUrl),
-        sectionHeading("Request Details"),
-        kv("Name", vars.requestName),
-        kvOpt("Description", vars.requestDescription),
-        sectionHeading("Request Contact"),
-        kv("Request's Contact", vars.requestContactName),
-        kv("Contact's Email", vars.requestContactEmail),
-        kvOpt("Contact's Phone", vars.requestContactPhone),
-        sectionHeading(`${vars.itemOrVolunteer}s Details`),
-        childrenHtml(vars.itemsOrRoles),
-        copyPara(copy.paragraphs[3] ?? "", vars),
-        button("View Your Request", vars.viewRequestUrl),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      copyText(copy.paragraphs[2] ?? "", vars),
-      textKv("URL", vars.viewRequestUrl),
-      [
-        "Request Details",
-        textKv("Name", vars.requestName),
-        ...textKvOpt("Description", vars.requestDescription),
-      ],
-      [
-        "Request Contact",
-        textKv("Request's Contact", vars.requestContactName),
-        textKv("Contact's Email", vars.requestContactEmail),
-        ...textKvOpt("Contact's Phone", vars.requestContactPhone),
-      ],
-      [`${vars.itemOrVolunteer}s Details`, ...childrenText(vars.itemsOrRoles)],
-      copyText(copy.paragraphs[3] ?? "", vars),
-      textKv("View Your Request", vars.viewRequestUrl),
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          copyPara(copy.paragraphs[2] ?? "", vars),
+          sectionHeading("Request Details"),
+          kv("Name", vars.requestName),
+          kvOpt("Description", vars.requestDescription),
+          kvLink("URL", vars.viewRequestUrl),
+          sectionHeading("Request Contact"),
+          kv("Request's Contact", vars.requestContactName),
+          kv("Contact's Email", vars.requestContactEmail),
+          kvOpt("Contact's Phone", vars.requestContactPhone),
+          sectionHeading(`${vars.itemOrVolunteer}s Details`),
+          childrenHtml(vars.itemsOrRoles),
+          copyPara(copy.paragraphs[3] ?? "", vars),
+          button("View Your Request", vars.viewRequestUrl),
+        ]
+          .filter(Boolean)
+          .join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          copyText(copy.paragraphs[2] ?? "", vars),
+          [
+            "Request Details",
+            textKv("Name", vars.requestName),
+            ...textKvOpt("Description", vars.requestDescription),
+            textKv("URL", vars.viewRequestUrl),
+          ],
+          [
+            "Request Contact",
+            textKv("Request's Contact", vars.requestContactName),
+            textKv("Contact's Email", vars.requestContactEmail),
+            ...textKvOpt("Contact's Phone", vars.requestContactPhone),
+          ],
+          [`${vars.itemOrVolunteer}s Details`, ...childrenText(vars.itemsOrRoles)],
+          copyText(copy.paragraphs[3] ?? "", vars),
+          textKv("View Your Request", vars.viewRequestUrl),
+        );
     return { subject, html, text };
   },
 };

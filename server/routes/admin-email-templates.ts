@@ -18,7 +18,7 @@ import { PRODUCT_TEMPLATES, isProductTemplateKey, type ProductTemplateKey } from
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
 import { copyPlaceholders, finalizeHtml, brandTokenVars, getBrand, type TemplateCopy } from "../email/render";
 import { absoluteUrl, headerImageDataUri } from "../email/send";
-import { effectiveCopy, envStaffRecipients, parseRecipientOverride, validateCopy } from "../email/overrides";
+import { effectiveCopy, envStaffRecipients, parseRecipientOverride, sanitizeCopy, validateCopy } from "../email/overrides";
 import { templateDisplayName } from "../../shared/email-templates";
 import { SCHEDULABLE_TEMPLATE_KEYS } from "../digest-schedule";
 import type { EmailSchedule } from "../dal/email-schedules";
@@ -42,7 +42,24 @@ function parseCopyBody(raw: unknown): { ok: true; copy: TemplateCopy | null } | 
     return { ok: false };
   }
   if (o.paragraphs.some((p) => typeof p !== "string")) return { ok: false };
-  return { ok: true, copy: { subject: o.subject, heading: o.heading, paragraphs: o.paragraphs as string[] } };
+
+  // Optional bodyBlocks array.
+  let bodyBlocks: TemplateCopy["bodyBlocks"] = undefined;
+  if (Array.isArray(o.bodyBlocks)) {
+    for (const block of o.bodyBlocks) {
+      if (typeof block !== "object" || block === null) return { ok: false };
+      const b = block as Record<string, unknown>;
+      if (b.kind === "paragraph" && typeof b.html === "string") continue;
+      if (b.kind === "section" && typeof b.name === "string") continue;
+      return { ok: false }; // unrecognised block shape
+    }
+    bodyBlocks = o.bodyBlocks as TemplateCopy["bodyBlocks"];
+  }
+
+  return {
+    ok: true,
+    copy: { subject: o.subject, heading: o.heading, paragraphs: o.paragraphs as string[], bodyBlocks },
+  };
 }
 
 const EMAILISH_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -114,6 +131,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
           defaultCopy: template.defaultCopy,
           copy: effectiveCopy(key as ProductTemplateKey, ov) ?? template.defaultCopy,
           placeholders: copyPlaceholders(template.defaultCopy),
+          sections: (template.sections ?? []).map((s) => ({ name: s.name, label: s.label })),
+          defaultBlocks: template.defaultBlocks ?? [],
           authInfrastructure: false,
            deliveryType: schedule ? "scheduled" : "event_triggered",
            schedule,
@@ -135,6 +154,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         defaultCopy: { subject: "Your sign-in link for Love in Action", heading: "Sign in to Love in Action", paragraphs: [] },
         copy: { subject: "Your sign-in link for Love in Action", heading: "Sign in to Love in Action", paragraphs: [] },
         placeholders: [],
+        sections: [],
+        defaultBlocks: [],
         authInfrastructure: true,
          deliveryType: "event_triggered",
          schedule: null,
@@ -258,6 +279,9 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
       return;
     }
     if (parsed.copy) {
+      // Sanitize rich-body paragraph HTML before validation and storage —
+      // strips tags outside the strict allowlist (strong, em, br, safe a[href]).
+      parsed.copy = sanitizeCopy(parsed.copy);
       const errors = validateCopy(key, parsed.copy);
       if (errors.length > 0) {
         res.status(400).json({ message: "The copy was not saved.", errors });
@@ -289,7 +313,14 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
 
     try {
       const saved = await dal.emailTemplateOverrides.saveOverride(staffCtx(req), key, {
-        copy: parsed.copy,
+        copy: parsed.copy
+          ? {
+              subject: parsed.copy.subject,
+              heading: parsed.copy.heading,
+              paragraphs: parsed.copy.paragraphs,
+              bodyBlocks: parsed.copy.bodyBlocks,
+            }
+          : null,
         recipients,
         updatedByUserId: staffContext(req).userId,
       });
@@ -353,6 +384,8 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
           return;
         }
         if (parsed.copy) {
+          // Sanitize rich-body paragraph HTML before validation and rendering.
+          parsed.copy = sanitizeCopy(parsed.copy);
           const errors = validateCopy(key, parsed.copy);
           if (errors.length > 0) {
             res.status(400).json({ message: "The preview could not be rendered.", errors });

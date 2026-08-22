@@ -18,7 +18,10 @@ import {
   fillText,
   copyPara,
   copyText,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate, ItemLine } from "./types";
 
@@ -44,6 +47,69 @@ const DEFAULT_COPY: TemplateCopy = {
   ],
 };
 
+const SECTIONS: TemplateSectionDef<OrgNewItemDonationVars>[] = [
+  {
+    name: "request_details",
+    label: "Request Details",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Request Details"),
+        kv("Name", vars.requestName),
+        kvOpt("Description", vars.requestDescription),
+        kvLink("Request Link", vars.requestUrl),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Request Details",
+      textKv("Name", vars.requestName),
+      ...textKvOpt("Description", vars.requestDescription),
+      textKv("Request Link", vars.requestUrl),
+    ],
+  },
+  {
+    name: "items_donated",
+    label: "Item(s) Donated",
+    renderHtml: (vars) =>
+      [sectionHeading("Item(s) Donated"), itemsTable(vars.items, "Number Donated")].join("\n"),
+    renderText: (vars) => ["Item(s) Donated", ...textItemsTable(vars.items, "Number Donated")],
+  },
+  {
+    name: "donor_info",
+    label: "Donor Information",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Donor Information"),
+        kv("Name", vars.donorName),
+        kv("Email", vars.donorEmail),
+        kvOpt("Phone", vars.donorPhone),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Donor Information",
+      textKv("Name", vars.donorName),
+      textKv("Email", vars.donorEmail),
+      ...textKvOpt("Phone", vars.donorPhone),
+    ],
+  },
+  {
+    name: "view_button",
+    label: "View Donors button",
+    renderHtml: (vars) => button("View Donors", vars.supportersUrl),
+    renderText: (vars) => [textKv("View Donors", vars.supportersUrl)],
+  },
+];
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "section",   name: "request_details" },
+  { kind: "section",   name: "items_donated" },
+  { kind: "section",   name: "donor_info" },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[2]! },
+  { kind: "section",   name: "view_button" },
+];
+
 export const orgNewItemDonation: ProductTemplate<OrgNewItemDonationVars> = {
   key: "org_new_item_donation",
   entityType: "item_pledge",
@@ -52,6 +118,8 @@ export const orgNewItemDonation: ProductTemplate<OrgNewItemDonationVars> = {
   recipients: "The request's contact person",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     organizationName: "Hope Community Center",
     requestName: "Winter Warmth Drive",
@@ -68,47 +136,49 @@ export const orgNewItemDonation: ProductTemplate<OrgNewItemDonationVars> = {
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        sectionHeading("Request Details"),
-        kv("Name", vars.requestName),
-        kvOpt("Description", vars.requestDescription),
-        kvLink("Request Link", vars.requestUrl),
-        sectionHeading("Item(s) Donated"),
-        itemsTable(vars.items, "Number Donated"),
-        sectionHeading("Donor Information"),
-        kv("Name", vars.donorName),
-        kv("Email", vars.donorEmail),
-        kvOpt("Phone", vars.donorPhone),
-        copyPara(copy.paragraphs[2] ?? "", vars),
-        button("View Donors", vars.supportersUrl),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      [
-        "Request Details",
-        textKv("Name", vars.requestName),
-        ...textKvOpt("Description", vars.requestDescription),
-        textKv("Request Link", vars.requestUrl),
-      ],
-      ["Item(s) Donated", ...textItemsTable(vars.items, "Number Donated")],
-      [
-        "Donor Information",
-        textKv("Name", vars.donorName),
-        textKv("Email", vars.donorEmail),
-        ...textKvOpt("Phone", vars.donorPhone),
-      ],
-      copyText(copy.paragraphs[2] ?? "", vars),
-      textKv("View Donors", vars.supportersUrl),
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          sectionHeading("Request Details"),
+          kv("Name", vars.requestName),
+          kvOpt("Description", vars.requestDescription),
+          kvLink("Request Link", vars.requestUrl),
+          sectionHeading("Item(s) Donated"),
+          itemsTable(vars.items, "Number Donated"),
+          sectionHeading("Donor Information"),
+          kv("Name", vars.donorName),
+          kv("Email", vars.donorEmail),
+          kvOpt("Phone", vars.donorPhone),
+          copyPara(copy.paragraphs[2] ?? "", vars),
+          button("View Donors", vars.supportersUrl),
+        ]
+          .filter(Boolean)
+          .join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          [
+            "Request Details",
+            textKv("Name", vars.requestName),
+            ...textKvOpt("Description", vars.requestDescription),
+            textKv("Request Link", vars.requestUrl),
+          ],
+          ["Item(s) Donated", ...textItemsTable(vars.items, "Number Donated")],
+          [
+            "Donor Information",
+            textKv("Name", vars.donorName),
+            textKv("Email", vars.donorEmail),
+            ...textKvOpt("Phone", vars.donorPhone),
+          ],
+          copyText(copy.paragraphs[2] ?? "", vars),
+          textKv("View Donors", vars.supportersUrl),
+        );
     return { subject, html, text };
   },
 };

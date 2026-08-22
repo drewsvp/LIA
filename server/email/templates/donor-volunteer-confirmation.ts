@@ -10,6 +10,7 @@ import {
   kv,
   kvOpt,
   kvLink,
+  button,
   rolesList,
   textKv,
   textKvOpt,
@@ -18,7 +19,10 @@ import {
   fillText,
   copyPara,
   copyText,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate } from "./types";
 
@@ -50,6 +54,75 @@ const DEFAULT_COPY: TemplateCopy = {
   ],
 };
 
+const SECTIONS: TemplateSectionDef<DonorVolunteerConfirmationVars>[] = [
+  {
+    name: "org_contact",
+    label: "Organization Contact",
+    renderHtml: (vars) =>
+      [
+        sectionHeading(`${vars.organizationName} Contact`),
+        kv("Name", vars.requestContactName),
+        kv("Email", vars.requestContactEmail),
+        kvOpt("Phone #", vars.requestContactPhone),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      `${vars.organizationName} Contact`,
+      textKv("Name", vars.requestContactName),
+      textKv("Email", vars.requestContactEmail),
+      ...textKvOpt("Phone #", vars.requestContactPhone),
+    ],
+  },
+  {
+    name: "request_details",
+    label: "Request Details",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Request Details"),
+        kv("Name", vars.requestName),
+        kvOpt("Description", vars.requestDescription),
+        kv("Volunteer Type", vars.requestDeadlineType),
+        kvOpt("Details", vars.requestDetails),
+        kvLink("Website Link", vars.requestUrl),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Request Details",
+      textKv("Name", vars.requestName),
+      ...textKvOpt("Description", vars.requestDescription),
+      textKv("Volunteer Type", vars.requestDeadlineType),
+      ...textKvOpt("Details", vars.requestDetails),
+      textKv("Website Link", vars.requestUrl),
+    ],
+  },
+  {
+    name: "role_details",
+    label: "Role Details",
+    renderHtml: (vars) => [sectionHeading("Role Details"), rolesList(vars.roles)].join("\n"),
+    renderText: (vars) => ["Role Details", ...textRolesList(vars.roles)],
+  },
+  {
+    name: "view_button",
+    label: "View Request button",
+    renderHtml: (vars) => button("View Request", vars.requestUrl),
+    renderText: (vars) => [textKv("View Request", vars.requestUrl)],
+  },
+];
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[2]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[3]! },
+  { kind: "section",   name: "org_contact" },
+  { kind: "section",   name: "request_details" },
+  { kind: "section",   name: "role_details" },
+  { kind: "section",   name: "view_button" },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[4]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[5]! },
+];
+
 export const donorVolunteerConfirmation: ProductTemplate<DonorVolunteerConfirmationVars> = {
   key: "donor_volunteer_confirmation",
   entityType: "volunteer_signup",
@@ -68,6 +141,8 @@ export const donorVolunteerConfirmation: ProductTemplate<DonorVolunteerConfirmat
   recipients: "The volunteer who signed up",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     donorName: "Maria Alvarez",
     organizationName: "Hope Community Center",
@@ -84,55 +159,59 @@ export const donorVolunteerConfirmation: ProductTemplate<DonorVolunteerConfirmat
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        copyPara(copy.paragraphs[2] ?? "", vars),
-        copyPara(copy.paragraphs[3] ?? "", vars),
-        sectionHeading(`${vars.organizationName} Contact`),
-        kv("Name", vars.requestContactName),
-        kv("Email", vars.requestContactEmail),
-        kvOpt("Phone #", vars.requestContactPhone),
-        sectionHeading("Request Details"),
-        kv("Name", vars.requestName),
-        kvOpt("Description", vars.requestDescription),
-        kv("Volunteer Type", vars.requestDeadlineType),
-        kvOpt("Details", vars.requestDetails),
-        kvLink("Website Link", vars.requestUrl),
-        sectionHeading("Role Details"),
-        rolesList(vars.roles),
-        copyPara(copy.paragraphs[4] ?? "", vars),
-        copyPara(copy.paragraphs[5] ?? "", vars),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      copyText(copy.paragraphs[2] ?? "", vars),
-      copyText(copy.paragraphs[3] ?? "", vars),
-      [
-        `${vars.organizationName} Contact`,
-        textKv("Name", vars.requestContactName),
-        textKv("Email", vars.requestContactEmail),
-        ...textKvOpt("Phone #", vars.requestContactPhone),
-      ],
-      [
-        "Request Details",
-        textKv("Name", vars.requestName),
-        ...textKvOpt("Description", vars.requestDescription),
-        textKv("Volunteer Type", vars.requestDeadlineType),
-        ...textKvOpt("Details", vars.requestDetails),
-        textKv("Website Link", vars.requestUrl),
-      ],
-      ["Role Details", ...textRolesList(vars.roles)],
-      copyText(copy.paragraphs[4] ?? "", vars),
-      copyText(copy.paragraphs[5] ?? "", vars),
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          copyPara(copy.paragraphs[2] ?? "", vars),
+          copyPara(copy.paragraphs[3] ?? "", vars),
+          sectionHeading(`${vars.organizationName} Contact`),
+          kv("Name", vars.requestContactName),
+          kv("Email", vars.requestContactEmail),
+          kvOpt("Phone #", vars.requestContactPhone),
+          sectionHeading("Request Details"),
+          kv("Name", vars.requestName),
+          kvOpt("Description", vars.requestDescription),
+          kv("Volunteer Type", vars.requestDeadlineType),
+          kvOpt("Details", vars.requestDetails),
+          kvLink("Website Link", vars.requestUrl),
+          sectionHeading("Role Details"),
+          rolesList(vars.roles),
+          button("View Request", vars.requestUrl),
+          copyPara(copy.paragraphs[4] ?? "", vars),
+          copyPara(copy.paragraphs[5] ?? "", vars),
+        ]
+          .filter(Boolean)
+          .join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          copyText(copy.paragraphs[2] ?? "", vars),
+          copyText(copy.paragraphs[3] ?? "", vars),
+          [
+            `${vars.organizationName} Contact`,
+            textKv("Name", vars.requestContactName),
+            textKv("Email", vars.requestContactEmail),
+            ...textKvOpt("Phone #", vars.requestContactPhone),
+          ],
+          [
+            "Request Details",
+            textKv("Name", vars.requestName),
+            ...textKvOpt("Description", vars.requestDescription),
+            textKv("Volunteer Type", vars.requestDeadlineType),
+            ...textKvOpt("Details", vars.requestDetails),
+            textKv("Website Link", vars.requestUrl),
+          ],
+          ["Role Details", ...textRolesList(vars.roles)],
+          textKv("View Request", vars.requestUrl),
+          copyText(copy.paragraphs[4] ?? "", vars),
+          copyText(copy.paragraphs[5] ?? "", vars),
+        );
     return { subject, html, text };
   },
 };

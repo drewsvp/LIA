@@ -19,7 +19,10 @@ import {
   fillText,
   copyPara,
   copyText,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate, ItemLine } from "./types";
 
@@ -32,7 +35,7 @@ export type DonorItemConfirmationVars = {
   requestName: string;
   requestDescription: string | null;
   requestDeadlineType: string;
-  requestDeadlineDate: string | null; // only for date_specific; line omitted otherwise
+  requestDeadlineDate: string | null;
   dropoffLocation: string | null;
   requestUrl: string;
   items: ItemLine[];
@@ -50,6 +53,70 @@ const DEFAULT_COPY: TemplateCopy = {
     "If you have any questions or you email the contact and do not hear back from them within 1 week, please email <strong>{directorName}</strong>, our {directorTitle}, at {directorEmail}.",
   ],
 };
+const SECTIONS: TemplateSectionDef<DonorItemConfirmationVars>[] = [
+  {
+    name: "contact",
+    label: "Contact",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Contact"),
+        kv("Name", vars.requestContactName),
+        kv("Email", vars.requestContactEmail),
+        kvOpt("Phone #", vars.requestContactPhone),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Contact",
+      textKv("Name", vars.requestContactName),
+      textKv("Email", vars.requestContactEmail),
+      ...textKvOpt("Phone #", vars.requestContactPhone),
+    ],
+  },
+  {
+    name: "request_details",
+    label: "Request Details",
+    renderHtml: (vars) =>
+      [
+        sectionHeading("Request Details"),
+        kv("Name", vars.requestName),
+        kvOpt("Description", vars.requestDescription),
+        kv("Deadline Type", vars.requestDeadlineType),
+        kvOpt("Deadline Date", vars.requestDeadlineDate),
+        kvOpt("Dropoff Location", vars.dropoffLocation),
+        kvLink("Website Link", vars.requestUrl),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    renderText: (vars) => [
+      "Request Details",
+      textKv("Name", vars.requestName),
+      ...textKvOpt("Description", vars.requestDescription),
+      textKv("Deadline Type", vars.requestDeadlineType),
+      ...textKvOpt("Deadline Date", vars.requestDeadlineDate),
+      ...textKvOpt("Dropoff Location", vars.dropoffLocation),
+      textKv("Website Link", vars.requestUrl),
+    ],
+  },
+  {
+    name: "items_donated",
+    label: "Item(s) Donated",
+    renderHtml: (vars) =>
+      [sectionHeading("Item(s) Donated"), itemsTable(vars.items, "Number Donated")].join("\n"),
+    renderText: (vars) => ["Item(s) Donated", ...textItemsTable(vars.items, "Number Donated")],
+  },
+];
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[2]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[3]! },
+  { kind: "section",   name: "contact" },
+  { kind: "section",   name: "request_details" },
+  { kind: "section",   name: "items_donated" },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[4]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[5]! },
+];
 
 export const donorItemConfirmation: ProductTemplate<DonorItemConfirmationVars> = {
   key: "donor_item_confirmation",
@@ -68,6 +135,8 @@ export const donorItemConfirmation: ProductTemplate<DonorItemConfirmationVars> =
   recipients: "The donor who pledged",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     donorName: "Jordan Lee",
     organizationName: "Hope Community Center",
@@ -87,57 +156,59 @@ export const donorItemConfirmation: ProductTemplate<DonorItemConfirmationVars> =
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        copyPara(copy.paragraphs[2] ?? "", vars),
-        copyPara(copy.paragraphs[3] ?? "", vars),
-        sectionHeading("Contact"),
-        kv("Name", vars.requestContactName),
-        kv("Email", vars.requestContactEmail),
-        kvOpt("Phone #", vars.requestContactPhone),
-        sectionHeading("Request Details"),
-        kv("Name", vars.requestName),
-        kvOpt("Description", vars.requestDescription),
-        kv("Deadline Type", vars.requestDeadlineType),
-        kvOpt("Deadline Date", vars.requestDeadlineDate),
-        kvOpt("Dropoff Location", vars.dropoffLocation),
-        kvLink("Website Link", vars.requestUrl),
-        sectionHeading("Item(s) Donated"),
-        itemsTable(vars.items, "Number Donated"),
-        copyPara(copy.paragraphs[4] ?? "", vars),
-        copyPara(copy.paragraphs[5] ?? "", vars),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      copyText(copy.paragraphs[2] ?? "", vars),
-      copyText(copy.paragraphs[3] ?? "", vars),
-      [
-        "Contact",
-        textKv("Name", vars.requestContactName),
-        textKv("Email", vars.requestContactEmail),
-        ...textKvOpt("Phone #", vars.requestContactPhone),
-      ],
-      [
-        "Request Details",
-        textKv("Name", vars.requestName),
-        ...textKvOpt("Description", vars.requestDescription),
-        textKv("Deadline Type", vars.requestDeadlineType),
-        ...textKvOpt("Deadline Date", vars.requestDeadlineDate),
-        ...textKvOpt("Dropoff Location", vars.dropoffLocation),
-        textKv("Website Link", vars.requestUrl),
-      ],
-      ["Item(s) Donated", ...textItemsTable(vars.items, "Number Donated")],
-      copyText(copy.paragraphs[4] ?? "", vars),
-      copyText(copy.paragraphs[5] ?? "", vars),
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          copyPara(copy.paragraphs[2] ?? "", vars),
+          copyPara(copy.paragraphs[3] ?? "", vars),
+          sectionHeading("Contact"),
+          kv("Name", vars.requestContactName),
+          kv("Email", vars.requestContactEmail),
+          kvOpt("Phone #", vars.requestContactPhone),
+          sectionHeading("Request Details"),
+          kv("Name", vars.requestName),
+          kvOpt("Description", vars.requestDescription),
+          kv("Deadline Type", vars.requestDeadlineType),
+          kvOpt("Deadline Date", vars.requestDeadlineDate),
+          kvOpt("Dropoff Location", vars.dropoffLocation),
+          kvLink("Website Link", vars.requestUrl),
+          sectionHeading("Item(s) Donated"),
+          itemsTable(vars.items, "Number Donated"),
+          copyPara(copy.paragraphs[4] ?? "", vars),
+          copyPara(copy.paragraphs[5] ?? "", vars),
+        ]
+          .filter(Boolean)
+          .join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          copyText(copy.paragraphs[2] ?? "", vars),
+          copyText(copy.paragraphs[3] ?? "", vars),
+          [
+            "Contact",
+            textKv("Name", vars.requestContactName),
+            textKv("Email", vars.requestContactEmail),
+            ...textKvOpt("Phone #", vars.requestContactPhone),
+          ],
+          [
+            "Request Details",
+            textKv("Name", vars.requestName),
+            ...textKvOpt("Description", vars.requestDescription),
+            textKv("Deadline Type", vars.requestDeadlineType),
+            ...textKvOpt("Deadline Date", vars.requestDeadlineDate),
+            ...textKvOpt("Dropoff Location", vars.dropoffLocation),
+            textKv("Website Link", vars.requestUrl),
+          ],
+          ["Item(s) Donated", ...textItemsTable(vars.items, "Number Donated")],
+          copyText(copy.paragraphs[4] ?? "", vars),
+          copyText(copy.paragraphs[5] ?? "", vars),
+        );
     return { subject, html, text };
   },
 };

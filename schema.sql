@@ -836,12 +836,14 @@ CREATE TABLE public.email_template_overrides (
     subject text,
     heading text,
     paragraphs jsonb,
+    body_blocks jsonb,
     recipients text,
     enabled boolean DEFAULT true NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
     CONSTRAINT email_template_overrides_copy_all_or_nothing CHECK ((((subject IS NULL) AND (heading IS NULL) AND (paragraphs IS NULL)) OR ((subject IS NOT NULL) AND (heading IS NOT NULL) AND (paragraphs IS NOT NULL)))),
-    CONSTRAINT email_template_overrides_paragraphs_array CHECK (((paragraphs IS NULL) OR (jsonb_typeof(paragraphs) = 'array'::text)))
+    CONSTRAINT email_template_overrides_paragraphs_array CHECK (((paragraphs IS NULL) OR (jsonb_typeof(paragraphs) = 'array'::text))),
+    CONSTRAINT email_template_overrides_body_blocks_array CHECK (((body_blocks IS NULL) OR (jsonb_typeof(body_blocks) = 'array'::text)))
 );
 
 ALTER TABLE ONLY public.email_template_overrides FORCE ROW LEVEL SECURITY;

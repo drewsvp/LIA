@@ -18,7 +18,10 @@ import {
   fillText,
   copyPara,
   copyText,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate } from "./types";
 
@@ -40,6 +43,22 @@ const DEFAULT_COPY: TemplateCopy = {
   ],
 };
 
+const SECTIONS: TemplateSectionDef<OrgMemberApprovedVars>[] = [
+  {
+    name: "login_button",
+    label: "Login button",
+    renderHtml: (vars) => button("Lorem Ipsum", vars.loginUrl),
+    renderText: (vars) => [textKv("Lorem Ipsum", vars.loginUrl)],
+  },
+];
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[2]! },
+  { kind: "section",   name: "login_button" },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[3]! },
+];
+
 export const orgMemberApproved: ProductTemplate<OrgMemberApprovedVars> = {
   key: "org_member_approved",
   entityType: "org_membership",
@@ -48,6 +67,8 @@ export const orgMemberApproved: ProductTemplate<OrgMemberApprovedVars> = {
   recipients: "The approved member",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     memberName: "Maria Alvarez",
     organizationName: "Hope Community Center",
@@ -56,24 +77,26 @@ export const orgMemberApproved: ProductTemplate<OrgMemberApprovedVars> = {
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        copyPara(copy.paragraphs[2] ?? "", vars),
-        button("Lorem Ipsum", vars.loginUrl),
-        copyPara(copy.paragraphs[3] ?? "", vars),
-      ].join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      copyText(copy.paragraphs[2] ?? "", vars),
-      textKv("Lorem Ipsum", vars.loginUrl),
-      copyText(copy.paragraphs[3] ?? "", vars),
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          copyPara(copy.paragraphs[2] ?? "", vars),
+          button("Lorem Ipsum", vars.loginUrl),
+          copyPara(copy.paragraphs[3] ?? "", vars),
+        ].join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          copyText(copy.paragraphs[2] ?? "", vars),
+          textKv("Lorem Ipsum", vars.loginUrl),
+          copyText(copy.paragraphs[3] ?? "", vars),
+        );
     return { subject, html, text };
   },
 };

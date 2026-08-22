@@ -14,7 +14,7 @@
  * `sample` variables for the rendered preview. `render` accepts an optional
  * copy override; the hardcoded defaultCopy is always the fallback.
  */
-import type { Rendered, TemplateCopy } from "../render";
+import type { Rendered, TemplateCopy, TemplateSectionDef, BodyBlock } from "../render";
 
 export type ProductEntityType =
   | "organization"
@@ -44,6 +44,17 @@ export type ProductTemplate<V extends Record<string, unknown>> = {
   defaultCopy: TemplateCopy;
   /** Sample variables used to render the admin preview. */
   sample: V;
+  /**
+   * Named auto-generated sections the body editor can insert as chips.
+   * Absent for templates whose structural content is not section-based.
+   */
+  sections?: TemplateSectionDef<V>[];
+  /**
+   * Default block ordering that exactly mirrors the legacy render() sequence.
+   * Used by the body editor to initialise content when no stored bodyBlocks override exists.
+   * Each paragraph block carries the raw template text (with {placeholder} tokens) from defaultCopy.
+   */
+  defaultBlocks?: BodyBlock[];
   render: (vars: V, copy?: TemplateCopy) => Rendered;
 };
 

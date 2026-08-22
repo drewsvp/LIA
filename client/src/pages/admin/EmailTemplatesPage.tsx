@@ -1,10 +1,10 @@
 /**
  * ADMIN-10 — Automated emails (staff-admin only). Every automated email
  * with its trigger and recipients in plain words, an enable/disable toggle,
- * a plain-text copy editor with {placeholder} tokens, and a rendered
- * preview with sample data. The login-link email appears marked as
- * authentication infrastructure, view-only. Saving refuses with a stated
- * error when a required placeholder is missing — the server validates too.
+ * a rich-text body editor with smart section chips, and a rendered preview
+ * with sample data. The login-link email appears marked as authentication
+ * infrastructure, view-only. Saving refuses with a stated error when a
+ * required placeholder is missing — the server validates too.
  *
  * Also hosts the Branding panel (Task 241) where staff-admins can edit the
  * primary colour, fonts, org identity strings, director details, and header
@@ -15,8 +15,15 @@ import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useNavigationGuard } from "../../hooks/useNavigationGuard";
+import { EmailBodyEditor } from "@/components/EmailBodyEditor";
+import type { BodyBlock, SectionDef } from "@/components/EmailBodyEditor";
 
-type Copy = { subject: string; heading: string; paragraphs: string[] };
+type Copy = {
+  subject: string;
+  heading: string;
+  paragraphs: string[];
+  bodyBlocks?: BodyBlock[];
+};
 
 type TemplateRow = {
   key: string;
@@ -31,6 +38,8 @@ type TemplateRow = {
   defaultCopy: Copy;
   copy: Copy;
   placeholders: string[];
+  sections: SectionDef[];
+  defaultBlocks: BodyBlock[];
   authInfrastructure: boolean;
   deliveryType: "scheduled" | "event_triggered";
   schedule: Schedule | null;
@@ -117,12 +126,12 @@ function fmtPacific(iso: string | null): string {
 }
 
 function copyEqual(a: Copy, b: Copy): boolean {
-  return (
-    a.subject === b.subject &&
-    a.heading === b.heading &&
-    a.paragraphs.length === b.paragraphs.length &&
-    a.paragraphs.every((p, i) => p === b.paragraphs[i])
-  );
+  if (a.subject !== b.subject || a.heading !== b.heading) return false;
+  if (a.paragraphs.length !== b.paragraphs.length || !a.paragraphs.every((p, i) => p === b.paragraphs[i])) return false;
+  // Compare bodyBlocks by serialization (undefined vs [] both mean "no blocks saved").
+  const aBlocks = a.bodyBlocks?.length ? JSON.stringify(a.bodyBlocks) : "";
+  const bBlocks = b.bodyBlocks?.length ? JSON.stringify(b.bodyBlocks) : "";
+  return aBlocks === bBlocks;
 }
 
 async function postJson(url: string, body: unknown, method = "POST"): Promise<{ ok: boolean; data: unknown }> {
@@ -134,6 +143,34 @@ async function postJson(url: string, body: unknown, method = "POST"): Promise<{ 
   });
   const data = (await res.json().catch(() => null)) as unknown;
   return { ok: res.ok, data };
+}
+
+/**
+ * Build the initial BodyBlock[] for the editor.
+ * Priority: stored bodyBlocks override → template's per-template defaultBlocks
+ * (which exactly mirrors the legacy render order) → naive fallback.
+ */
+function buildInitialBlocks(copy: Copy, defaultBlocks: BodyBlock[]): BodyBlock[] {
+  if (copy.bodyBlocks && copy.bodyBlocks.length > 0) return copy.bodyBlocks;
+  if (defaultBlocks.length > 0) {
+    // Substitute paragraph blocks from the stored copy paragraphs array so
+    // any custom copy is reflected, but section chips come from the template default.
+    let paraIdx = 0;
+    return defaultBlocks.map((block) => {
+      if (block.kind === "paragraph") {
+        const html = copy.paragraphs[paraIdx] ?? block.html;
+        paraIdx++;
+        return { kind: "paragraph" as const, html };
+      }
+      return block;
+    });
+  }
+  // Naive fallback — should not be reached for any declared template.
+  const blocks: BodyBlock[] = copy.paragraphs.map((p) => ({ kind: "paragraph" as const, html: p }));
+  if (blocks.length === 0 || blocks[blocks.length - 1]?.kind === "section") {
+    blocks.push({ kind: "paragraph", html: "" });
+  }
+  return blocks;
 }
 
 const BRAND_DEFAULTS: BrandSettings = {
@@ -168,6 +205,8 @@ export function EmailTemplatesPage(): ReactElement {
   // When non-null, a row switch or close is waiting for dirty-state confirmation.
   // "__CLOSE__" means the close button was clicked; any other value is the target row key.
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  // Incremented to force the EmailBodyEditor to remount (e.g. after restore-to-default).
+  const [editorKey, setEditorKey] = useState(0);
   // Incremented each time the selected template changes so stale in-flight
   // responses from a previous selection are discarded on arrival.
   const previewGenRef = useRef(0);
@@ -189,22 +228,6 @@ export function EmailTemplatesPage(): ReactElement {
   // Show the guard whenever a navigation or in-page action is pending confirmation.
   const showGuard = blocked || pendingKey !== null;
 
-  // True when the editor section is (or should be) in the DOM.
-  const editorVisible = selected !== null && draft !== null;
-
-  // Scroll the editor into view after it is actually in the DOM.
-  // This effect fires on the render AFTER draft is set, so editorRef.current is
-  // guaranteed to be attached. selectedKey in deps re-triggers on template switches
-  // (editorVisible stays true but the selected content changed).
-  useEffect(() => {
-    if (!editorVisible) return;
-    const id = requestAnimationFrame(() => {
-      editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    return () => cancelAnimationFrame(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorVisible, selectedKey]);
-
   // (Re)initialize the editor, load the stored preview, and auto-scroll on selection.
   // Intentionally omits `data` from deps: a background refetch (e.g. after toggling
   // status or saving schedule) must NOT reset a dirty copy/recipients draft.
@@ -219,12 +242,25 @@ export function EmailTemplatesPage(): ReactElement {
       setScheduleDraft(null);
       return;
     }
-    setDraft({ ...selected.copy, paragraphs: [...selected.copy.paragraphs] });
+    setDraft({
+      ...selected.copy,
+      paragraphs: [...selected.copy.paragraphs],
+      bodyBlocks: selected.copy.bodyBlocks ? [...selected.copy.bodyBlocks] : undefined,
+    });
     setDraftRecipients(selected.recipientsOverride ?? "");
     setScheduleDraft(selected.schedule ? { ...selected.schedule } : null);
     const once = pacificDateTime(selected.schedule?.oneTimeAt ?? null);
     setOneTimeDate(once.date);
     setOneTimeTime(once.time);
+
+    // Scroll the editor into view after two animation frames: the outer frame
+    // lets React finish its commit; the inner fires after the first browser
+    // paint when the editor element is guaranteed in the DOM and has layout.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
 
     const gen = ++previewGenRef.current;
     void postJson(`/api/admin/email-templates/${selected.key}/preview`, {}).then(({ ok, data: body }) => {
@@ -326,12 +362,10 @@ export function EmailTemplatesPage(): ReactElement {
         setMessage(resetToDefault ? "Restored the built-in copy." : "Saved. All future sends use this copy.");
         // Explicitly sync the draft so isDirty returns false without relying on the
         // editor-init effect (which intentionally omits `data` from its deps).
-        // For a restore-default, adopt the built-in copy. For a normal save, the
-        // draft already matches the saved copy — just normalise recipients so that
-        // any server-side trimming doesn't leave a phantom dirty flag.
         if (resetToDefault) {
-          setDraft({ ...selected.defaultCopy, paragraphs: [...selected.defaultCopy.paragraphs] });
+          setDraft({ ...selected.defaultCopy, paragraphs: [...selected.defaultCopy.paragraphs], bodyBlocks: undefined });
           setDraftRecipients("");
+          setEditorKey((k) => k + 1); // remount the editor with the default content
         } else if (selected.recipientsConfigurable) {
           setDraftRecipients(draftRecipients.trim() === "" ? "" : draftRecipients.trim());
         }
@@ -558,7 +592,6 @@ export function EmailTemplatesPage(): ReactElement {
               </button>
             </div>
 
-
             <dl className="adm-detail-list">
               <dt>Sent when</dt>
               <dd>{selected.deliveryType === "scheduled" ? selected.trigger : `Event-triggered: ${selected.trigger}`}</dd>
@@ -670,23 +703,19 @@ export function EmailTemplatesPage(): ReactElement {
                   Heading
                   <input type="text" value={draft.heading} onChange={(e) => setDraft({ ...draft, heading: e.target.value })} />
                 </label>
-                {draft.paragraphs.map((p, i) => (
-                  // eslint-disable-next-line react/no-array-index-key
-                  <label className="adm-filter" key={i}>
-                    Paragraph {i + 1}
-                    <textarea
-                      rows={4}
-                      value={p}
-                      onChange={(e) => {
-                        const paragraphs = [...draft.paragraphs];
-                        paragraphs[i] = e.target.value;
-                        setDraft({ ...draft, paragraphs });
-                      }}
-                    />
-                  </label>
-                ))}
+
+                <div style={{ marginBottom: 4 }}>
+                  <span className="adm-filter" style={{ marginBottom: 4 }}>Body</span>
+                  <EmailBodyEditor
+                    key={`${selectedKey}-${editorKey}`}
+                    value={buildInitialBlocks(draft, selected.defaultBlocks)}
+                    sections={selected.sections}
+                    onChange={(blocks) => setDraft({ ...draft, bodyBlocks: blocks })}
+                  />
+                </div>
+
                 <p className="adm-muted">
-                  Placeholders this email uses: {selected.placeholders.length > 0 ? selected.placeholders.map((p) => `{${p}}`).join(", ") : "none"}. Details like names, tables, and buttons below the copy are built automatically and cannot break.
+                  Placeholders this email uses: {selected.placeholders.length > 0 ? selected.placeholders.map((p) => `{${p}}`).join(", ") : "none"}. Details like names, tables, and buttons are inserted via the section chips above and cannot break.
                 </p>
                 <div className="adm-btn-row">
                   <button type="button" className="adm-btn" disabled={saving} onClick={() => void save(false)}>

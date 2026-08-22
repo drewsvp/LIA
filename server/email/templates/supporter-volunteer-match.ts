@@ -15,7 +15,10 @@ import {
   copyText,
   escapeHtml,
   getBrand,
+  renderBodyBlocksHtml,
+  renderBodyBlocksToTextBlocks,
   type TemplateCopy,
+  type TemplateSectionDef,
 } from "../render";
 import type { ProductTemplate } from "./types";
 
@@ -38,6 +41,56 @@ const DEFAULT_COPY: TemplateCopy = {
   ],
 };
 
+const SECTIONS: TemplateSectionDef<SupporterVolunteerMatchVars>[] = [
+  {
+    name: "opportunity_card",
+    label: "Opportunity Card",
+    renderHtml: (vars) =>
+      [
+        sectionHeading(vars.opportunityName),
+        para(`<strong>Organization:</strong> ${escapeHtml(vars.organizationName)}`),
+        sectionHeading(vars.matchingCategories.length === 1 ? "Matching Interest" : "Matching Interests"),
+        rolesList(vars.matchingCategories),
+      ].join("\n"),
+    renderText: (vars) => [
+      vars.opportunityName,
+      `Organization: ${vars.organizationName}`,
+      vars.matchingCategories.length === 1 ? "Matching Interest" : "Matching Interests",
+      ...textRolesList(vars.matchingCategories),
+    ],
+  },
+  {
+    name: "view_button",
+    label: "Review Opportunity button",
+    renderHtml: (vars) => button("Review This Volunteer Opportunity", vars.opportunityUrl),
+    renderText: (vars) => [`Review this volunteer opportunity: ${vars.opportunityUrl}`],
+  },
+  {
+    name: "unsubscribe",
+    label: "Unsubscribe link",
+    renderHtml: (vars) => {
+      const color = getBrand().primaryColor;
+      return para(
+        `<span style="font-size:13px;">You are receiving this because you turned on matching volunteer alerts. ` +
+          `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${color};text-decoration:underline;">Stop these alerts</a></span>`,
+      );
+    },
+    renderText: (vars) => [
+      "You are receiving this because you turned on matching volunteer alerts.",
+      `Stop these alerts: ${vars.unsubscribeUrl}`,
+    ],
+  },
+];
+
+const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[0]! },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[1]! },
+  { kind: "section",   name: "opportunity_card" },
+  { kind: "section",   name: "view_button" },
+  { kind: "paragraph", html: DEFAULT_COPY.paragraphs[2]! },
+  { kind: "section",   name: "unsubscribe" },
+];
+
 export const supporterVolunteerMatch: ProductTemplate<SupporterVolunteerMatchVars> = {
   key: "supporter_volunteer_match",
   entityType: "volunteer_request",
@@ -53,6 +106,8 @@ export const supporterVolunteerMatch: ProductTemplate<SupporterVolunteerMatchVar
   recipients: "Opted-in active supporter profiles with at least one matching active volunteer interest",
   recipientsConfigurable: false,
   defaultCopy: DEFAULT_COPY,
+  sections: SECTIONS,
+  defaultBlocks: DEFAULT_BLOCKS,
   sample: {
     supporterFirstName: "Maria",
     opportunityName: "Saturday Food Pantry Support",
@@ -64,42 +119,44 @@ export const supporterVolunteerMatch: ProductTemplate<SupporterVolunteerMatchVar
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
     const color = getBrand().primaryColor;
-    const html = shell(
-      fillText(copy.heading, vars),
-      [
-        copyPara(copy.paragraphs[0] ?? "", vars),
-        copyPara(copy.paragraphs[1] ?? "", vars),
-        sectionHeading(vars.opportunityName),
-        para(`<strong>Organization:</strong> ${escapeHtml(vars.organizationName)}`),
-        sectionHeading(vars.matchingCategories.length === 1 ? "Matching Interest" : "Matching Interests"),
-        rolesList(vars.matchingCategories),
-        button("Review This Volunteer Opportunity", vars.opportunityUrl),
-        copyPara(copy.paragraphs[2] ?? "", vars),
-        para(
-          `<span style="font-size:13px;">You are receiving this because you turned on matching volunteer alerts. ` +
-            `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${color};text-decoration:underline;">Stop these alerts</a></span>`,
-        ),
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    const text = textBody(
-      copyText(copy.heading, vars),
-      copyText(copy.paragraphs[0] ?? "", vars),
-      copyText(copy.paragraphs[1] ?? "", vars),
-      [
-        vars.opportunityName,
-        `Organization: ${vars.organizationName}`,
-        vars.matchingCategories.length === 1 ? "Matching Interest" : "Matching Interests",
-        ...textRolesList(vars.matchingCategories),
-        `Review this volunteer opportunity: ${vars.opportunityUrl}`,
-      ],
-      copyText(copy.paragraphs[2] ?? "", vars),
-      [
-        "You are receiving this because you turned on matching volunteer alerts.",
-        `Stop these alerts: ${vars.unsubscribeUrl}`,
-      ],
-    );
+    const bodyHtml = copy.bodyBlocks?.length
+      ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
+      : [
+          copyPara(copy.paragraphs[0] ?? "", vars),
+          copyPara(copy.paragraphs[1] ?? "", vars),
+          sectionHeading(vars.opportunityName),
+          para(`<strong>Organization:</strong> ${escapeHtml(vars.organizationName)}`),
+          sectionHeading(vars.matchingCategories.length === 1 ? "Matching Interest" : "Matching Interests"),
+          rolesList(vars.matchingCategories),
+          button("Review This Volunteer Opportunity", vars.opportunityUrl),
+          copyPara(copy.paragraphs[2] ?? "", vars),
+          para(
+            `<span style="font-size:13px;">You are receiving this because you turned on matching volunteer alerts. ` +
+              `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${color};text-decoration:underline;">Stop these alerts</a></span>`,
+          ),
+        ]
+          .filter(Boolean)
+          .join("\n");
+    const html = shell(fillText(copy.heading, vars), bodyHtml);
+    const text = copy.bodyBlocks?.length
+      ? textBody(copyText(copy.heading, vars), ...renderBodyBlocksToTextBlocks(copy.bodyBlocks, vars, SECTIONS))
+      : textBody(
+          copyText(copy.heading, vars),
+          copyText(copy.paragraphs[0] ?? "", vars),
+          copyText(copy.paragraphs[1] ?? "", vars),
+          [
+            vars.opportunityName,
+            `Organization: ${vars.organizationName}`,
+            vars.matchingCategories.length === 1 ? "Matching Interest" : "Matching Interests",
+            ...textRolesList(vars.matchingCategories),
+          ],
+          [`Review this volunteer opportunity: ${vars.opportunityUrl}`],
+          copyText(copy.paragraphs[2] ?? "", vars),
+          [
+            "You are receiving this because you turned on matching volunteer alerts.",
+            `Stop these alerts: ${vars.unsubscribeUrl}`,
+          ],
+        );
     return { subject, html, text };
   },
 };
