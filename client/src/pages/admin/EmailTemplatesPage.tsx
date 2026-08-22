@@ -454,7 +454,7 @@ export function EmailTemplatesPage(): ReactElement {
               <button type="button" className="adm-btn" onClick={commitPending}>
                 Discard changes
               </button>
-              <button type="button" className="adm-btn-outline" onClick={dismissPending}>
+              <button type="button" className="adm-btn adm-btn-outline" onClick={dismissPending}>
                 Keep editing
               </button>
             </div>
@@ -677,7 +677,7 @@ export function EmailTemplatesPage(): ReactElement {
                         {savingSchedule ? "Saving schedule…" : "Save schedule"}
                       </button>
                       {scheduleDraft.oneTimeAt && (
-                        <button type="button" className="adm-btn-outline" disabled={savingSchedule} onClick={() => void saveSchedule(true)}>
+                        <button type="button" className="adm-btn adm-btn-outline" disabled={savingSchedule} onClick={() => void saveSchedule(true)}>
                           Cancel one-time send
                         </button>
                       )}
@@ -721,11 +721,11 @@ export function EmailTemplatesPage(): ReactElement {
                   <button type="button" className="adm-btn" disabled={saving} onClick={() => void save(false)}>
                     {saving ? "Saving…" : "Save"}
                   </button>
-                  <button type="button" className="adm-btn-outline" disabled={previewing} onClick={() => void refreshPreview()}>
+                  <button type="button" className="adm-btn adm-btn-outline" disabled={previewing} onClick={() => void refreshPreview()}>
                     {previewing ? "Loading preview…" : "Preview these edits"}
                   </button>
                   {selected.hasCopyOverride && (
-                    <button type="button" className="adm-btn-outline" disabled={saving} onClick={() => void save(true)}>
+                    <button type="button" className="adm-btn adm-btn-outline" disabled={saving} onClick={() => void save(true)}>
                       Restore built-in copy
                     </button>
                   )}
