@@ -4,8 +4,9 @@
  * Persistent left nav of the eight admin surfaces with the current one
  * marked; pending-count badges beside the three approval queues (zero = no
  * badge); a failed-email count for the trailing seven days linking to
- * ADMIN-06 filtered to failures, rendered only above zero. Dense, no
- * decoration: Design.md color/type tokens, no card shadow or radius.
+ * ADMIN-06 filtered to failures, rendered only above zero. Uses Design.md
+ * color/type tokens with rounded corners and light shadows matching the
+ * public site style.
  *
  * A DB-routine-health banner appears below the nav when the startup check
  * found missing functions or triggers (status "missing"), or when the catalog
