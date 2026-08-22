@@ -11,7 +11,7 @@
  * happened to the welcome email (§4, §9). Staying on the queue after each
  * action is deliberate — staff work through several at a sitting (§2).
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../../lib/queryClient";
 
@@ -92,6 +92,13 @@ export function OrganizationsPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const detailRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (selectedId !== null) {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedId]);
 
   const listQuery = useQuery<{ organizations: QueueRow[] }>({
     queryKey: [`/api/admin/organizations?status=${tab}`],
@@ -199,7 +206,7 @@ export function OrganizationsPage() {
       )}
 
       {selectedId !== null && (
-        <section className="adm-detail" aria-label="Organization detail">
+        <section className="adm-detail" aria-label="Organization detail" ref={detailRef}>
           {detailQuery.isLoading ? (
             <p className="adm-note">Loading…</p>
           ) : detailQuery.isError || !org ? (

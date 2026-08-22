@@ -14,7 +14,7 @@
  * sends nothing; reinstate returns a removed row to PENDING (§6), never
  * straight to active, so the approval email still runs.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type Tab = "pending" | "active" | "removed";
@@ -97,6 +97,13 @@ export function MembersPage() {
   const [rejectNote, setRejectNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const detailRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (selectedId !== null) {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedId]);
 
   const listQuery = useQuery<{ members: QueueRow[] }>({
     queryKey: [`/api/admin/members?status=${tab}`],
@@ -210,7 +217,7 @@ export function MembersPage() {
       )}
 
       {selectedId !== null && (
-        <div className="adm-detail">
+        <div className="adm-detail" ref={detailRef}>
           {detailQuery.isError ? (
             <p className="adm-alert">{DETAIL_ERROR}</p>
           ) : detailQuery.isLoading || !detail || !person ? (

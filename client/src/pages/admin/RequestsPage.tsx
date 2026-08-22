@@ -14,7 +14,7 @@
  * Returned drafts can be moved back to pending without re-submission.
  * Every result lands in place, verbatim from §8 where the spec binds it.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { productUrlProblem } from "@shared/item-product-url";
 import { useNavigationGuard } from "../../hooks/useNavigationGuard";
@@ -573,6 +573,8 @@ export function RequestsPage() {
   const initialEditFormRef = useRef<EditForm | null>(null);
   // Ref for the edit-form container so focus can be restored after "Stay"
   const editFormRef = useRef<HTMLDivElement | null>(null);
+  // Ref for the detail panel — used to scroll it into view on row selection
+  const detailRef = useRef<HTMLDivElement | null>(null);
 
   // Navigation guard — fires when the admin tries to leave while editing.
   // isDirty is true only when the form has actually been changed from its
@@ -633,6 +635,12 @@ export function RequestsPage() {
     queryKey: [`/api/admin/requests/${selected?.type}/${selected?.id}`],
     enabled: selected !== null,
   });
+
+  useEffect(() => {
+    if (selected !== null) {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selected]);
 
   function switchTab(next: Tab) {
     if (isDirty) {
@@ -1012,7 +1020,7 @@ export function RequestsPage() {
       )}
 
       {selected !== null && (
-        <div className="adm-detail">
+        <div className="adm-detail" ref={detailRef}>
           {detailQuery.isError ? (
             <p className="adm-alert">{DETAIL_ERROR}</p>
           ) : detailQuery.isLoading || !detail || !request ? (

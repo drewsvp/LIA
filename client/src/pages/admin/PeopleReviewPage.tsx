@@ -16,7 +16,7 @@
  * irreversible action — ships with the merge_people() database function
  * once that DDL is approved; until then candidates render read-only.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type Person = {
@@ -227,6 +227,13 @@ export function PeopleReviewPage() {
   // Merge flow (§6): candidate chosen → direction → confirm 1 → typed MERGE.
   const [merge, setMerge] = useState<{ candidateId: string; survivorIsCandidate: boolean; step: 1 | 2 } | null>(null);
   const [mergeToken, setMergeToken] = useState("");
+  const detailRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (selectedId !== null) {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedId]);
 
   const listQuery = useQuery<{ people: QueueRow[] }>({ queryKey: ["/api/admin/people/review"] });
   const detailQuery = useQuery<Detail>({
@@ -324,7 +331,7 @@ export function PeopleReviewPage() {
       )}
 
       {selectedId !== null && (
-        <div className="adm-detail">
+        <div className="adm-detail" ref={detailRef}>
           {detailQuery.isError ? (
             <p className="adm-alert">{DETAIL_ERROR}</p>
           ) : detailQuery.isLoading || !detail || !person ? (
