@@ -163,6 +163,20 @@ async function main(): Promise<void> {
 
   // Pre-clean any leftover rows from a prior aborted run so the once-only
   // index doesn't block the fresh insert below.
+  //
+  // SAFE pattern for filtering by the zz_fixture marker:
+  //   payload->'zz_fixture' = 'true'::jsonb
+  //
+  // DO NOT use the text-cast variant (grep-checked by lint:fixture-queries):
+  //   payload->>'zz_fixture'  ← extracts text, then cast to
+  //   ::boolean IS TRUE       ← THROWS 22P02 when any other row carries a
+  //                              non-boolean string in that field
+  //
+  // The ->> operator extracts a JSON value as SQL text (no quotes), so a
+  // plain ::boolean cast works only when every zz_fixture row in the table
+  // holds a real boolean. The -> operator keeps the value as JSONB, so the
+  // equality check below is always type-safe regardless of what other test
+  // rows are present.
   await pool.query(
     `delete from email_log
       where to_email = any($1::text[])
