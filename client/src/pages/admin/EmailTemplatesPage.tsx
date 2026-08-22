@@ -549,7 +549,7 @@ export function EmailTemplatesPage(): ReactElement {
                         </button>
                         <button
                           type="button"
-                          className="adm-btn-outline adm-btn-sm"
+                          className="adm-btn adm-btn-outline adm-btn-sm"
                           onClick={(e) => { e.stopPropagation(); setConfirmToggleKey(null); }}
                         >
                           Cancel
