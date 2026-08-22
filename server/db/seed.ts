@@ -139,7 +139,8 @@ async function main(): Promise<void> {
   if (volunteerCategories.length === 0) fail("expected volunteer categories to be initialized");
 
   // -------------------------------------------------------------------------
-  // 2. Populations — the exact eleven from the work order.
+  // 2. Populations — the eleven required rows from the work order.
+  //    Additional rows added by administrators are left untouched.
   // -------------------------------------------------------------------------
   const POPULATIONS: { name: string; slug: string }[] = [
     { name: "At-Risk Kids/Teens", slug: "at-risk-kids-teens" },
@@ -161,7 +162,7 @@ async function main(): Promise<void> {
     popIds.set(p.slug, row.id);
   }
   const allPops = await dal.populations.listAll(ctx);
-  if (allPops.length !== 11) fail(`expected exactly 11 populations, found ${allPops.length}`);
+  if (allPops.length < 11) fail(`expected at least 11 populations, found ${allPops.length}`);
 
   // -------------------------------------------------------------------------
   // 2. Staff people + users (needed before any approval can be recorded).
@@ -822,7 +823,7 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Seed complete and verified:");
-  console.log("  populations: 11  |  counter_drift: 0 rows");
+  console.log(`  populations: ${allPops.length} (11 required)  |  counter_drift: 0 rows`);
   console.log("  orgs: The Alliance (platform owner) + 3 approved + 1 pending");
   console.log("  item requests: 2 active, 1 auto-archived (fulfilled), 1 draft, 1 pending, 1 expired-but-active");
   console.log("  volunteer requests: 2 active, 1 draft, 1 pending, 1 expired-but-active");
