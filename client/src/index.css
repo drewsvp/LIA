@@ -2573,7 +2573,7 @@ a.site-nav-btn {
 
 .adm-tabs {
   margin-bottom: 16px;
-  border-bottom: 1px solid #dddddd;
+  border-bottom: 1px solid #e3e8ed;
 }
 
 .adm-tab {
@@ -2583,7 +2583,6 @@ a.site-nav-btn {
   font-family: inherit;
   font-size: 15px;
   font-weight: 700;
-  text-transform: uppercase;
   color: var(--color-muted);
   cursor: pointer;
   border-bottom: 3px solid transparent;
@@ -2834,7 +2833,7 @@ a.site-nav-btn {
 .adm-ok { font-size: 14px; font-weight: 600; color: #1d6f42; margin: 10px 0; }
 .adm-form-row { display: flex; gap: 12px; margin: 10px 0; flex-wrap: wrap; }
 .adm-form-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5a6b7c; }
-.adm-form-row input { padding: 6px 8px; border: 1px solid #d7dde4; font-size: 14px; min-width: 200px; }
+.adm-form-row input { padding: 6px 8px; border: 1px solid #d7dde4; font-size: 14px; min-width: 200px; border-radius: 4px; }
 .adm-record-list { margin: 4px 0 10px; padding-left: 20px; font-size: 13px; }
 .adm-record-list li { margin: 2px 0; }
 .adm-list-label { margin: 10px 0 2px; font-size: 13px; color: #163a5f; }
@@ -2892,8 +2891,9 @@ a.site-nav-btn {
 .adm-filter input {
   font: inherit;
   padding: 4px 6px;
-  border: 1px solid #c8c4bc;
+  border: 1px solid #d7dde4;
   background: #fff;
+  border-radius: 4px;
 }
 .adm-email-split {
   display: flex;
