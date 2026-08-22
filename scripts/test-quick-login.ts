@@ -1,5 +1,5 @@
 /**
- * Integration test: quick login flow for all three seeded roles.
+ * Integration test: seeded quick-login roles plus the supporter magic-link flow.
  *
  * Tests the full chain:
  *   POST /api/login/quick → Set-Cookie → GET /api/session → authenticated
@@ -12,6 +12,7 @@
  *
  * Exit 0 = all pass.  Exit 1 = at least one failure (details printed).
  */
+import { randomBytes } from "node:crypto";
 import { pool } from "../server/db/client";
 
 const BASE = "http://localhost:5000";
@@ -50,6 +51,97 @@ function parseCookies(res: Response): string[] {
 /** Build a Cookie: header string from an array of Set-Cookie values. */
 function cookieHeader(setCookies: string[]): string {
   return setCookies.map((c) => c.split(";")[0]).join("; ");
+}
+
+type SupporterFixture = {
+  created: boolean;
+  personId?: string;
+  userId?: string;
+  providerUserExisted: boolean;
+};
+
+/**
+ * The development seed normally provides this account. Create it only when a
+ * partially seeded local database is missing it, then remove every row this
+ * test creates after the suite finishes.
+ */
+async function ensureSupporterFixture(): Promise<SupporterFixture> {
+  const email = "supporter@example.org";
+  const { rows: existingAppUsers } = await pool.query<{
+    userId: string;
+    personId: string;
+    kind: string;
+    status: string;
+  }>(
+    `SELECT u.id AS "userId", u.person_id AS "personId", u.kind, u.status
+       FROM users u
+       JOIN people p ON p.id = u.person_id
+      WHERE lower(p.email) = lower($1)
+      LIMIT 1`,
+    [email],
+  );
+  const existingAppUser = existingAppUsers[0];
+  if (existingAppUser) {
+    if (existingAppUser.kind !== "supporter" || existingAppUser.status !== "active") {
+      throw new Error(
+        `supporter fixture has kind=${existingAppUser.kind}, status=${existingAppUser.status}; expected active supporter`,
+      );
+    }
+    return { created: false, providerUserExisted: true };
+  }
+
+  const { rows: existingProviderUsers } = await pool.query<{ id: string }>(
+    `SELECT id FROM "user" WHERE lower(email) = lower($1) LIMIT 1`,
+    [email],
+  );
+  const { rows: people } = await pool.query<{ id: string }>(
+    `INSERT INTO people (first_name, last_name, email, source_note)
+     VALUES ('Alex', 'Rivera', $1, 'zz_fixture_login_integration')
+     RETURNING id`,
+    [email],
+  );
+  const person = people[0];
+  if (!person) throw new Error("supporter fixture person was not created");
+
+  try {
+    const { rows: users } = await pool.query<{ id: string }>(
+      `INSERT INTO users (person_id, status, kind)
+       VALUES ($1, 'active', 'supporter')
+       RETURNING id`,
+      [person.id],
+    );
+    const user = users[0];
+    if (!user) throw new Error("supporter fixture user was not created");
+    return {
+      created: true,
+      personId: person.id,
+      userId: user.id,
+      providerUserExisted: existingProviderUsers.length > 0,
+    };
+  } catch (err) {
+    await pool.query(`DELETE FROM people WHERE id = $1`, [person.id]);
+    throw err;
+  }
+}
+
+async function cleanupSupporterFixture(fixture: SupporterFixture): Promise<void> {
+  if (!fixture.created || !fixture.personId || !fixture.userId) return;
+
+  if (!fixture.providerUserExisted) {
+    await pool.query(
+      `DELETE FROM session
+        WHERE "userId" IN (SELECT id FROM "user" WHERE lower(email) = lower($1))`,
+      ["supporter@example.org"],
+    );
+    await pool.query(
+      `DELETE FROM account
+        WHERE "userId" IN (SELECT id FROM "user" WHERE lower(email) = lower($1))`,
+      ["supporter@example.org"],
+    );
+    await pool.query(`DELETE FROM "user" WHERE lower(email) = lower($1)`, ["supporter@example.org"]);
+  }
+  await pool.query(`DELETE FROM users WHERE id = $1`, [fixture.userId]);
+  await pool.query(`DELETE FROM people WHERE id = $1`, [fixture.personId]);
 }
 
 // ── schema guard ─────────────────────────────────────────────────────────────
@@ -329,11 +421,98 @@ async function testSupporterRole(): Promise<void> {
   }
 }
 
+/**
+ * Supporter-specific magic-link flow: mint the same verification row that the
+ * email sign-in path consumes, then confirm it through the application route.
+ * This deliberately does not use quick login so the two redirect branches
+ * remain independently covered.
+ */
+async function testSupporterMagicLink(): Promise<void> {
+  const expectedEmail = "supporter@example.org";
+  const expectedRedirect = "/profile";
+  const token = `zz-magic-link-supporter-${randomBytes(18).toString("base64url")}`;
+
+  console.log("\nMagic-link role: supporter");
+
+  await pool.query(
+    `INSERT INTO verification (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
+     VALUES (gen_random_uuid(), $1, $2, NOW() + INTERVAL '2 minutes', NOW(), NOW())`,
+    [token, JSON.stringify({ email: expectedEmail })],
+  );
+
+  try {
+    let verifyRes: Response;
+    try {
+      verifyRes = await fetch(`${BASE}/api/login/magic-link/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+        redirect: "manual",
+      });
+    } catch (err) {
+      fail("POST /api/login/magic-link/verify reachable", String(err));
+      return;
+    }
+
+    if (verifyRes.status !== 200) {
+      const body = await verifyRes.text().catch(() => "(unreadable)");
+      fail(
+        "POST /api/login/magic-link/verify → 200",
+        `got ${verifyRes.status}: ${body}`,
+      );
+      return;
+    }
+    pass("POST /api/login/magic-link/verify → 200");
+
+    let verifyBody: { ok?: boolean; redirectTo?: string };
+    try {
+      verifyBody = (await verifyRes.json()) as typeof verifyBody;
+    } catch {
+      fail("magic-link response body is valid JSON");
+      return;
+    }
+
+    if (verifyBody.ok !== true) {
+      fail("magic-link body.ok === true", JSON.stringify(verifyBody));
+    } else {
+      pass("magic-link body.ok === true");
+    }
+
+    if (verifyBody.redirectTo !== expectedRedirect) {
+      fail(
+        `magic-link body.redirectTo === "${expectedRedirect}" (supporter must not land on /dashboard)`,
+        `got: ${JSON.stringify(verifyBody.redirectTo)}`,
+      );
+    } else {
+      pass(`magic-link body.redirectTo === "${expectedRedirect}"`);
+    }
+
+    const setCookies = parseCookies(verifyRes);
+    const hasSession = setCookies.some(
+      (c) =>
+        c.startsWith("__Secure-better-auth.session_token") ||
+        c.startsWith("better-auth.session_token"),
+    );
+    if (!hasSession) {
+      fail(
+        "magic-link Set-Cookie contains session token",
+        `got: ${setCookies.join(" | ") || "(none)"}`,
+      );
+    } else {
+      pass("magic-link Set-Cookie contains session token");
+    }
+  } finally {
+    // confirmMagicLink restores the row to preserve the token's replay window;
+    // remove the test row so this script never leaves auth fixtures behind.
+    await pool.query(`DELETE FROM verification WHERE identifier = $1`, [token]);
+  }
+}
+
 // ── entrypoint ───────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log("Quick login integration test");
-  console.log("============================");
+  console.log("Login integration test");
+  console.log("======================");
 
   // Confirm quick login is enabled before running the per-role tests.
   let statusRes: Response;
@@ -351,16 +530,25 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Schema guard: catches column renames / type changes before touching HTTP.
-  await checkVerificationSchema();
+  const supporterFixture = await ensureSupporterFixture();
+  try {
+    // Schema guard: catches column renames / type changes before touching HTTP.
+    await checkVerificationSchema();
 
-  // Per-role flows.
-  for (const { role, expectedEmail, expectedRedirect } of ROLES) {
-    await testRole(role, expectedEmail, expectedRedirect);
+    // Per-role flows.
+    for (const { role, expectedEmail, expectedRedirect } of ROLES) {
+      await testRole(role, expectedEmail, expectedRedirect);
+    }
+
+    // Supporter role: must redirect to /profile, not /dashboard.
+    await testSupporterRole();
+
+    // Magic-link supporter flow has its own redirect branch and must stay on
+    // /profile as well.
+    await testSupporterMagicLink();
+  } finally {
+    await cleanupSupporterFixture(supporterFixture);
   }
-
-  // Supporter role: must redirect to /profile, not /dashboard.
-  await testSupporterRole();
 
   // ── summary ───────────────────────────────────────────────────────────────
   console.log(`\n${"─".repeat(44)}`);
