@@ -906,7 +906,7 @@ export function RequestsPage() {
             key={t}
             role="tab"
             aria-selected={tab === t}
-            className={tab === t ? "adm-tab adm-tab-on" : "adm-tab"}
+            className={tab === t ? "adm-tab adm-tab-current" : "adm-tab"}
             onClick={() => switchTab(t)}
           >
             {t === "pending"
