@@ -822,7 +822,7 @@ function BrandingPanel(): ReactElement {
             <h2 className="adm-subheading" style={{ margin: 0 }}>Branding</h2>
             <span className="adm-muted" style={{ fontSize: "0.875em" }}>{lastEdited}</span>
           </div>
-          <button type="button" className="adm-btn-outline" onClick={openPanel}>
+          <button type="button" className="adm-btn adm-btn-outline" onClick={openPanel}>
             Edit branding
           </button>
         </div>
@@ -973,7 +973,7 @@ function BrandingPanel(): ReactElement {
         <button type="button" className="adm-btn" disabled={saving} onClick={() => void saveBrand()}>
           {saving ? "Saving…" : "Save branding"}
         </button>
-        <button type="button" className="adm-btn-outline" disabled={saving} onClick={() => void resetBrand()}>
+        <button type="button" className="adm-btn adm-btn-outline" disabled={saving} onClick={() => void resetBrand()}>
           Reset to defaults
         </button>
       </div>
