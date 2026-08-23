@@ -191,9 +191,61 @@ async function main(): Promise<void> {
       },
     );
 
+    // ── Case 1b: Browser confirms "Last saved by …" after a PUT ──────────────
+    //
+    // After Case 1 persisted custom values, loading /admin/settings in a real
+    // browser must show a "Last saved by <name> on <date>" paragraph instead
+    // of the "Using built-in defaults" fallback.  The admin GET endpoint joins
+    // users → people to resolve the display name; this confirms that join
+    // works and that the UI renders it correctly.
+    await runCase(
+      "Browser: /admin/settings shows 'Last saved by <name> on <date>' after a PUT",
+      async () => {
+        const ctx = await newCtx(browser, adminCookie);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(`${BASE}/admin/settings`, { waitUntil: "networkidle" });
+
+          // Confirm the page loaded before checking the metadata paragraph.
+          const heading = page.locator("h1.adm-heading", { hasText: "Settings" });
+          await heading.waitFor({ state: "visible", timeout: 8_000 });
+
+          // The "Last saved" paragraph is a p.adm-muted element that contains
+          // the updatedByName and a formatted date returned by the admin API.
+          const lastSavedPara = page.locator("p.adm-muted", { hasText: "Last saved by" });
+          await lastSavedPara.waitFor({ state: "visible", timeout: 8_000 });
+          const text = (await lastSavedPara.textContent()) ?? "";
+
+          // Must start with the expected prefix.
+          assert(
+            text.includes("Last saved by"),
+            "paragraph must contain 'Last saved by'",
+            text,
+          );
+
+          // The name between "Last saved by " and " on " must be non-empty.
+          const nameMatch = text.match(/Last saved by (.+?) on /);
+          assert(
+            nameMatch !== null && nameMatch[1]!.trim().length > 0,
+            "name between 'Last saved by' and 'on' must be non-empty",
+            text,
+          );
+
+          // Must contain a formatted date such as "Aug 23, 2026".
+          assert(
+            / on [A-Z][a-z]+ \d{1,2}, \d{4}/.test(text),
+            "paragraph must contain 'on <Mon D, YYYY>' formatted date",
+            text,
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
     // ── Case 2: POST /api/admin/site-settings/reset restores defaults ─────────
     //
-    // After the previous case set custom values, a reset must overwrite them
+    // After the previous cases set custom values, a reset must overwrite them
     // with the hardcoded defaults and the public endpoint must reflect them.
     await runCase(
       "POST /api/admin/site-settings/reset restores defaults and GET reflects them",
