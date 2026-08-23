@@ -157,7 +157,7 @@ export function SignupPage() {
       </div>
       <div className="mp3-body">
         <p className="mp3-intro">
-          Welcome to The Alliance's <strong>Love in Action Database!</strong> This platform is an exclusive tool
+          Welcome to The Alliance's <strong>{siteSettings.siteName}!</strong> This platform is an exclusive tool
           for our Members and is designed to streamline the process of promoting your donation and volunteer
           needs to the community.
         </p>

@@ -384,6 +384,95 @@ async function main(): Promise<void> {
         );
       },
     );
+
+    // ── Case 5: member /signup renders updated siteName after admin save ────────
+    //
+    // Confirms the full browser chain: admin PUT → server cache → client fetch
+    // → page render. The /signup intro paragraph renders siteSettings.siteName
+    // (e.g. "Welcome to The Alliance's Love in Action Database!"). A fresh
+    // navigation (empty query cache) forces a guaranteed refetch so we can
+    // assert the new value is actually rendered, not just returned by the API.
+    //
+    // The test also confirms that a subsequent reset brings the default site
+    // name back — the cleanup path exercises the same refetch/render chain.
+    await runCase(
+      "member /signup renders updated siteName after admin save and navigation",
+      async () => {
+        const ctx = await newCtx(browser, adminCookie);
+        try {
+          const page = await ctx.newPage();
+          const NEW_NAME = "Test Platform Name";
+
+          // Step 1: baseline — /signup intro must currently show the default
+          // site name in the "Welcome to The Alliance's …!" paragraph.
+          await page.goto(`${BASE}/signup`, { waitUntil: "networkidle" });
+          const introPara = page.locator("p.mp3-intro", { hasText: "Welcome to" });
+          await introPara.waitFor({ state: "visible", timeout: 8_000 });
+          const initialText = await introPara.textContent();
+          assert(
+            initialText !== null && initialText.includes(DEFAULTS.siteName),
+            "/signup must initially show the default siteName",
+            { got: initialText, want: DEFAULTS.siteName },
+          );
+
+          // Step 2: admin saves a new site name via the API.
+          const putRes = await fetch(`${BASE}/api/admin/site-settings`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Cookie: cookieHeader(adminCookie),
+            },
+            body: JSON.stringify({
+              siteName: NEW_NAME,
+              contactEmail: DEFAULTS.contactEmail,
+              responseTimeLanguage: DEFAULTS.responseTimeLanguage,
+            }),
+          });
+          assert(
+            putRes.ok,
+            "PUT /api/admin/site-settings must succeed before the browser check",
+            putRes.status,
+          );
+
+          // Step 3: navigate to /signup again. The React app starts with an
+          // empty query cache (fresh page load) and fetches /api/site-settings,
+          // which now returns the new siteName — the intro paragraph must show it.
+          await page.goto(`${BASE}/signup`, { waitUntil: "networkidle" });
+          const updatedPara = page.locator("p.mp3-intro", { hasText: "Welcome to" });
+          await updatedPara.waitFor({ state: "visible", timeout: 8_000 });
+          const updatedText = await updatedPara.textContent();
+          assert(
+            updatedText !== null && updatedText.includes(NEW_NAME),
+            "/signup must render the new siteName after admin save and navigation",
+            { got: updatedText, want: NEW_NAME },
+          );
+
+          // Step 4: reset to defaults and confirm /signup reverts to the
+          // default site name.
+          const resetRes = await fetch(`${BASE}/api/admin/site-settings/reset`, {
+            method: "POST",
+            headers: { Cookie: cookieHeader(adminCookie) },
+          });
+          assert(
+            resetRes.ok,
+            "POST /api/admin/site-settings/reset must succeed during cleanup",
+            resetRes.status,
+          );
+
+          await page.goto(`${BASE}/signup`, { waitUntil: "networkidle" });
+          const restoredPara = page.locator("p.mp3-intro", { hasText: "Welcome to" });
+          await restoredPara.waitFor({ state: "visible", timeout: 8_000 });
+          const restoredText = await restoredPara.textContent();
+          assert(
+            restoredText !== null && restoredText.includes(DEFAULTS.siteName),
+            "/signup must show the default siteName after reset and navigation",
+            { got: restoredText, want: DEFAULTS.siteName },
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
   } finally {
     await browser.close();
   }
