@@ -18,6 +18,7 @@ import { donorItemConfirmation } from "./donor-item-confirmation";
 import { donorVolunteerConfirmation } from "./donor-volunteer-confirmation";
 import { digestNewNeeds } from "./digest-new-needs";
 import { supporterVolunteerMatch } from "./supporter-volunteer-match";
+import { staffInvited } from "./staff-invited";
 
 export const PRODUCT_TEMPLATES = {
   staff_new_org: staffNewOrg,
@@ -34,6 +35,7 @@ export const PRODUCT_TEMPLATES = {
   donor_volunteer_confirmation: donorVolunteerConfirmation,
   digest_new_needs: digestNewNeeds,
   supporter_volunteer_match: supporterVolunteerMatch,
+  staff_invited: staffInvited,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } satisfies Record<string, ProductTemplate<any>>;
 

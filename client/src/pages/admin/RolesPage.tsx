@@ -8,6 +8,9 @@
  * legal for the row's org kind. The server refuses to demote the last active
  * staff admin; the change takes effect the next time the affected user's
  * session is resolved.
+ *
+ * An "Invite new staff member" panel above the table lets staff admins
+ * onboard new staff directly from the UI (closes O4 from ADMIN-03 §11).
  */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +44,15 @@ function legalRoles(row: Row): Row["role"][] {
   return row.orgKind === "platform_owner" ? ["staff_admin", "staff_approver"] : ["owner", "member"];
 }
 
+type InviteFields = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: "staff_admin" | "staff_approver";
+};
+
+const BLANK_INVITE: InviteFields = { firstName: "", lastName: "", email: "", role: "staff_approver" };
+
 export function RolesPage() {
   const queryClient = useQueryClient();
   const { session } = useSession();
@@ -49,7 +61,14 @@ export function RolesPage() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
+  // Invite form state
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteFields, setInviteFields] = useState<InviteFields>(BLANK_INVITE);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
   const currentUserId = session?.user?.id;
+  const currentUserEmail = session?.user?.email;
 
   const listQuery = useQuery<{ memberships: Row[] }>({ queryKey: ["/api/admin/roles"] });
   const rows = listQuery.data?.memberships ?? [];
@@ -92,9 +111,136 @@ export function RolesPage() {
     }
   }
 
+  async function submitInvite(e: React.FormEvent) {
+    e.preventDefault();
+    setInviteResult(null);
+
+    // Client-side self-invite guard
+    if (
+      currentUserEmail &&
+      inviteFields.email.trim().toLowerCase() === currentUserEmail.toLowerCase()
+    ) {
+      setInviteResult({ kind: "error", text: "You cannot invite yourself via this form." });
+      return;
+    }
+
+    setInviteBusy(true);
+    try {
+      const res = await fetch("/api/admin/staff/invite", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: inviteFields.firstName.trim(),
+          lastName: inviteFields.lastName.trim(),
+          email: inviteFields.email.trim().toLowerCase(),
+          role: inviteFields.role,
+        }),
+      });
+      let message = FAILURE;
+      try {
+        const payload = (await res.json()) as { message?: string };
+        if (payload.message) message = payload.message;
+      } catch {
+        /* non-JSON body */
+      }
+      if (res.ok) {
+        setInviteResult({ kind: "ok", text: message });
+        setInviteFields(BLANK_INVITE);
+        await queryClient.invalidateQueries({ queryKey: ["/api/admin/roles"] });
+      } else {
+        setInviteResult({ kind: "error", text: message });
+      }
+    } catch {
+      setInviteResult({ kind: "error", text: FAILURE });
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
   return (
     <div>
       <h1 className="adm-heading">Roles</h1>
+
+      {/* Invite panel */}
+      <div className="adm-panel">
+        <button
+          className="adm-btn"
+          type="button"
+          onClick={() => {
+            setInviteOpen((o) => !o);
+            setInviteResult(null);
+          }}
+          aria-expanded={inviteOpen}
+        >
+          {inviteOpen ? "Cancel invite" : "Invite new staff member"}
+        </button>
+
+        {inviteOpen && (
+          <form onSubmit={(e) => void submitInvite(e)} className="adm-invite-form">
+            <div className="adm-invite-fields">
+              <label className="adm-label">
+                First name
+                <input
+                  className="adm-note"
+                  type="text"
+                  value={inviteFields.firstName}
+                  onChange={(e) => setInviteFields((f) => ({ ...f, firstName: e.target.value }))}
+                  required
+                  disabled={inviteBusy}
+                  autoComplete="given-name"
+                />
+              </label>
+              <label className="adm-label">
+                Last name
+                <input
+                  className="adm-note"
+                  type="text"
+                  value={inviteFields.lastName}
+                  onChange={(e) => setInviteFields((f) => ({ ...f, lastName: e.target.value }))}
+                  required
+                  disabled={inviteBusy}
+                  autoComplete="family-name"
+                />
+              </label>
+              <label className="adm-label">
+                Email address
+                <input
+                  className="adm-note"
+                  type="email"
+                  value={inviteFields.email}
+                  onChange={(e) => setInviteFields((f) => ({ ...f, email: e.target.value }))}
+                  required
+                  disabled={inviteBusy}
+                  autoComplete="email"
+                />
+              </label>
+              <label className="adm-label">
+                Role
+                <select
+                  className="adm-note"
+                  value={inviteFields.role}
+                  onChange={(e) =>
+                    setInviteFields((f) => ({ ...f, role: e.target.value as InviteFields["role"] }))
+                  }
+                  disabled={inviteBusy}
+                >
+                  <option value="staff_approver">Staff approver</option>
+                  <option value="staff_admin">Staff admin</option>
+                </select>
+              </label>
+            </div>
+
+            {inviteResult && (
+              <p className={inviteResult.kind === "ok" ? "adm-ok" : "adm-alert"}>{inviteResult.text}</p>
+            )}
+
+            <button className="adm-btn adm-btn-primary" type="submit" disabled={inviteBusy}>
+              {inviteBusy ? "Sending invite…" : "Send invite"}
+            </button>
+          </form>
+        )}
+      </div>
 
       <input
         className="adm-note"

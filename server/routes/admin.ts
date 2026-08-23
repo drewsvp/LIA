@@ -91,6 +91,12 @@ import {
   MembershipStateError,
   MemberOrgNotApprovedError,
 } from "../services/member-approval";
+import {
+  inviteStaff,
+  DuplicateStaffMembershipError,
+  SelfInviteError,
+  DisabledUserError,
+} from "../services/staff-invite";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -2501,6 +2507,79 @@ export function registerAdminRoutes(app: Express): void {
       }
     } catch (err) {
       console.error(`[admin] role change failed for membership ${id}:`, err);
+      res.status(500).json({ message: SAVE_FAILURE });
+    }
+  });
+
+  // ---- Staff invite: create a new staff person and their membership atomically,
+  // then send them a sign-in link. Staff are pre-approved by the inviting admin —
+  // no separate ADMIN-03 queue. requireStaffAdmin mirrors the rest of ADMIN-09.
+  app.post("/api/admin/staff/invite", requireStaffAdmin, async (req: Request, res: Response) => {
+    const body = req.body as Record<string, unknown>;
+    const firstName = typeof body.firstName === "string" ? body.firstName.trim() : "";
+    const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const role = typeof body.role === "string" ? body.role : "";
+
+    if (!firstName) {
+      res.status(400).json({ message: "First name is required." });
+      return;
+    }
+    if (!lastName) {
+      res.status(400).json({ message: "Last name is required." });
+      return;
+    }
+    if (!email || !EMAIL_RE.test(email)) {
+      res.status(400).json({ message: "A valid email address is required." });
+      return;
+    }
+    if (role !== "staff_admin" && role !== "staff_approver") {
+      res.status(400).json({ message: "Role must be staff_admin or staff_approver." });
+      return;
+    }
+
+    const actorUserId = staffContext(req).userId;
+    try {
+      const result = await inviteStaff({
+        actorUserId,
+        firstName,
+        lastName,
+        email,
+        role,
+      });
+
+      // Dispatch the invite email and report honestly on the outcome.
+      const dispatch = result.dispatches[0];
+      let message: string;
+      const name = `${firstName} ${lastName}`.trim();
+      if (dispatch) {
+        const outcomes = await dispatchQueuedEmails([dispatch]);
+        const sent = outcomes[0] && outcomes[0].outcome === "sent";
+        message = sent
+          ? `${name} invited. A sign-in link has been sent to ${email}.`
+          : `${name} invited. The invitation email to ${email} failed to send — it is logged in the Email log and can be resent there.`;
+      } else {
+        // Email disabled or blocked (skipped_disabled / duplicate once-only).
+        message = `${name} invited. The invitation email is disabled or could not be sent — check the Email log.`;
+      }
+
+      res.json({ membershipId: result.membershipId, message });
+    } catch (err) {
+      if (err instanceof SelfInviteError) {
+        res.status(400).json({ message: "You cannot invite yourself via this form." });
+        return;
+      }
+      if (err instanceof DisabledUserError) {
+        res.status(409).json({ message: `${email} has a disabled account and cannot be invited. Nothing was changed.` });
+        return;
+      }
+      if (err instanceof DuplicateStaffMembershipError) {
+        res.status(409).json({
+          message: `${email} already has an active staff membership. No changes were made.`,
+        });
+        return;
+      }
+      console.error("[admin] staff invite failed:", err);
       res.status(500).json({ message: SAVE_FAILURE });
     }
   });

@@ -138,6 +138,7 @@ export const RESENDABLE_TEMPLATE_KEYS: ReadonlySet<string> = new Set<string>([
   "staff_new_item_request",
   "staff_new_volunteer_request",
   "staff_new_user",
+  "staff_invited",
   "org_approved",
   "org_request_received",
   "org_request_approved",
@@ -215,6 +216,35 @@ const REBUILDERS: Record<string, (ctx: DbContext, row: EmailLogEntry) => Promise
         submitterName: membership.inviter ? fullName(membership.inviter) : "",
         submitterEmail: membership.inviter?.email ?? "",
         adminUrl: absoluteUrl("/admin/members"),
+      },
+    };
+  },
+
+  async staff_invited(ctx, row) {
+    // entity_id is a per-occurrence UUID (not the membershipId). The real
+    // membership is anchored via a non-rendered var stored in the payload.
+    const vars = (row.payload as { vars?: Record<string, unknown> }).vars ?? {};
+    const storedMembershipId = typeof vars.membershipId === "string" ? vars.membershipId : null;
+    if (!storedMembershipId) {
+      throw new ResendBlockedError(
+        "This invitation log entry is missing its membership reference. Nothing was sent.",
+      );
+    }
+    const membershipRow = await dal.memberships.getById(ctx, storedMembershipId);
+    if (!membershipRow) throw new ResendBlockedError(GONE.membership);
+    // Re-derive current member name from the linked person record.
+    const membershipData = await dal.emailResendData.membershipResendContext(ctx, storedMembershipId);
+    if (!membershipData) throw new ResendBlockedError(GONE.membership);
+    const inviteeRole = membershipRow.role === "staff_admin" ? "Staff Admin" : "Staff Approver";
+    return {
+      toEmail: row.toEmail, // recorded invitee address
+      toPersonId: null,
+      entityType: "org_membership",
+      vars: {
+        inviteeName: fullName(membershipData.member),
+        inviteeRole,
+        loginUrl: absoluteUrl("/login"),
+        membershipId: storedMembershipId, // preserve anchor for future resends
       },
     };
   },
