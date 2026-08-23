@@ -21,6 +21,7 @@ import { SignupError } from "../dal/signups";
 import { FixedWindowLimiter } from "../auth/rate-limit";
 import { NOT_FOUND_BODY } from "../auth/guards";
 import { queueProductEmail, dispatchQueuedEmails, absoluteUrl, type PendingDispatch } from "../email/send";
+import { envStaffRecipients, parseRecipientOverride } from "../email/overrides";
 import { storeImage } from "../storage/object-storage";
 import { submitOrganizationSignup, OrgNameTakenError } from "../services/org-signup";
 import { resolveSessionInfo } from "../auth/session";
@@ -972,8 +973,6 @@ export function registerPublicRoutes(app: Express): void {
           const donorName = `${firstName} ${lastName}`;
           const requestUrl = absoluteUrl(`/volunteer/${requestId}`);
           const supportersUrl = absoluteUrl("/dashboard/supporters");
-          const staffPrimary = (process.env.STAFF_NOTIFY_PRIMARY ?? "").trim();
-          const staffSecondary = (process.env.STAFF_NOTIFY_SECONDARY ?? "").trim();
           if (info.contactName && info.contactEmail) {
             const donor = await queueProductEmail(SYSTEM, {
               key: "donor_volunteer_confirmation",
@@ -997,35 +996,53 @@ export function registerPublicRoutes(app: Express): void {
               },
             });
             if (donor.outcome === "queued") pending.push(donor.dispatch);
-            // org_new_volunteer goes to the request contact AND both staff
-            // addresses (D53) — distinct recipients queue their own rows.
-            const orgRecipients = [info.contactEmail, staffPrimary, staffSecondary].filter((e) => e !== "");
-            if (staffPrimary === "" || staffSecondary === "") {
+
+            // Resolve staff recipients: DB override wins, then env-var fallback.
+            const staffOv = await dal.emailTemplateOverrides.getOverride(SYSTEM, "org_new_volunteer");
+            const overriddenStaff = parseRecipientOverride(staffOv?.recipients);
+            const { primary: staffPrimary, all: staffRecipients } =
+              overriddenStaff.length > 0
+                ? { primary: overriddenStaff[0]!, all: overriddenStaff }
+                : envStaffRecipients();
+            if (staffRecipients.length === 0) {
               console.error(
-                `[public] signup ${signupId}: STAFF_NOTIFY_PRIMARY/SECONDARY not fully configured — org_new_volunteer staff copies incomplete`,
+                `[public] signup ${signupId}: no staff notification recipients (override empty and STAFF_NOTIFY_PRIMARY/SECONDARY unset) — org_new_volunteer staff copies not sent`,
               );
             }
-            for (const recipient of orgRecipients) {
-              const orgMail = await queueProductEmail(SYSTEM, {
+            const orgMailVars = {
+              organizationName: info.orgName,
+              requestName: info.title,
+              requestDescription: info.description,
+              requestDetails: info.details,
+              requestUrl,
+              roles: roleNames,
+              donorName,
+              donorEmail: email,
+              donorPhone: phone,
+              donorNotes: notes,
+              supportersUrl,
+            };
+            // Fixed send: the org contact always receives the email regardless of
+            // any admin override.
+            const contactMail = await queueProductEmail(SYSTEM, {
+              key: "org_new_volunteer",
+              entityId: signupId,
+              toEmail: info.contactEmail,
+              replyTo: staffPrimary !== "" ? staffPrimary : undefined,
+              vars: orgMailVars,
+            });
+            if (contactMail.outcome === "queued") pending.push(contactMail.dispatch);
+            // Staff CC copies: resolved through the admin override/env-var
+            // mechanism so the admin can manage them in Automated Emails.
+            for (const staffEmail of staffRecipients) {
+              const staffMail = await queueProductEmail(SYSTEM, {
                 key: "org_new_volunteer",
                 entityId: signupId,
-                toEmail: recipient,
+                toEmail: staffEmail,
                 replyTo: staffPrimary !== "" ? staffPrimary : undefined,
-                vars: {
-                  organizationName: info.orgName,
-                  requestName: info.title,
-                  requestDescription: info.description,
-                  requestDetails: info.details,
-                  requestUrl,
-                  roles: roleNames,
-                  donorName,
-                  donorEmail: email,
-                  donorPhone: phone,
-                  donorNotes: notes,
-                  supportersUrl,
-                },
+                vars: orgMailVars,
               });
-              if (orgMail.outcome === "queued") pending.push(orgMail.dispatch);
+              if (staffMail.outcome === "queued") pending.push(staffMail.dispatch);
             }
           } else {
             console.error(
