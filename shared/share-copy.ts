@@ -28,8 +28,8 @@ export function volunteerRequestPath(requestId: string): string {
 
 // ---------------------------------------------------------------- titles
 
-export function organizationShareTitle(orgName: string): string {
-  return `${orgName} — ${SHARE_SITE_NAME}`;
+export function organizationShareTitle(orgName: string, siteName?: string): string {
+  return `${orgName} — ${siteName ?? SHARE_SITE_NAME}`;
 }
 
 export function itemShareTitle(requestTitle: string, orgName: string): string {

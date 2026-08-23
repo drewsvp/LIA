@@ -27,6 +27,7 @@ import { registerMemberRoutes } from "./member";
 import { registerAdminRoutes } from "./admin";
 import { registerEmailTemplateAdminRoutes } from "./admin-email-templates";
 import { registerEngagementReportingRoutes } from "./engagement-reporting";
+import { registerSettingsAdminRoutes } from "./admin-settings";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -635,6 +636,9 @@ export function registerRoutes(app: Express): void {
 
   // ---- ADMIN-10 Automated emails (staff-admin only).
   registerEmailTemplateAdminRoutes(app);
+
+  // ---- ADMIN-13 Settings + public /api/site-settings endpoint.
+  registerSettingsAdminRoutes(app);
 
   // ---- Public read/write API for the PB surfaces.
   registerPublicRoutes(app);

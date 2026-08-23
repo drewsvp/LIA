@@ -42,6 +42,7 @@ import { RolesPage as AdminRolesPage } from "./pages/admin/RolesPage";
 import { EmailTemplatesPage as AdminEmailTemplatesPage } from "./pages/admin/EmailTemplatesPage";
 import { VolunteerCategoriesPage as AdminVolunteerCategoriesPage } from "./pages/admin/VolunteerCategoriesPage";
 import { AnalyticsPage as AdminAnalyticsPage } from "./pages/admin/AnalyticsPage";
+import { SettingsPage as AdminSettingsPage } from "./pages/admin/SettingsPage";
 import { VolunteerAlertOptOutPage } from "./pages/public/VolunteerAlertOptOutPage";
 import { OrganizationProfilePage } from "./pages/public/OrganizationProfilePage";
 
@@ -86,6 +87,7 @@ const ADMIN_PAGES: Partial<Record<string, () => ReactElement>> = {
   "ADMIN-10": () => <AdminEmailTemplatesPage />,
   "ADMIN-11": () => <AdminVolunteerCategoriesPage />,
   "ADMIN-12": () => <AdminAnalyticsPage />,
+  "ADMIN-13": () => <AdminSettingsPage />,
 };
 
 /**

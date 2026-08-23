@@ -8,15 +8,9 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSiteSettings } from "../../hooks/useSiteSettings";
 
 type PopulationOption = { id: string; name: string; slug: string };
-
-const SUCCESS_COPY =
-  "Thank you for registering! We'll review your submission and set up your dashboard within 1-2 business days. Watch your email for next steps.";
-const DUPLICATE_COPY =
-  "It looks like your organization may already be registered. Please contact us at info@defendingthecause.org if you need help accessing your account.";
-const FAILURE_COPY =
-  "Something went wrong and your submission wasn't saved. Please try again, or contact us at info@defendingthecause.org if the problem continues.";
 const REQUIRED_MSG = "This field is required";
 const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 
@@ -33,7 +27,12 @@ function isValidWebsite(raw: string): boolean {
 }
 
 export function SignupPage() {
+  const { settings: siteSettings } = useSiteSettings();
   const populationsQuery = useQuery<PopulationOption[]>({ queryKey: ["/api/public/populations"] });
+
+  const SUCCESS_COPY = `Thank you for registering! We'll review your submission and set up your dashboard within ${siteSettings.responseTimeLanguage}. Watch your email for next steps.`;
+  const DUPLICATE_COPY = `It looks like your organization may already be registered. Please contact us at ${siteSettings.contactEmail} if you need help accessing your account.`;
+  const FAILURE_COPY = `Something went wrong and your submission wasn't saved. Please try again, or contact us at ${siteSettings.contactEmail} if the problem continues.`;
 
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
@@ -163,7 +162,7 @@ export function SignupPage() {
           needs to the community.
         </p>
         <p className="mp3-intro">
-          Please fill out the form below and we will set up your dashboard in the next 1-2 business days. You
+          Please fill out the form below and we will set up your dashboard in the next {siteSettings.responseTimeLanguage}. You
           will receive a series of 2 emails with instructions on creating a username and password then you'll be
           ready to create item and volunteer posts.
         </p>

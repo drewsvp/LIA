@@ -6,6 +6,7 @@ import { RequestCard } from "../../components/public/RequestCard";
 import { ShareButton } from "../../components/public/ShareButton";
 import { NotFound } from "../NotFound";
 import { organizationPath, organizationShareDescription, organizationShareTitle } from "@shared/share-copy";
+import { useSiteSettings } from "../../hooks/useSiteSettings";
 import allianceLogo from "../../assets/alliance-logo-blue.png";
 
 /**
@@ -46,6 +47,7 @@ type ProfilePayload = {
 export function OrganizationProfilePage(): ReactElement {
   const params = useParams<{ slug: string }>();
   const slug = params.slug ?? "";
+  const { settings: siteSettings } = useSiteSettings();
   const { data, isLoading, isError, error } = useQuery<ProfilePayload>({
     queryKey: [`/api/public/organizations/${encodeURIComponent(slug)}`],
     enabled: slug !== "",
@@ -110,7 +112,7 @@ export function OrganizationProfilePage(): ReactElement {
                 )}
                 <ShareButton
                   path={organizationPath(org.slug)}
-                  title={organizationShareTitle(org.name)}
+                  title={organizationShareTitle(org.name, siteSettings.siteName)}
                   text={organizationShareDescription(org.name, org.mission)}
                   label="Share this organization"
                 />

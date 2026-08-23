@@ -33,6 +33,8 @@ export type OrgNewVolunteerVars = {
   donorPhone: string | null;
   donorNotes: string | null;
   supportersUrl: string;
+  /** Response-time window from site_settings; defaults to "1-3 business days". */
+  responseTimeLanguage: string;
 };
 
 const DEFAULT_COPY: TemplateCopy = {
@@ -40,7 +42,7 @@ const DEFAULT_COPY: TemplateCopy = {
   heading: "A New Volunteer Has Expressed Interest!",
   paragraphs: [
     "Hi {organizationName},",
-    "Congratulations, someone is interested in volunteering with your organization! Their details and which role(s) they are interested in are included below. Please reach out to this person in the <strong>next 1–3 business days</strong> to confirm the requirements for this volunteer opportunity and provide any additional details they need for participating.",
+    "Congratulations, someone is interested in volunteering with your organization! Their details and which role(s) they are interested in are included below. Please reach out to this person in the <strong>next {responseTimeLanguage}</strong> to confirm the requirements for this volunteer opportunity and provide any additional details they need for participating.",
     "Thank you,<br /><strong>{signature}</strong>",
   ],
 };
@@ -114,7 +116,7 @@ const DEFAULT_BLOCKS: import("../render").BodyBlock[] = [
 export const orgNewVolunteer: ProductTemplate<OrgNewVolunteerVars> = {
   key: "org_new_volunteer",
   entityType: "volunteer_signup",
-  required: ["organizationName", "requestName", "requestUrl", "roles", "donorName", "donorEmail", "supportersUrl"],
+  required: ["organizationName", "requestName", "requestUrl", "roles", "donorName", "donorEmail", "supportersUrl", "responseTimeLanguage"],
   trigger: "A volunteer signs up on a public request",
   recipients: "The request's contact person (always included) plus the configurable staff notification addresses",
   recipientsConfigurable: true,
@@ -133,6 +135,7 @@ export const orgNewVolunteer: ProductTemplate<OrgNewVolunteerVars> = {
     donorPhone: "(213) 555-0164",
     donorNotes: "Available on alternating Saturdays.",
     supportersUrl: "https://example.org/admin/supporters",
+    responseTimeLanguage: "1-3 business days",
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);

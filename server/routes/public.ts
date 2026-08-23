@@ -21,11 +21,11 @@ import { SignupError } from "../dal/signups";
 import { FixedWindowLimiter } from "../auth/rate-limit";
 import { NOT_FOUND_BODY } from "../auth/guards";
 import { queueProductEmail, dispatchQueuedEmails, absoluteUrl, type PendingDispatch } from "../email/send";
-import { envStaffRecipients, parseRecipientOverride } from "../email/overrides";
 import { storeImage } from "../storage/object-storage";
 import { submitOrganizationSignup, OrgNameTakenError } from "../services/org-signup";
 import { resolveSessionInfo } from "../auth/session";
 import type { Item, PublicItemRequest, PublicVolunteerRequest } from "../../shared/types";
+import { getCachedSiteSettings } from "../dal/site-settings";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -973,6 +973,8 @@ export function registerPublicRoutes(app: Express): void {
           const donorName = `${firstName} ${lastName}`;
           const requestUrl = absoluteUrl(`/volunteer/${requestId}`);
           const supportersUrl = absoluteUrl("/dashboard/supporters");
+          const staffPrimary = (process.env.STAFF_NOTIFY_PRIMARY ?? "").trim();
+          const staffSecondary = (process.env.STAFF_NOTIFY_SECONDARY ?? "").trim();
           if (info.contactName && info.contactEmail) {
             const donor = await queueProductEmail(SYSTEM, {
               key: "donor_volunteer_confirmation",
@@ -992,57 +994,40 @@ export function registerPublicRoutes(app: Express): void {
                 requestDetails: info.details,
                 requestUrl,
                 roles: roleNames,
-                followUpWindow: "1-3 business days",
+                followUpWindow: getCachedSiteSettings().responseTimeLanguage,
               },
             });
             if (donor.outcome === "queued") pending.push(donor.dispatch);
-
-            // Resolve staff recipients: DB override wins, then env-var fallback.
-            const staffOv = await dal.emailTemplateOverrides.getOverride(SYSTEM, "org_new_volunteer");
-            const overriddenStaff = parseRecipientOverride(staffOv?.recipients);
-            const { primary: staffPrimary, all: staffRecipients } =
-              overriddenStaff.length > 0
-                ? { primary: overriddenStaff[0]!, all: overriddenStaff }
-                : envStaffRecipients();
-            if (staffRecipients.length === 0) {
+            // org_new_volunteer goes to the request contact AND both staff
+            // addresses (D53) — distinct recipients queue their own rows.
+            const orgRecipients = [info.contactEmail, staffPrimary, staffSecondary].filter((e) => e !== "");
+            if (staffPrimary === "" || staffSecondary === "") {
               console.error(
-                `[public] signup ${signupId}: no staff notification recipients (override empty and STAFF_NOTIFY_PRIMARY/SECONDARY unset) — org_new_volunteer staff copies not sent`,
+                `[public] signup ${signupId}: STAFF_NOTIFY_PRIMARY/SECONDARY not fully configured — org_new_volunteer staff copies incomplete`,
               );
             }
-            const orgMailVars = {
-              organizationName: info.orgName,
-              requestName: info.title,
-              requestDescription: info.description,
-              requestDetails: info.details,
-              requestUrl,
-              roles: roleNames,
-              donorName,
-              donorEmail: email,
-              donorPhone: phone,
-              donorNotes: notes,
-              supportersUrl,
-            };
-            // Fixed send: the org contact always receives the email regardless of
-            // any admin override.
-            const contactMail = await queueProductEmail(SYSTEM, {
-              key: "org_new_volunteer",
-              entityId: signupId,
-              toEmail: info.contactEmail,
-              replyTo: staffPrimary !== "" ? staffPrimary : undefined,
-              vars: orgMailVars,
-            });
-            if (contactMail.outcome === "queued") pending.push(contactMail.dispatch);
-            // Staff CC copies: resolved through the admin override/env-var
-            // mechanism so the admin can manage them in Automated Emails.
-            for (const staffEmail of staffRecipients) {
-              const staffMail = await queueProductEmail(SYSTEM, {
+            for (const recipient of orgRecipients) {
+              const orgMail = await queueProductEmail(SYSTEM, {
                 key: "org_new_volunteer",
                 entityId: signupId,
-                toEmail: staffEmail,
+                toEmail: recipient,
                 replyTo: staffPrimary !== "" ? staffPrimary : undefined,
-                vars: orgMailVars,
+                vars: {
+                  organizationName: info.orgName,
+                  requestName: info.title,
+                  requestDescription: info.description,
+                  requestDetails: info.details,
+                  requestUrl,
+                  roles: roleNames,
+                  donorName,
+                  donorEmail: email,
+                  donorPhone: phone,
+                  donorNotes: notes,
+                  supportersUrl,
+                  responseTimeLanguage: getCachedSiteSettings().responseTimeLanguage,
+                },
               });
-              if (staffMail.outcome === "queued") pending.push(staffMail.dispatch);
+              if (orgMail.outcome === "queued") pending.push(orgMail.dispatch);
             }
           } else {
             console.error(
@@ -1070,7 +1055,7 @@ export function registerPublicRoutes(app: Express): void {
         ok: true,
         profileCreated: profileReady,
         message:
-          "Thank you for expressing interest! Check your email for a confirmation — a representative from the requesting organization will reach out to you within 1-3 business days.",
+          `Thank you for expressing interest! Check your email for a confirmation — a representative from the requesting organization will reach out to you within ${getCachedSiteSettings().responseTimeLanguage}.`,
       });
       if (pending.length > 0) void dispatchQueuedEmails(pending);
     } catch (err) {
@@ -1208,7 +1193,7 @@ export function registerPublicRoutes(app: Express): void {
           res.status(409).json({
             code: "organization_exists",
             message:
-              "It looks like your organization may already be registered. Please contact us at info@defendingthecause.org if you need help accessing your account.",
+              `It looks like your organization may already be registered. Please contact us at ${getCachedSiteSettings().contactEmail} if you need help accessing your account.`,
           });
           return;
         }

@@ -22,6 +22,7 @@
  */
 import { PUBLIC } from "./db/client";
 import * as dal from "./dal";
+import { getCachedSiteSettings } from "./dal/site-settings";
 import { absoluteUrl } from "./email/send";
 import {
   itemShareDescription,
@@ -129,7 +130,7 @@ async function organizationPreview(rawSlug: string): Promise<SharePreview | null
   // platform owner keeps a public profile; pending/disabled/rejected do not.
   if (!org || org.status !== "approved") return null;
 
-  const title = organizationShareTitle(org.name);
+  const title = organizationShareTitle(org.name, getCachedSiteSettings().siteName);
   return {
     title,
     description: truncateOnWord(organizationShareDescription(org.name, org.mission)),

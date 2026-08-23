@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
+import { useSiteSettings } from "../../hooks/useSiteSettings";
 import heroImg from "../../assets/dashboard/hero.png";
 import tileItem from "../../assets/dashboard/tile-item.png";
 import tileVolunteer from "../../assets/dashboard/tile-volunteer.png";
@@ -121,6 +122,7 @@ function RequestSelector({
 export function DashboardPage() {
   const [, navigate] = useLocation();
   const { session } = useSession();
+  const { settings: siteSettings } = useSiteSettings();
   const overviewQuery = useQuery<Overview>({ queryKey: ["/api/dashboard/overview"] });
 
   const overview = overviewQuery.data;
@@ -165,8 +167,8 @@ export function DashboardPage() {
         </p>
         <p className="mp4-welcome">
           If you have any questions, please email our Love in Action Program Director{" "}
-          <strong>Christina Moe</strong> at{" "}
-          <a href="mailto:christina@defendingthecause.org">christina@defendingthecause.org</a>.
+          <strong>{siteSettings.directorName}</strong> at{" "}
+          <a href={`mailto:${siteSettings.directorEmail}`}>{siteSettings.directorEmail}</a>.
         </p>
 
         <div className="mp4-grid">

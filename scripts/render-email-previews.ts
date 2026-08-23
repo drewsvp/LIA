@@ -338,6 +338,7 @@ async function main(): Promise<void> {
       donorPhone: signup.donorPhone,
       donorNotes: signup.notes,
       supportersUrl: absoluteUrl("/dashboard/supporters"),
+      responseTimeLanguage: "1-3 business days",
     }),
     donor_item_confirmation: donorItemConfirmation.render({
       donorName: pledge.donorName,

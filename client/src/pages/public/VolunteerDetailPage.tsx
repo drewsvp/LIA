@@ -10,6 +10,7 @@ import {
   volunteerShareTitle,
 } from "@shared/share-copy";
 import { beginEngagementLifecycle, reportEngagement } from "../../lib/engagement";
+import { useSiteSettings } from "../../hooks/useSiteSettings";
 
 /**
  * PB-04 — Volunteer request detail and interest (docs/specs/PB-04.md).
@@ -75,6 +76,7 @@ type FieldErrors = {
 export function VolunteerDetailPage(): ReactElement {
   const params = useParams<{ id: string }>();
   const requestId = params.id ?? "";
+  const { settings: siteSettings } = useSiteSettings();
   const { data, isLoading, isError, error } = useQuery<DetailPayload>({
     queryKey: [`/api/public/volunteer-requests/${requestId}`],
     enabled: requestId !== "",
@@ -480,7 +482,7 @@ export function VolunteerDetailPage(): ReactElement {
                     <p style={{ fontSize: 14, lineHeight: 1.6, textAlign: "center", margin: "0 0 20px" }}>
                       Thank you for being willing to volunteer your time. You will receive a confirmation email
                       indicating you've expressed interest in this role and a representative from the requesting
-                      organization will be reaching out to you within 1-3 business days with more details.
+                      organization will be reaching out to you within {siteSettings.responseTimeLanguage} with more details.
                     </p>
                     <form
                       onSubmit={(e) => {

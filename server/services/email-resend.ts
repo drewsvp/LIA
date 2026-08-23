@@ -21,6 +21,7 @@
  * operator reads a dated sentence, never a constraint violation.
  */
 import * as dal from "../dal";
+import { getCachedSiteSettings } from "../dal/site-settings";
 import type { DbContext } from "../db/client";
 import type { EmailLogEntry } from "../../shared/types";
 import { absoluteUrl, dispatchQueuedEmails, MAY_HAVE_SENT_MARKER, queueProductEmail } from "../email/send";
@@ -372,6 +373,7 @@ const REBUILDERS: Record<string, (ctx: DbContext, row: EmailLogEntry) => Promise
         donorPhone: signup.supporter.phone,
         donorNotes: signup.notes,
         supportersUrl: absoluteUrl("/dashboard/supporters"),
+        responseTimeLanguage: getCachedSiteSettings().responseTimeLanguage,
       },
     };
   },
@@ -396,7 +398,7 @@ const REBUILDERS: Record<string, (ctx: DbContext, row: EmailLogEntry) => Promise
         requestDetails: signup.request.details,
         requestUrl: absoluteUrl(`/volunteer/${signup.request.id}`),
         roles: signup.roleNames,
-        followUpWindow: "1-3 business days",
+        followUpWindow: getCachedSiteSettings().responseTimeLanguage,
       },
     };
   },

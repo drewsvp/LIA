@@ -20,16 +20,18 @@ import type { ReactElement, ReactNode } from "react";
 import { Redirect, useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
+import { useSiteSettings } from "../../hooks/useSiteSettings";
 import { apiRequest } from "../../lib/queryClient";
 import type { SessionInfo } from "@shared/types";
 
 function PendingApproval(): ReactElement {
+  const { settings } = useSiteSettings();
   return (
     <main className="mp2-message-page">
       <p className="mp2-pending">
         Your account is set up, but you&rsquo;re not yet an active member of an organization. Check
         with whoever invited you, or reach out to{" "}
-        <a href="mailto:christina@defendingthecause.org">christina@defendingthecause.org</a> if you
+        <a href={`mailto:${settings.directorEmail}`}>{settings.directorEmail}</a> if you
         think this is a mistake.
       </p>
     </main>
