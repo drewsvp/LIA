@@ -41,9 +41,9 @@ const WIDTHS = [390, 719, 721] as const;
 const PUBLIC_SIGNED_OUT = [
   { text: "ABOUT", href: "/about" },
   { text: "ALLIANCE HOMEPAGE", href: ALLIANCE_HOMEPAGE },
-  { text: "MEMBER LOGIN", href: "/login" },
   { text: "PROVIDE AN ITEM", href: "/items" },
   { text: "VOLUNTEER", href: "/volunteer" },
+  { text: "MEMBER LOGIN", href: "/login" },
 ] as const;
 const PUBLIC_AUTHENTICATED = PUBLIC_SIGNED_OUT.filter(({ text }) => text !== "MEMBER LOGIN");
 
@@ -334,7 +334,11 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
   }
 
   if (mobile) {
-    const panelItems = await page.locator(".site-nav-panel > a.site-nav-panel-item:visible").allTextContents();
+    // Collect all direct anchor children of the panel in DOM order: plain
+    // links use site-nav-panel-item; MEMBER LOGIN (unauthenticated only) now
+    // uses site-nav-btn. Both are direct <a> children so one selector covers
+    // both without breaking DOM order.
+    const panelItems = await page.locator(".site-nav-panel > a:visible").allTextContents();
     const actualOrder = panelItems.map((item) => item.trim());
     const expectedOrder = expected.map(({ text }) => text);
     assertThat(
@@ -357,21 +361,35 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
     "Desktop primary public destinations are in the wrong order.",
     `Expected ${JSON.stringify(expectedTopOrder)}, got ${JSON.stringify(topOrder)}.`,
   );
-  const rightOrder = (await page.locator(".site-nav-right > a.site-nav-link:visible").allTextContents()).map((item) =>
+  // Collect all direct anchor children of the lower row in DOM order: plain
+  // links use site-nav-link; MEMBER LOGIN (unauthenticated only) now uses
+  // site-nav-btn. Both are direct <a> children so one selector covers both.
+  const rightOrder = (await page.locator(".site-nav-right > a:visible").allTextContents()).map((item) =>
     item.trim(),
   );
   // PROVIDE AN ITEM and VOLUNTEER are plain links in the lower row for every
   // visitor state. The top row is only rendered when authenticated (portal
-  // controls); logged-out visitors see the lower row only, with MEMBER LOGIN
-  // before the two public destinations.
+  // controls); logged-out visitors see MEMBER LOGIN as a navy button at the
+  // far right, after VOLUNTEER.
   const expectedRightOrder = authenticated
     ? ["ABOUT", "ALLIANCE HOMEPAGE", "PROVIDE AN ITEM", "VOLUNTEER"]
-    : ["ABOUT", "ALLIANCE HOMEPAGE", "MEMBER LOGIN", "PROVIDE AN ITEM", "VOLUNTEER"];
+    : ["ABOUT", "ALLIANCE HOMEPAGE", "PROVIDE AN ITEM", "VOLUNTEER", "MEMBER LOGIN"];
   assertThat(
     JSON.stringify(rightOrder) === JSON.stringify(expectedRightOrder),
     "Desktop secondary public destinations are in the wrong order.",
     `Expected ${JSON.stringify(expectedRightOrder)}, got ${JSON.stringify(rightOrder)}.`,
   );
+  // MEMBER LOGIN must use the navy button style, not a plain text link.
+  if (!authenticated) {
+    const loginClass = await page
+      .locator('.site-nav-right > a[href="/login"]:visible')
+      .getAttribute("class");
+    assertThat(
+      loginClass !== null && loginClass.includes("site-nav-btn"),
+      "MEMBER LOGIN must use the site-nav-btn class in the desktop nav.",
+      `Got class=${JSON.stringify(loginClass)}.`,
+    );
+  }
 }
 
 async function openMobileMenu(page: Page): Promise<void> {

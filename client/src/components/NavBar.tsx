@@ -229,11 +229,6 @@ export function NavBar(): ReactElement {
             >
               ALLIANCE HOMEPAGE
             </a>
-            {showMemberLogin ? (
-              <Link href="/login" className="site-nav-link">
-                MEMBER LOGIN
-              </Link>
-            ) : null}
             {/* The two public destinations are shown to all visitors — logged-out
                 and logged-in alike. Logged-out users no longer see them as
                 teal CTA buttons in the top row; they appear here as plain links
@@ -244,6 +239,11 @@ export function NavBar(): ReactElement {
             <Link href="/volunteer" className="site-nav-link">
               VOLUNTEER
             </Link>
+            {showMemberLogin ? (
+              <Link href="/login" className="site-nav-btn">
+                MEMBER LOGIN
+              </Link>
+            ) : null}
             <OrgSwitcher className="site-nav-switcher" />
           </div>
         </nav>
@@ -288,17 +288,17 @@ export function NavBar(): ReactElement {
           >
             ALLIANCE HOMEPAGE
           </a>
-          {showMemberLogin ? (
-            <Link href="/login" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
-              MEMBER LOGIN
-            </Link>
-          ) : null}
           <Link href="/items" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
             PROVIDE AN ITEM
           </Link>
           <Link href="/volunteer" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
             VOLUNTEER
           </Link>
+          {showMemberLogin ? (
+            <Link href="/login" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
+              MEMBER LOGIN
+            </Link>
+          ) : null}
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />
           {showUserMenu && isSupporter ? (
             <Link href="/profile" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
