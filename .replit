@@ -104,6 +104,17 @@ args = "npm run test:request-engagement"
 isValidation = true
 
 [[workflows.workflow]]
+name = "lint-fixture-queries"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/lint-fixture-queries.sh"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
 name = "lint-adm-btn"
 author = "agent"
 

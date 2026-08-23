@@ -14,6 +14,11 @@
 #
 # Reference implementation: scripts/test-email-preview-panel.ts (pre-clean block)
 #
+# IMPORTANT: This script must run as a standalone validation step (see the
+# lint-fixture-queries workflow in .replit). Do NOT rely solely on the
+# npm run check &&-chain — a TypeScript failure there will prevent this lint
+# from running and allow a broken fixture query to slip through undetected.
+#
 # Run via:  npm run lint:fixture-queries
 #           (also invoked automatically by npm run check)
 
