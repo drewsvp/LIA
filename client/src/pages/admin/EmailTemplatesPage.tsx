@@ -764,6 +764,12 @@ function BrandingPanel(): ReactElement {
   const [message, setMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
 
+  // Header image upload state.
+  const [headerInputMode, setHeaderInputMode] = useState<"upload" | "url">("upload");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const headerFileInputRef = useRef<HTMLInputElement>(null);
+
   // Initialise draft when brand loads.
   useEffect(() => {
     if (brandData?.settings && !draft) {
@@ -813,6 +819,31 @@ function BrandingPanel(): ReactElement {
       setMessage(SAVE_FAILURE);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function uploadHeaderImage(file: File): Promise<void> {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch("/api/admin/email-brand/header-image", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const data = (await res.json().catch(() => null)) as { url?: string; message?: string } | null;
+      if (res.ok && data?.url) {
+        setDraft((prev) => (prev ? { ...prev, headerImageUrl: data.url! } : prev));
+        await queryClient.invalidateQueries({ queryKey: [BRAND_KEY] });
+      } else {
+        setUploadError(data?.message ?? "Upload failed. Try again.");
+      }
+    } catch {
+      setUploadError("Upload failed. Check your connection and try again.");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -974,25 +1005,88 @@ function BrandingPanel(): ReactElement {
               onChange={(e) => setDraft({ ...draft, fontStack: e.target.value })}
             />
           </label>
-          <label className="adm-filter">
-            Header image URL <span className="adm-muted">(leave blank to use the built-in PNG)</span>
-            <input
-              type="url"
-              value={draft.headerImageUrl ?? ""}
-              placeholder="https://…"
-              onChange={(e) => setDraft({ ...draft, headerImageUrl: e.target.value || null })}
-            />
-          </label>
-          {(draft.headerImageUrl ?? "").trim() !== "" && (
-            <div style={{ marginTop: 8 }}>
-              <p className="adm-muted" style={{ marginBottom: 4 }}>Preview:</p>
-              <img
-                src={draft.headerImageUrl ?? ""}
-                alt="Header preview"
-                style={{ maxWidth: "100%", maxHeight: 80, border: "1px solid #ccc", borderRadius: 4 }}
-              />
-            </div>
-          )}
+          <div className="adm-filter">
+            <span>
+              Header image{" "}
+              <span className="adm-muted">(leave blank to use the built-in PNG)</span>
+            </span>
+            {headerInputMode === "upload" ? (
+              <div style={{ marginTop: 4 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="adm-btn adm-btn-outline"
+                    disabled={uploading || saving}
+                    onClick={() => headerFileInputRef.current?.click()}
+                  >
+                    {uploading ? "Uploading…" : "Upload image"}
+                  </button>
+                  <button
+                    type="button"
+                    className="adm-btn adm-btn-outline"
+                    style={{ fontSize: "0.875em" }}
+                    disabled={uploading || saving}
+                    onClick={() => setHeaderInputMode("url")}
+                  >
+                    Use URL instead
+                  </button>
+                </div>
+                <input
+                  ref={headerFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadHeaderImage(file);
+                    e.target.value = "";
+                  }}
+                />
+                {uploadError && (
+                  <p className="adm-error-text" style={{ marginTop: 4 }}>{uploadError}</p>
+                )}
+              </div>
+            ) : (
+              <div style={{ marginTop: 4 }}>
+                <input
+                  type="url"
+                  value={draft.headerImageUrl ?? ""}
+                  placeholder="https://…"
+                  onChange={(e) => setDraft({ ...draft, headerImageUrl: e.target.value || null })}
+                />
+                <button
+                  type="button"
+                  className="adm-btn adm-btn-outline"
+                  style={{ fontSize: "0.875em", marginTop: 4 }}
+                  disabled={saving}
+                  onClick={() => setHeaderInputMode("upload")}
+                >
+                  Upload file instead
+                </button>
+              </div>
+            )}
+            {(draft.headerImageUrl ?? "").trim() !== "" && (
+              <div style={{ marginTop: 8 }}>
+                <p className="adm-muted" style={{ marginBottom: 4 }}>Preview:</p>
+                <img
+                  src={draft.headerImageUrl ?? ""}
+                  alt="Header preview"
+                  style={{ maxWidth: "100%", maxHeight: 80, border: "1px solid #ccc", borderRadius: 4 }}
+                />
+                <div style={{ marginTop: 4 }}>
+                  <button
+                    type="button"
+                    className="adm-btn adm-btn-outline"
+                    style={{ fontSize: "0.875em" }}
+                    disabled={saving}
+                    onClick={() => setDraft({ ...draft, headerImageUrl: null })}
+                  >
+                    Clear header image
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

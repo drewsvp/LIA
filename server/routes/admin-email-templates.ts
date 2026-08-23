@@ -11,9 +11,11 @@
  * POST /api/admin/email-brand/reset) used by the Branding panel in the UI.
  */
 import type { Express, Request, Response } from "express";
+import multer from "multer";
 import { requireStaffAdmin, staffContext, sendNotFound } from "../auth/guards";
 import * as dal from "../dal";
 import type { DbContext } from "../db/client";
+import { storeImage, deleteImage, StorageError } from "../storage/object-storage";
 import { PRODUCT_TEMPLATES, isProductTemplateKey, type ProductTemplateKey } from "../email/templates";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
 import { copyPlaceholders, finalizeHtml, brandTokenVars, getBrand, type TemplateCopy } from "../email/render";
@@ -24,6 +26,53 @@ import { SCHEDULABLE_TEMPLATE_KEYS } from "../digest-schedule";
 import type { EmailSchedule } from "../dal/email-schedules";
 
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
+
+/**
+ * Multer instance for brand header image upload — 2 MB limit, matching the
+ * MAX_HEADER_IMAGE_BYTES cap in send.ts so every accepted file is attachable.
+ */
+const brandImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+});
+
+/**
+ * Detect the actual image type from the leading bytes of the buffer.
+ * Never relies on client-supplied MIME type or filename — both are attacker-controlled.
+ * SVG is intentionally excluded: it can contain scripts and must not be served from the
+ * application origin without sanitisation.
+ */
+type DetectedImageType = { ext: string; mimeType: string };
+
+function detectImageType(buf: Buffer): DetectedImageType | null {
+  if (buf.length < 12) return null;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) {
+    return { ext: "jpg", mimeType: "image/jpeg" };
+  }
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47 &&
+    buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A
+  ) {
+    return { ext: "png", mimeType: "image/png" };
+  }
+  // GIF87a or GIF89a: 47 49 46 38 (37|39) 61
+  if (
+    buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38 &&
+    (buf[4] === 0x37 || buf[4] === 0x39) && buf[5] === 0x61
+  ) {
+    return { ext: "gif", mimeType: "image/gif" };
+  }
+  // WebP: RIFF????WEBP
+  if (
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  ) {
+    return { ext: "webp", mimeType: "image/webp" };
+  }
+  return null;
+}
 
 function staffCtx(req: Request): DbContext {
   return { kind: "staff", userId: staffContext(req).userId };
@@ -467,6 +516,16 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         return;
       }
 
+      const newHeaderUrl =
+        rawHeaderUrl && typeof rawHeaderUrl === "string" && rawHeaderUrl.trim() !== ""
+          ? rawHeaderUrl.trim()
+          : null;
+
+      // Read the current header URL before writing so we can clean up any prior
+      // storage object after a successful save (clear OR replace with a pasted URL).
+      const currentBeforeSave = await dal.emailBrandSettings.getBrandSettings(staffCtx(req));
+      const oldHeaderUrl = currentBeforeSave.headerImageUrl;
+
       const saved = await dal.emailBrandSettings.upsertBrandSettings(staffCtx(req), {
         primaryColor: (body.primaryColor as string).trim(),
         fontStack: (body.fontStack as string).trim(),
@@ -476,12 +535,19 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
         directorName: (body.directorName as string).trim(),
         directorEmail: (body.directorEmail as string).trim(),
         directorTitle: (body.directorTitle as string).trim(),
-        headerImageUrl:
-          rawHeaderUrl && typeof rawHeaderUrl === "string" && rawHeaderUrl.trim() !== ""
-            ? rawHeaderUrl.trim()
-            : null,
+        headerImageUrl: newHeaderUrl,
         updatedByUserId: staffContext(req).userId,
       });
+
+      // Post-save best-effort cleanup: delete any prior uploaded storage object
+      // that was just replaced or cleared. Runs only after the DB write succeeds
+      // so a save failure never leaves the database referencing a deleted image.
+      if (oldHeaderUrl && oldHeaderUrl.startsWith("/storage/images/") && oldHeaderUrl !== newHeaderUrl) {
+        await deleteImage(oldHeaderUrl).catch((err) => {
+          console.error("[admin] failed to delete orphaned brand header image after save:", err);
+        });
+      }
+
       res.json({ ok: true, settings: saved });
     } catch (err) {
       next(err);
@@ -491,10 +557,100 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
   // ---- Reset brand settings to the hardcoded defaults.
   app.post("/api/admin/email-brand/reset", requireStaffAdmin, async (req: Request, res: Response, next) => {
     try {
+      // Read the current header URL before resetting so we can clean up any
+      // previously uploaded storage object after the reset succeeds.
+      const current = await dal.emailBrandSettings.getBrandSettings(staffCtx(req));
+      const oldHeaderUrl = current.headerImageUrl;
+
       const saved = await dal.emailBrandSettings.resetToDefaults(staffCtx(req), staffContext(req).userId);
+
+      // Post-reset best-effort cleanup — delete only after the DB write succeeds.
+      if (oldHeaderUrl && oldHeaderUrl.startsWith("/storage/images/")) {
+        await deleteImage(oldHeaderUrl).catch((err) => {
+          console.error("[admin] failed to delete orphaned brand header image on reset:", err);
+        });
+      }
+
       res.json({ ok: true, settings: saved });
     } catch (err) {
       next(err);
     }
   });
+
+  // ---- Upload a header image for email branding.
+  // Stores the file via object storage, upserts the resulting URL into
+  // email_brand_settings, and deletes any previously uploaded storage object.
+  // Returns { ok: true, url } on success, or a clear error when storage is
+  // unavailable so the UI can fall back to the URL input.
+  app.post("/api/admin/email-brand/header-image", requireStaffAdmin, (req: Request, res: Response) => {
+    brandImageUpload.single("image")(req, res, (err: unknown) => {
+      if (err) {
+        console.error("[admin] brand header image upload rejected before parse:", err);
+        res.status(400).json({ message: err instanceof Error ? err.message : "Upload failed. The file may be too large (2 MB limit)." });
+        return;
+      }
+      void handleBrandHeaderImageUpload(req, res);
+    });
+  });
+
+  async function handleBrandHeaderImageUpload(req: Request, res: Response): Promise<void> {
+    if (!req.file) {
+      res.status(400).json({ message: "Choose an image file first." });
+      return;
+    }
+    // Validate actual file content via magic bytes — never trust the client-supplied
+    // MIME type or filename, both of which are attacker-controlled. SVG is excluded
+    // because it can contain active script content.
+    const detected = detectImageType(req.file.buffer);
+    if (!detected) {
+      res.status(400).json({ message: "Only JPEG, PNG, WebP, and GIF images are accepted." });
+      return;
+    }
+    const ctx = staffCtx(req);
+    try {
+      // Fetch the current header URL so we can clean up the old storage object.
+      const current = await dal.emailBrandSettings.getBrandSettings(ctx);
+      const oldUrl = current.headerImageUrl;
+
+      let stored: { url: string };
+      try {
+        // Use a synthetic filename so the stored extension is always derived from
+        // verified content, never from the attacker-controlled originalname.
+        stored = await storeImage({ data: req.file.buffer, filename: `header.${detected.ext}` });
+      } catch (err) {
+        if (err instanceof StorageError) {
+          res.status(503).json({ message: `Image storage is not available. ${err.message}` });
+          return;
+        }
+        throw err;
+      }
+
+      // Write the new URL to the database.
+      let saved;
+      try {
+        saved = await dal.emailBrandSettings.upsertBrandSettings(ctx, {
+          headerImageUrl: stored.url,
+          updatedByUserId: staffContext(req).userId,
+        });
+      } catch (err) {
+        // Roll back the stored object so we don't accumulate orphans.
+        await deleteImage(stored.url).catch((deleteErr) => {
+          console.error("[admin] failed to roll back brand header image after DB error:", deleteErr);
+        });
+        throw err;
+      }
+
+      // Delete the previous storage object (ignore errors — best-effort cleanup).
+      if (oldUrl && oldUrl.startsWith("/storage/images/") && oldUrl !== stored.url) {
+        await deleteImage(oldUrl).catch((deleteErr) => {
+          console.error(`[admin] orphaned brand header image ${oldUrl} after replacement:`, deleteErr);
+        });
+      }
+
+      res.json({ ok: true, url: stored.url, settings: saved });
+    } catch (err) {
+      console.error("[admin] brand header image upload failed:", err);
+      res.status(500).json({ message: "The upload failed. Nothing was changed." });
+    }
+  }
 }

@@ -618,6 +618,9 @@ export function registerRoutes(app: Express): void {
       const image = await storage.readImage(req.path);
       res.setHeader("Content-Type", image.contentType);
       res.setHeader("Cache-Control", "public, max-age=3600");
+      // Prevent browsers from MIME-sniffing away from the declared Content-Type.
+      // This matters for uploaded content that could be mistaken for an active type.
+      res.setHeader("X-Content-Type-Options", "nosniff");
       res.send(image.data);
     } catch {
       res.status(404).json(NOT_FOUND_BODY);
