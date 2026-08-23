@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # lint-adm-btn.sh — Catch adm-btn-outline used without the adm-btn base class.
 #
+# IMPORTANT: This script must always run to completion.
+# It contains two independent checks: a TSX/TS source scan (Step 1) and a CSS
+# combined-selector check (Step 2).  Do NOT short-circuit after the source scan
+# only (e.g. via an early exit or a partial --include flag) — the CSS check
+# will be silently skipped and index.css regressions will go undetected.
+# Register this script as its own required validation step rather than calling
+# it at the tail of a &&-chained command.
+#
 # adm-btn-outline relies on adm-btn for button identity (element reset, display,
 # base sizing).  A className that contains adm-btn-outline but not adm-btn as a
 # standalone class token renders as a plain browser-default rectangle.
