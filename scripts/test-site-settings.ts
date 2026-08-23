@@ -473,6 +473,131 @@ async function main(): Promise<void> {
         }
       },
     );
+    // ── Case 6: /signup duplicate-org error reflects updated contactEmail ────
+    //
+    // The 409 response body is built server-side using
+    // getCachedSiteSettings().contactEmail (public.ts), so a cache update
+    // must appear in the next rendered error without any client-side refresh
+    // beyond a normal page navigation. This confirms the full chain:
+    // admin PUT → server cache → 409 message → browser render.
+    //
+    // The test also confirms the client-side DUPLICATE_COPY fallback path
+    // works when the server 409 includes a pre-rendered message — because the
+    // client uses `body?.message ?? DUPLICATE_COPY`, the server-built string
+    // wins and must contain the live contactEmail.
+    await runCase(
+      "/signup duplicate-org error shows updated contactEmail after admin change",
+      async () => {
+        const NEW_EMAIL = "zz.test.contact@example.com";
+        // "Hearts & Hands Family Services" is inserted by the seed script and
+        // will always trigger a 409 on re-submission.
+        const DUPLICATE_ORG = "Hearts & Hands Family Services";
+
+        // Minimal 1×1 transparent PNG (67 bytes) — satisfies the logo
+        // file-type guard without depending on the filesystem.
+        const TINY_PNG = Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIA" +
+            "BQAABjE+ibYAAAAASUVORK5CYII=",
+          "base64",
+        );
+
+        type Page = Awaited<ReturnType<BrowserContext["newPage"]>>;
+
+        // Fill every required field and click Submit. A fresh goto ensures the
+        // React query cache starts empty so /api/site-settings is always
+        // re-fetched. The function is called twice (before and after the email
+        // change) so the duplicate-org 409 fires both times.
+        async function fillAndSubmit(page: Page): Promise<void> {
+          await page.goto(`${BASE}/signup`, { waitUntil: "networkidle" });
+
+          // Wait for population checkboxes rendered by the async query.
+          await page.waitForSelector(".mp3-check input[type='checkbox']", {
+            timeout: 8_000,
+          });
+
+          await page.fill("#mp3-name", DUPLICATE_ORG);
+          await page.fill("#mp3-website", "https://example.org");
+          await page.fill("#mp3-city", "Sacramento");
+          await page.fill("#mp3-phone", "916-555-0100");
+          await page.fill("#mp3-mission", "Serving families in our community.");
+
+          // Check the first available population.
+          await page.locator(".mp3-check input[type='checkbox']").first().check();
+
+          // Provide a logo programmatically (bypasses the file-picker dialog).
+          await page.setInputFiles("#mp3-logo", {
+            name: "logo.png",
+            mimeType: "image/png",
+            buffer: TINY_PNG,
+          });
+
+          await page.fill("#mp3-first", "Test");
+          await page.fill("#mp3-last", "User");
+          await page.fill("#mp3-email", "zz.tester@example.com");
+          await page.fill("#mp3-contact-phone", "916-555-0101");
+
+          await page.click(".mp3-submit");
+        }
+
+        const ctx = await newCtx(browser, adminCookie);
+        try {
+          const page = await ctx.newPage();
+          const errorLocator = page.locator(".mp3-server-error[role='alert']");
+
+          // ── Step 1: baseline — error must contain the default contactEmail ─
+          await fillAndSubmit(page);
+          await errorLocator.waitFor({ state: "visible", timeout: 10_000 });
+          const firstError = (await errorLocator.textContent()) ?? "";
+          assert(
+            firstError.includes(DEFAULTS.contactEmail),
+            "duplicate-org error must contain the default contactEmail",
+            { got: firstError, want: DEFAULTS.contactEmail },
+          );
+
+          // ── Step 2: admin changes the contactEmail ──────────────────────────
+          const putRes = await fetch(`${BASE}/api/admin/site-settings`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Cookie: cookieHeader(adminCookie),
+            },
+            body: JSON.stringify({
+              siteName: DEFAULTS.siteName,
+              contactEmail: NEW_EMAIL,
+              responseTimeLanguage: DEFAULTS.responseTimeLanguage,
+            }),
+          });
+          assert(
+            putRes.ok,
+            "PUT /api/admin/site-settings must succeed before resubmission check",
+            putRes.status,
+          );
+
+          // ── Step 3: fresh navigation + resubmit → new email must appear ────
+          await fillAndSubmit(page);
+          await errorLocator.waitFor({ state: "visible", timeout: 10_000 });
+          const secondError = (await errorLocator.textContent()) ?? "";
+          assert(
+            secondError.includes(NEW_EMAIL),
+            "duplicate-org error must contain the new contactEmail after admin change",
+            { got: secondError, want: NEW_EMAIL },
+          );
+          assert(
+            !secondError.includes(DEFAULTS.contactEmail),
+            "duplicate-org error must NOT still contain the old contactEmail",
+            { got: secondError, old: DEFAULTS.contactEmail },
+          );
+        } finally {
+          // Always restore defaults so subsequent runs and manual tests start
+          // from a clean state.
+          await fetch(`${BASE}/api/admin/site-settings/reset`, {
+            method: "POST",
+            headers: { Cookie: cookieHeader(adminCookie) },
+          });
+          await ctx.close();
+        }
+      },
+    );
   } finally {
     await browser.close();
   }
