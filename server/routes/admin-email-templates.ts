@@ -626,9 +626,13 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
       }
 
       // Write the new URL to the database.
+      // setHeaderImageUrl only touches header_image_url + audit columns;
+      // all other brand columns keep their existing values (INSERT path seeds
+      // BRAND_DEFAULTS so NOT NULL constraints are satisfied even when the
+      // settings row has not yet been populated by db:seed).
       let saved;
       try {
-        saved = await dal.emailBrandSettings.upsertBrandSettings(ctx, {
+        saved = await dal.emailBrandSettings.setHeaderImageUrl(ctx, {
           headerImageUrl: stored.url,
           updatedByUserId: staffContext(req).userId,
         });

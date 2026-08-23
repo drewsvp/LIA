@@ -96,33 +96,53 @@ function objectNameFromUrl(url: string): string {
 export async function storeImage(input: { data: Buffer; filename: string }): Promise<StoredImage> {
   const ext = extensionOf(input.filename);
   const objectName = `images/${randomUUID()}.${ext}`;
-  const result = await getClient().uploadFromBytes(objectName, input.data);
-  if (!result.ok) {
+  try {
+    const result = await getClient().uploadFromBytes(objectName, input.data);
+    if (!result.ok) {
+      throw new StorageError(
+        `Image upload failed: ${result.error.message}. If no bucket exists yet, create one in the App Storage tool.`,
+      );
+    }
+    return { url: `${URL_PREFIX}${objectName}` };
+  } catch (err) {
+    if (err instanceof StorageError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
     throw new StorageError(
-      `Image upload failed: ${result.error.message}. If no bucket exists yet, create one in the App Storage tool.`,
+      `Image upload failed: ${msg}. If no bucket exists yet, create one in the App Storage tool.`,
     );
   }
-  return { url: `${URL_PREFIX}${objectName}` };
 }
 
 /** Read an image by its app URL. Throws StorageError when missing. */
 export async function readImage(url: string): Promise<ImageDownload> {
   const objectName = objectNameFromUrl(url);
-  const result = await getClient().downloadAsBytes(objectName);
-  if (!result.ok) {
-    throw new StorageError(`Image not found: ${url} (${result.error.message})`);
+  try {
+    const result = await getClient().downloadAsBytes(objectName);
+    if (!result.ok) {
+      throw new StorageError(`Image not found: ${url} (${result.error.message})`);
+    }
+    const buffer = result.value[0];
+    if (!buffer) throw new StorageError(`Image empty: ${url}`);
+    return { data: buffer, contentType: contentTypeFor(objectName) };
+  } catch (err) {
+    if (err instanceof StorageError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new StorageError(`Image read failed: ${url} (${msg})`);
   }
-  const buffer = result.value[0];
-  if (!buffer) throw new StorageError(`Image empty: ${url}`);
-  return { data: buffer, contentType: contentTypeFor(objectName) };
 }
 
 /** Delete an image by its app URL. Missing objects are not an error. */
 export async function deleteImage(url: string): Promise<void> {
   const objectName = objectNameFromUrl(url);
-  const result = await getClient().delete(objectName, { ignoreNotFound: true });
-  if (!result.ok) {
-    throw new StorageError(`Image delete failed: ${url} (${result.error.message})`);
+  try {
+    const result = await getClient().delete(objectName, { ignoreNotFound: true });
+    if (!result.ok) {
+      throw new StorageError(`Image delete failed: ${url} (${result.error.message})`);
+    }
+  } catch (err) {
+    if (err instanceof StorageError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new StorageError(`Image delete failed: ${url} (${msg})`);
   }
 }
 

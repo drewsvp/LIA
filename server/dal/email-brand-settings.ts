@@ -214,6 +214,53 @@ export async function upsertBrandSettings(
   return row;
 }
 
+/**
+ * Set only the header image URL (used by the upload endpoint).
+ *
+ * On INSERT (row absent): seeds all required brand columns from BRAND_DEFAULTS
+ * so the NOT NULL constraints are satisfied — no constraint violation even in
+ * a bare DB that has the table but no seeded row.
+ * On CONFLICT (row exists): only header_image_url, updated_at, and updated_by
+ * are changed; all other brand columns keep their existing values.
+ */
+export async function setHeaderImageUrl(
+  ctx: DbContext,
+  input: { headerImageUrl: string; updatedByUserId: string | null },
+): Promise<EmailBrandSettingsRow> {
+  const d = BRAND_DEFAULTS;
+  const rows = await withDbContext(ctx, (c) =>
+    q<EmailBrandSettingsRow>(
+      c,
+      `INSERT INTO email_brand_settings (
+         id, primary_color, font_stack, org_name, program_name,
+         signature_name, director_name, director_email, director_title,
+         header_image_url, updated_at, updated_by
+       ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10)
+       ON CONFLICT (id) DO UPDATE SET
+         header_image_url = EXCLUDED.header_image_url,
+         updated_at       = now(),
+         updated_by       = EXCLUDED.updated_by
+       RETURNING ${INTERNAL_COLS}`,
+      [
+        d.primaryColor,
+        d.fontStack,
+        d.orgName,
+        d.programName,
+        d.signatureName,
+        d.directorName,
+        d.directorEmail,
+        d.directorTitle,
+        input.headerImageUrl,
+        input.updatedByUserId,
+      ],
+    ),
+  );
+  const row = rows[0];
+  if (!row) throw new Error("emailBrandSettings.setHeaderImageUrl: no row returned");
+  setCache(row);
+  return row;
+}
+
 /** Reset all brand fields to the hardcoded defaults. */
 export async function resetToDefaults(
   ctx: DbContext,
