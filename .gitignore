@@ -11,3 +11,6 @@ dist/
 .DS_Store
 attached_assets/
 /tmp/
+
+# Point-in-time audit output. Regenerate rather than commit.
+CUTOVER-AUDIT.md
