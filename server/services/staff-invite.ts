@@ -13,7 +13,9 @@
  * rebuilder can look up the current member name and role.
  */
 import { randomUUID } from "crypto";
+import type { PoolClient } from "pg";
 import { SYSTEM, withDbContext, q } from "../db/client";
+import type { OrgMembership } from "../../shared/types";
 import * as people from "../dal/people";
 import * as users from "../dal/users";
 import * as memberships from "../dal/memberships";
@@ -59,6 +61,30 @@ export type StaffInviteResult = {
   membershipId: string;
   dispatches: PendingDispatch[];
 };
+
+type StaffInvitationEmailInput = {
+  c: PoolClient;
+  membershipId: string;
+  toEmail: string;
+  inviteeName: string;
+  role: "staff_admin" | "staff_approver";
+};
+
+/** Queue the shared staff onboarding email for both fresh and recovered invites. */
+async function queueStaffInvitationEmailInTx(input: StaffInvitationEmailInput): Promise<PendingDispatch | null> {
+  return queueProductEmailInTx(input.c, {
+    key: "staff_invited",
+    entityId: randomUUID(),
+    toEmail: input.toEmail,
+    vars: {
+      inviteeName: input.inviteeName,
+      inviteeRole: input.role === "staff_admin" ? "Staff Admin" : "Staff Approver",
+      loginUrl: absoluteUrl("/login"),
+      // Non-rendered anchor used by the email-log resend path.
+      membershipId: input.membershipId,
+    },
+  });
+}
 
 export async function inviteStaff(input: StaffInviteInput): Promise<StaffInviteResult> {
   return withDbContext(SYSTEM, async (c) => {
@@ -142,33 +168,89 @@ export async function inviteStaff(input: StaffInviteInput): Promise<StaffInviteR
       });
     }
 
-    // (g) queue staff_invited email to the invitee's address.
-    //
-    // entity_id is a fresh UUID per invitation occurrence so the once-only
-    // log index never blocks a re-invite — even if the prior invitation was
-    // successfully delivered. The real membershipId is stored as a non-rendered
-    // var in the payload so the resend rebuilder can resolve the current
-    // member name and role without a separate lookup table.
-    const emailEntityId = randomUUID();
-    const roleName = input.role === "staff_admin" ? "Staff Admin" : "Staff Approver";
     const dispatches: PendingDispatch[] = [];
     pushDispatch(
       dispatches,
-      await queueProductEmailInTx(c, {
-        key: "staff_invited",
-        entityId: emailEntityId,
+      await queueStaffInvitationEmailInTx({
+        c,
+        membershipId,
         toEmail: input.email,
-        vars: {
-          inviteeName: `${person.firstName} ${person.lastName}`,
-          inviteeRole: roleName,
-          loginUrl: absoluteUrl("/login"),
-          // Non-rendered anchor: stored in payload so the resend rebuilder
-          // can look up the membership for current name/role.
-          membershipId,
-        },
+        inviteeName: `${person.firstName} ${person.lastName}`,
+        role: input.role,
       }),
     );
 
     return { membershipId, dispatches };
   });
+}
+
+/** A row that is not the one deliberate Alliance recovery operation. */
+export class AllianceInviteConversionError extends Error {
+  constructor(
+    message = "Only a pending Member invitation at The Alliance can be converted to Staff approver. Nothing was changed.",
+  ) {
+    super(message);
+    this.name = "AllianceInviteConversionError";
+  }
+}
+
+export type AllianceInviteConversionResult = {
+  outcome: "converted" | "already_converted";
+  membershipId: string;
+  inviteeName: string;
+  inviteeEmail: string;
+  membership: OrgMembership;
+  dispatches: PendingDispatch[];
+};
+
+/**
+ * Recover a malformed member invitation at the platform owner organization.
+ * The DAL performs the locked state transition; this function queues the
+ * shared staff email in the same transaction for dispatch after commit.
+ */
+export async function convertAllianceInviteToStaffApproverInTx(
+  c: PoolClient,
+  membershipId: string,
+  actorUserId: string,
+): Promise<AllianceInviteConversionResult> {
+  const row = await memberships.getRoleAdminRowInTx(c, membershipId);
+  if (!row) throw new AllianceInviteConversionError("That membership could not be found. Nothing was changed.");
+  if (row.orgKind === "platform_owner" && row.role === "staff_approver" && row.status === "active") {
+    return {
+      outcome: "already_converted",
+      membershipId,
+      inviteeName: `${row.firstName} ${row.lastName}`.trim(),
+      inviteeEmail: row.email,
+      membership: row,
+      dispatches: [],
+    };
+  }
+  if (row.orgKind !== "platform_owner" || row.role !== "member" || row.status !== "pending") {
+    throw new AllianceInviteConversionError();
+  }
+  if (row.userStatus === "disabled") {
+    throw new AllianceInviteConversionError("This account is disabled and cannot be activated as staff. Nothing was changed.");
+  }
+
+  const membership = await memberships.convertPendingAllianceMemberInTx(c, membershipId, actorUserId);
+  const inviteeName = `${row.firstName} ${row.lastName}`.trim();
+  const dispatches: PendingDispatch[] = [];
+  pushDispatch(
+    dispatches,
+    await queueStaffInvitationEmailInTx({
+      c,
+      membershipId,
+      toEmail: row.email,
+      inviteeName,
+      role: "staff_approver",
+    }),
+  );
+  return {
+    outcome: "converted",
+    membershipId,
+    inviteeName,
+    inviteeEmail: row.email,
+    membership,
+    dispatches,
+  };
 }

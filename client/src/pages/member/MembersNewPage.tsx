@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import heroImg from "../../assets/dashboard/hero.png";
+import { useSession } from "../../hooks/useSession";
 
 const REQUIRED_MSG = "This field is required";
 const SUCCESS_MSG = "Success! Your new user has been submitted for approval.";
@@ -19,8 +20,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type Overview = { org: { name: string } };
 
 export function MembersNewPage() {
+  const { session } = useSession();
   const overviewQuery = useQuery<Overview>({ queryKey: ["/api/dashboard/overview"] });
   const orgName = overviewQuery.data?.org.name ?? "";
+  const activeMembership = session?.memberships.find((m) => m.orgId === session.activeOrgId);
+  const isPlatformOwner = activeMembership?.orgKind === "platform_owner";
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -89,6 +93,19 @@ export function MembersNewPage() {
         <Link href="/dashboard" className="mp5-back">
           &lt; Back
         </Link>
+        {isPlatformOwner ? (
+          <p className="mp5-failure" role="alert">
+            The Alliance does not use member invitations.{" "}
+            {session?.staffRole === "staff_admin" ? (
+              <>
+                To add staff, go to <Link href="/admin/roles">Admin → Roles → Invite new staff member</Link>.
+              </>
+            ) : (
+              "Contact a staff admin to send a staff invitation."
+            )}
+          </p>
+        ) : (
+          <>
         <p className="mp6-copy">
           Please fill out the form below to add a new user to your organization&apos;s dashboard. They will be
           approved in 1-2 business days and receive an email with a link to log in. Once this is complete, they will
@@ -171,6 +188,8 @@ export function MembersNewPage() {
             {submitting ? "Submitting…" : "Submit for Approval"}
           </button>
         </form>
+          </>
+        )}
       </div>
     </div>
   );

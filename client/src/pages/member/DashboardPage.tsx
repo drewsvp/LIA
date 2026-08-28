@@ -52,7 +52,8 @@ const ONLINE_COMMUNITY_LOGIN_URL = "https://www.alliancemembercommunity.org/user
 
 type DashboardTile =
   | { img: string; label: string; to: string }
-  | { img: string; label: string; href: string };
+  | { img: string; label: string; href: string }
+  | { img: string; label: string; notice: true };
 
 function RequestSelector({
   label,
@@ -129,6 +130,8 @@ export function DashboardPage() {
   // Org name resolves from the session even if the overview query fails.
   const sessionOrgName =
     session?.memberships.find((m) => m.orgId === session.activeOrgId)?.orgName ?? "";
+  const activeMembership = session?.memberships.find((m) => m.orgId === session.activeOrgId);
+  const isPlatformOwner = activeMembership?.orgKind === "platform_owner";
   const orgName = overview?.org.name ?? sessionOrgName;
   const logoUrl = overview?.org.logoUrl ?? null;
 
@@ -137,7 +140,11 @@ export function DashboardPage() {
     { img: tileVolunteer, label: "New Volunteer Request", to: "/dashboard/volunteer/new" },
     { img: tileDonors, label: "View Donors/Volunteers", to: "/dashboard/supporters" },
     { img: tileOrg, label: "Edit My Organization", to: "/dashboard/organization" },
-    { img: tileUsers, label: "Add Another User", to: "/dashboard/members/new" },
+    isPlatformOwner
+      ? session?.staffRole === "staff_admin"
+        ? { img: tileUsers, label: "Invite staff member (Admin → Roles)", to: "/admin/roles" }
+        : { img: tileUsers, label: "Contact a staff admin to invite staff", notice: true as const }
+      : { img: tileUsers, label: "Add Another User", to: "/dashboard/members/new" },
     {
       img: tileCommunity,
       label: "Online Community Login",
@@ -184,10 +191,12 @@ export function DashboardPage() {
                 >
                   {tile.label}
                 </a>
-              ) : (
+              ) : "to" in tile && typeof tile.to === "string" ? (
                 <button type="button" className="mp4-tile-btn" onClick={() => navigate(tile.to)}>
                   {tile.label}
                 </button>
+              ) : (
+                <p className="mp4-tile-link">{tile.label}</p>
               )}
             </div>
           ))}

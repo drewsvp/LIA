@@ -41,7 +41,10 @@ const ROLE_NAMES: Record<Row["role"], string> = {
 
 /** The roles a row may legally move to, by its org kind. */
 function legalRoles(row: Row): Row["role"][] {
-  return row.orgKind === "platform_owner" ? ["staff_admin", "staff_approver"] : ["owner", "member"];
+  if (row.orgKind !== "platform_owner") return ["owner", "member"];
+  if (row.status === "pending" && row.role === "member") return ["member", "staff_approver"];
+  const staffRoles: Row["role"][] = ["staff_admin", "staff_approver"];
+  return staffRoles.includes(row.role) ? staffRoles : [row.role, ...staffRoles];
 }
 
 type InviteFields = {
@@ -307,6 +310,11 @@ export function RolesPage() {
           pending.row.userId === currentUserId &&
           pending.row.role === "staff_admin" &&
           pending.toRole !== "staff_admin";
+        const isAllianceInviteConversion =
+          pending.row.orgKind === "platform_owner" &&
+          pending.row.status === "pending" &&
+          pending.row.role === "member" &&
+          pending.toRole === "staff_approver";
         return (
           <div className="adm-confirm">
             {isSelfDemotion && (
@@ -315,13 +323,21 @@ export function RolesPage() {
                 session is resolved and will not be able to undo this yourself.
               </p>
             )}
-            <p>
-              Change {`${pending.row.firstName} ${pending.row.lastName}`.trim()} at {pending.row.orgName} from{" "}
-              {ROLE_NAMES[pending.row.role]} to {ROLE_NAMES[pending.toRole]}? The change applies the next time their
-              session is resolved.
-            </p>
+            {isAllianceInviteConversion ? (
+              <p>
+                Convert {`${pending.row.firstName} ${pending.row.lastName}`.trim()}&apos;s pending member invitation
+                at {pending.row.orgName} to Staff approver? This activates the existing account immediately, records
+                your approval, and sends the normal staff sign-in email. No duplicate account will be created.
+              </p>
+            ) : (
+              <p>
+                Change {`${pending.row.firstName} ${pending.row.lastName}`.trim()} at {pending.row.orgName} from{" "}
+                {ROLE_NAMES[pending.row.role]} to {ROLE_NAMES[pending.toRole]}? The change applies the next time their
+                session is resolved.
+              </p>
+            )}
             <button className="adm-btn adm-btn-primary" disabled={busy || isSelfDemotion} onClick={() => void confirmChange()}>
-              Change role
+              {isAllianceInviteConversion ? "Convert to Staff approver" : "Change role"}
             </button>
             <button className="adm-btn" disabled={busy} onClick={() => setPending(null)}>
               Cancel

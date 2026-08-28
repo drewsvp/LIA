@@ -287,6 +287,7 @@ export type RoleAdminRow = OrgMembership & {
   orgName: string;
   orgKind: "member_org" | "platform_owner";
   orgStatus: "pending" | "approved" | "disabled";
+  userStatus: "invited" | "active" | "disabled";
 };
 
 /**
@@ -299,7 +300,8 @@ export async function listForRoleAdmin(ctx: DbContext): Promise<RoleAdminRow[]> 
     q<RoleAdminRow>(
       c,
       `select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email,
-              o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus"
+              o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus",
+              u.status as "userStatus"
          from org_memberships m
          join organizations o on o.id = m.org_id
          join users u on u.id = m.user_id
@@ -314,7 +316,8 @@ export async function getRoleAdminRowInTx(c: PoolClient, membershipId: string): 
   const rows = await q<RoleAdminRow>(
     c,
     `select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email,
-            o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus"
+            o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus",
+            u.status as "userStatus"
        from org_memberships m
        join organizations o on o.id = m.org_id
        join users u on u.id = m.user_id
@@ -374,6 +377,53 @@ export async function changeRoleInTx(
     toStatus: `role:${toRole}`,
     actorUserId,
     note: "Role changed via ADMIN-09",
+  });
+  return membership;
+}
+
+/**
+ * The one exceptional ADMIN-09 recovery: a pending regular-member row at the
+ * platform owner becomes an active staff approver. The service validates the
+ * joined org/person shape; this function locks again and repeats the state
+ * guard immediately before the write so callers cannot race a transition.
+ */
+export async function convertPendingAllianceMemberInTx(
+  c: PoolClient,
+  membershipId: string,
+  approvedByUserId: string,
+): Promise<OrgMembership> {
+  const rows = await q<{ role: MembershipRole; status: string; orgKind: string }>(
+    c,
+    `select m.role, m.status, o.kind as "orgKind"
+       from org_memberships m
+       join organizations o on o.id = m.org_id
+      where m.id = $1
+      for update of m`,
+    [membershipId],
+  );
+  const current = rows[0];
+  if (!current || current.orgKind !== "platform_owner" || current.role !== "member" || current.status !== "pending") {
+    throw new Error("memberships.convertPendingAllianceMember: membership is no longer convertible");
+  }
+  const updated = await q<OrgMembership>(
+    c,
+    `update org_memberships
+        set role = 'staff_approver', status = 'active', approved_at = now(), approved_by = $2
+      where id = $1 and role = 'member' and status = 'pending'
+      returning id, org_id as "orgId", user_id as "userId", role, status,
+                invited_by as "invitedBy", approved_at as "approvedAt", approved_by as "approvedBy",
+                created_at as "createdAt", updated_at as "updatedAt"`,
+    [membershipId, approvedByUserId],
+  );
+  const membership = updated[0];
+  if (!membership) throw new Error("memberships.convertPendingAllianceMember: update failed");
+  await insertInTx(c, {
+    entityType: "org_membership",
+    entityId: membershipId,
+    fromStatus: "pending",
+    toStatus: "active",
+    actorUserId: approvedByUserId,
+    note: "Pending Alliance member invitation converted to Staff approver via ADMIN-09",
   });
   return membership;
 }

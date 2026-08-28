@@ -29,6 +29,14 @@ export class DuplicateMembershipError extends Error {
   }
 }
 
+/** The platform owner uses staff invitations, not the member approval queue. */
+export class PlatformOwnerMemberInviteError extends Error {
+  constructor() {
+    super("The Alliance uses staff invitations. Go to Admin → Roles → Invite new staff member.");
+    this.name = "PlatformOwnerMemberInviteError";
+  }
+}
+
 export type SubmitMemberInviteInput = {
   orgId: string;
   actorUserId: string;
@@ -52,6 +60,7 @@ export async function submitMemberInvite(input: SubmitMemberInviteInput): Promis
   ]);
   if (org === null) throw new Error(`member-invite: organization not found: ${input.orgId}`);
   if (submitter === null) throw new Error(`member-invite: no person row for submitter ${input.actorEmail}`);
+  if (org.kind === "platform_owner") throw new PlatformOwnerMemberInviteError();
 
   return withDbContext(SYSTEM, async (c) => {
     // One identifier resolves the person (§1): lower(email). An existing row

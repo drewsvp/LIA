@@ -15,7 +15,11 @@ import { parseProductUrl } from "../../shared/item-product-url";
 import { requireOrganization, orgContext, sendNotFound } from "../auth/guards";
 import { storeImage } from "../storage/object-storage";
 import { updateOrganizationSettings } from "../services/org-settings";
-import { submitMemberInvite, DuplicateMembershipError } from "../services/member-invite";
+import {
+  submitMemberInvite,
+  DuplicateMembershipError,
+  PlatformOwnerMemberInviteError,
+} from "../services/member-invite";
 import { submitItemRequest, NoItemsError } from "../services/item-submit";
 import { sourceNeedImageInBackground } from "../services/need-image";
 import { saveRequestEdits, IllegalStatusMoveError } from "../services/item-request-edit";
@@ -1537,10 +1541,16 @@ export function registerMemberRoutes(app: Express): void {
         res.json({ ok: true });
       } catch (err) {
         if (
+          err instanceof PlatformOwnerMemberInviteError ||
           err instanceof DuplicateMembershipError ||
           isUniqueViolation(err, "org_memberships_org_id_user_id_key")
         ) {
-          res.status(409).json({ message: "This person is already a member of your organization." });
+          res.status(409).json({
+            message:
+              err instanceof PlatformOwnerMemberInviteError
+                ? err.message
+                : "This person is already a member of your organization.",
+          });
           return;
         }
         throw err;

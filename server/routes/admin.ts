@@ -96,6 +96,8 @@ import {
   DuplicateStaffMembershipError,
   SelfInviteError,
   DisabledUserError,
+  convertAllianceInviteToStaffApproverInTx,
+  AllianceInviteConversionError,
 } from "../services/staff-invite";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2451,6 +2453,19 @@ export function registerAdminRoutes(app: Express): void {
       const result = await withDbContext({ kind: "staff", userId }, async (c) => {
         const row = await dal.memberships.getRoleAdminRowInTx(c, id);
         if (!row) return { kind: "not_found" as const };
+        // Regular member/owner roles are never valid at the platform owner.
+        // The sole repair is the explicit pending-member → active approver
+        // conversion; every other crafted target is refused.
+        if (
+          row.orgKind === "platform_owner" &&
+          (row.role === "member" || row.role === "owner")
+        ) {
+          if (row.role === "member" && row.status === "pending" && newRole === "staff_approver") {
+            const conversion = await convertAllianceInviteToStaffApproverInTx(c, id, userId);
+            return { kind: "converted" as const, row, conversion };
+          }
+          return { kind: "not_convertible" as const };
+        }
         if (row.role === newRole) return { kind: "noop" as const, row };
         const isStaffRole = newRole === "staff_admin" || newRole === "staff_approver";
         if (isStaffRole && row.orgKind !== "platform_owner") {
@@ -2486,6 +2501,11 @@ export function registerAdminRoutes(app: Express): void {
         case "wrong_org":
           res.status(409).json({ message: result.message });
           return;
+        case "not_convertible":
+          res.status(409).json({
+            message: "Only a pending Member invitation at The Alliance can be converted to Staff approver. Nothing was changed.",
+          });
+          return;
         case "self_demotion":
           res.status(409).json({
             message: "You cannot demote your own staff admin role. Nothing was changed.",
@@ -2504,8 +2524,26 @@ export function registerAdminRoutes(app: Express): void {
           });
           return;
         }
+        case "converted": {
+          const outcomes = await dispatchQueuedEmails(result.conversion.dispatches);
+          const sent = outcomes.some((outcome) => outcome.outcome === "sent");
+          const name = result.conversion.inviteeName;
+          const base = `${name} is now an active Staff approver at ${result.row.orgName}.`;
+          const message =
+            result.conversion.dispatches.length === 0
+              ? `${base} The staff invitation email is disabled — check the Email log.`
+              : sent
+                ? `${base} A staff sign-in link has been sent to ${result.conversion.inviteeEmail}.`
+                : `${base} The staff invitation email to ${result.conversion.inviteeEmail} failed to send — it is logged in the Email log and can be resent there.`;
+          res.json({ membership: result.conversion.membership, message });
+          return;
+        }
       }
     } catch (err) {
+      if (err instanceof AllianceInviteConversionError) {
+        res.status(409).json({ message: err.message });
+        return;
+      }
       console.error(`[admin] role change failed for membership ${id}:`, err);
       res.status(500).json({ message: SAVE_FAILURE });
     }
