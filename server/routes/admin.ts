@@ -45,7 +45,7 @@ function slugify(name: string): string {
 }
 import * as dal from "../dal";
 import { withDbContext, type DbContext } from "../db/client";
-import type { DeadlineType, MembershipRole } from "../../shared/types";
+import type { DeadlineType, MembershipRole, MembershipStatus } from "../../shared/types";
 import { dispatchQueuedEmails, headerImageDataUri, unresolvedVariables, leftoverPlaceholders, type PendingDispatch } from "../email/send";
 import { storeImage, deleteImage } from "../storage/object-storage";
 import { sourceNeedImage, NeedImageError } from "../services/need-image";
@@ -82,6 +82,7 @@ import {
 } from "../services/staff-request-edit";
 import {
   approveMembership,
+  changeMembershipStatus,
   rejectMembership,
   reinstateMembership,
   MembershipNotFoundError,
@@ -90,6 +91,11 @@ import {
   MembershipAlreadyPendingError,
   MembershipStateError,
   MemberOrgNotApprovedError,
+  MembershipStatusTransitionError,
+  OwnerMembershipActivationError,
+  AllianceInviteStatusError,
+  MembershipSelfLockoutError,
+  LastActiveStaffAdminError,
 } from "../services/member-approval";
 import {
   inviteStaff,
@@ -110,6 +116,7 @@ const SAVE_FAILURE = "That did not save. Nothing was changed.";
 
 /** ADMIN-09: the full membership-role enum and its display names. */
 const ROLE_VALUES: ReadonlySet<string> = new Set(["owner", "member", "staff_admin", "staff_approver"]);
+const MEMBERSHIP_STATUS_VALUES: ReadonlySet<string> = new Set(["pending", "active", "removed"]);
 const ROLE_LABELS: Record<MembershipRole, string> = {
   owner: "an owner",
   member: "a member",
@@ -2433,22 +2440,97 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  // ---- Change one membership's role. Staff roles live only in the
-  // platform_owner org, owner/member only in member orgs, and the last
-  // active staff_admin can never be demoted — all checked under the row lock.
+  // ---- Change one membership's role or lifecycle status. Staff roles live
+  // only in the platform_owner org, owner/member only in member orgs, and the
+  // last active staff_admin can never be demoted or removed. Every protection
+  // is checked under the membership row lock.
   app.post("/api/admin/roles/:id", requireStaffAdmin, async (req: Request, res: Response) => {
     const id = req.params.id ?? "";
     if (!UUID_RE.test(id)) {
       sendNotFound(res);
       return;
     }
+    const userId = staffContext(req).userId;
+    const requestedStatus = typeof req.body?.status === "string" ? req.body.status : null;
+    if (requestedStatus !== null) {
+      if (!MEMBERSHIP_STATUS_VALUES.has(requestedStatus)) {
+        res.status(400).json({ message: "Unknown membership status." });
+        return;
+      }
+      if (typeof req.body?.role === "string") {
+        res.status(400).json({ message: "Change either role or status, not both." });
+        return;
+      }
+      const status = requestedStatus as MembershipStatus;
+      try {
+        const result = await changeMembershipStatus({
+          membershipId: id,
+          staffUserId: userId,
+          status,
+        });
+        if (result.noop) {
+          res.json({
+            membership: result.membership,
+            message: `${result.memberName} is already ${status}. Nothing changed.`,
+            noop: true,
+          });
+          return;
+        }
+
+        let message =
+          status === "pending"
+            ? `${result.memberName} returned to the pending queue.`
+            : status === "removed"
+              ? `${result.memberName}'s membership was removed.`
+              : `${result.memberName}'s membership is now active.`;
+        if (result.email?.outcome === "queued") {
+          const outcomes = await dispatchQueuedEmails([result.email.dispatch]);
+          message =
+            outcomes[0]?.outcome === "sent"
+              ? `${message} Login information was sent to ${result.memberEmail}.`
+              : `${message} The login email to ${result.memberEmail} failed to send — it is logged in the Email log and can be resent there.`;
+        } else if (result.email?.outcome === "skipped_disabled") {
+          message = `${message} The login email is disabled under Automated emails, so it was skipped (logged in the Email log).`;
+        } else if (result.email?.outcome === "already_sent") {
+          message = `${message} Login information had already been sent, so no duplicate email was created.`;
+        } else if (result.email?.outcome === "blocked") {
+          message = `${message} The login email to ${result.memberEmail} failed to send — it is logged in the Email log and can be resent there.`;
+        }
+        res.json({ membership: result.membership, message });
+        return;
+      } catch (err) {
+        if (err instanceof MembershipNotFoundError) {
+          sendNotFound(res);
+          return;
+        }
+        if (
+          err instanceof MembershipStatusTransitionError ||
+          err instanceof OwnerMembershipActivationError ||
+          err instanceof AllianceInviteStatusError ||
+          err instanceof MembershipSelfLockoutError ||
+          err instanceof LastActiveStaffAdminError
+        ) {
+          res.status(409).json({ message: err.message });
+          return;
+        }
+        if (err instanceof MemberOrgNotApprovedError) {
+          res
+            .status(409)
+            .json({ message: `${err.orgName} is not approved yet, so this membership cannot be activated.` });
+          return;
+        }
+        console.error(`[admin] membership status change failed for ${id}:`, err);
+        res.status(500).json({ message: SAVE_FAILURE });
+        return;
+      }
+    }
+
     const role = typeof req.body?.role === "string" ? req.body.role : "";
     if (!ROLE_VALUES.has(role)) {
       res.status(400).json({ message: "Unknown role." });
       return;
     }
     const newRole = role as MembershipRole;
-    const userId = staffContext(req).userId;
     try {
       const result = await withDbContext({ kind: "staff", userId }, async (c) => {
         const row = await dal.memberships.getRoleAdminRowInTx(c, id);

@@ -28,7 +28,7 @@ import type { AdminMemberDetail } from "../dal/memberships";
 import type { DbContext } from "../db/client";
 import { withDbContext } from "../db/client";
 import { absoluteUrl, queueProductEmailInTx, EmailConfigError, type PendingDispatch } from "../email/send";
-import type { OrgMembership } from "../../shared/types";
+import type { MembershipStatus, OrgMembership } from "../../shared/types";
 
 export class MembershipNotFoundError extends Error {
   constructor(membershipId: string) {
@@ -77,9 +77,56 @@ export class MemberOrgNotApprovedError extends Error {
   }
 }
 
+/** The requested lifecycle edge is not valid for this membership. */
+export class MembershipStatusTransitionError extends Error {
+  constructor(
+    public readonly currentStatus: MembershipStatus,
+    public readonly requestedStatus: MembershipStatus,
+    message = `This membership cannot change from ${currentStatus} to ${requestedStatus}. Nothing was changed.`,
+  ) {
+    super(message);
+    this.name = "MembershipStatusTransitionError";
+  }
+}
+
+/** Owner activation is part of organization approval, not member approval. */
+export class OwnerMembershipActivationError extends Error {
+  constructor() {
+    super("Owner memberships are activated with organization approval. Nothing was changed.");
+    this.name = "OwnerMembershipActivationError";
+  }
+}
+
+/** The malformed Alliance row has one deliberate recovery path: role conversion. */
+export class AllianceInviteStatusError extends Error {
+  constructor() {
+    super(
+      "Only a pending Member invitation at The Alliance can be activated here by changing its role to Staff approver. Nothing was changed.",
+    );
+    this.name = "AllianceInviteStatusError";
+  }
+}
+
+/** Removing this membership would remove the actor's own staff access. */
+export class MembershipSelfLockoutError extends Error {
+  constructor() {
+    super("You cannot remove your own staff membership. Nothing was changed.");
+    this.name = "MembershipSelfLockoutError";
+  }
+}
+
+/** A platform-owner staff admin is the last admin who can manage the system. */
+export class LastActiveStaffAdminError extends Error {
+  constructor() {
+    super("This is the last active staff admin, so this membership cannot be removed. Nothing was changed.");
+    this.name = "LastActiveStaffAdminError";
+  }
+}
+
 export type MemberEmailOutcome =
   | { outcome: "queued"; toEmail: string; dispatch: PendingDispatch }
   | { outcome: "skipped_disabled"; toEmail: string }
+  | { outcome: "already_sent"; toEmail: string }
   | { outcome: "blocked"; toEmail: string; reason: string };
 
 export type ApproveMembershipResult = {
@@ -89,7 +136,7 @@ export type ApproveMembershipResult = {
   email: MemberEmailOutcome;
 };
 
-function memberName(detail: AdminMemberDetail): string {
+function memberName(detail: Pick<AdminMemberDetail, "firstName" | "lastName">): string {
   return `${detail.firstName} ${detail.lastName}`.trim();
 }
 
@@ -158,6 +205,173 @@ export async function approveMembership(input: {
       return { membership, memberName: name, memberEmail: detail.email, email };
     });
   } catch (err) {
+    throw mapDalError(err, input.membershipId);
+  }
+}
+
+/**
+ * Change a membership status from ADMIN-09. All checks and the audit event
+ * happen under the membership row lock. Member approval remains the normal
+ * path: activation is blocked for an unapproved organization and queues the
+ * same welcome email as ADMIN-03, with delivery dispatched only after commit.
+ */
+export async function changeMembershipStatus(input: {
+  membershipId: string;
+  staffUserId: string;
+  status: MembershipStatus;
+}): Promise<{
+  membership: OrgMembership;
+  memberName: string;
+  memberEmail: string;
+  email: MemberEmailOutcome | null;
+  noop: boolean;
+  fromStatus: MembershipStatus;
+}> {
+  const staff: DbContext = { kind: "staff", userId: input.staffUserId };
+
+  try {
+    return await withDbContext(staff, async (c: PoolClient) => {
+      const row = await dal.memberships.getRoleAdminRowInTx(c, input.membershipId);
+      if (!row) throw new MembershipNotFoundError(input.membershipId);
+
+      const fromStatus = row.status;
+      if (fromStatus === input.status) {
+        return {
+          membership: row,
+          memberName: memberName(row),
+          memberEmail: row.email,
+          email: null,
+          noop: true,
+          fromStatus,
+        };
+      }
+
+      const validEdge =
+        (fromStatus === "pending" && (input.status === "active" || input.status === "removed")) ||
+        (fromStatus === "active" && input.status === "removed") ||
+        (fromStatus === "removed" && input.status === "pending");
+      if (!validEdge) {
+        throw new MembershipStatusTransitionError(fromStatus, input.status);
+      }
+
+      if (input.status === "active") {
+        if (row.orgKind === "platform_owner") {
+          if (row.role === "member") throw new AllianceInviteStatusError();
+          // Staff invitations are pre-approved and are activated through the
+          // staff-invite flow, which also sends the staff-specific email.
+          throw new MembershipStatusTransitionError(
+            fromStatus,
+            input.status,
+            "Pending staff memberships must be activated through a staff invitation. Nothing was changed.",
+          );
+        }
+        if (row.role === "owner") throw new OwnerMembershipActivationError();
+        if (row.orgStatus !== "approved") throw new MemberOrgNotApprovedError(row.orgName);
+      }
+
+      if (
+        input.status === "removed" &&
+        fromStatus === "active" &&
+        row.orgKind === "platform_owner" &&
+        (row.role === "staff_admin" || row.role === "staff_approver")
+      ) {
+        if (row.userId === input.staffUserId) throw new MembershipSelfLockoutError();
+        if (
+          row.role === "staff_admin" &&
+          (await dal.memberships.countActiveStaffAdminsLockedInTx(c)) <= 1
+        ) {
+          throw new LastActiveStaffAdminError();
+        }
+      }
+
+      // Reinstatement is deliberately the member queue's removed → pending
+      // path. A removed staff row must use the normal staff re-invite flow.
+      if (input.status === "pending" && (row.orgKind !== "member_org" || row.role === "owner")) {
+        throw new MembershipStatusTransitionError(
+          fromStatus,
+          input.status,
+          "Only a removed member-organization Member membership can be reinstated here. Nothing was changed.",
+        );
+      }
+
+      const membership = await dal.memberships.changeStatusInTx(
+        c,
+        input.membershipId,
+        fromStatus,
+        input.status,
+        input.staffUserId,
+        input.status === "active",
+      );
+
+      let email: MemberEmailOutcome | null = null;
+      if (fromStatus === "pending" && input.status === "active") {
+        const name = memberName(row);
+        const vars = {
+          memberName: name,
+          organizationName: row.orgName,
+          loginUrl: absoluteUrl("/login"),
+          dashboardUrl: absoluteUrl("/dashboard"),
+        };
+        try {
+          const alreadySent = await dal.emailLog.existsForRecipientInTx(c, {
+            templateKey: "org_member_approved",
+            entityType: "org_membership",
+            entityId: membership.id,
+            toEmail: row.email,
+          });
+          if (alreadySent) {
+            email = { outcome: "already_sent", toEmail: row.email };
+          } else {
+            const dispatch = await queueProductEmailInTx(c, {
+              key: "org_member_approved",
+              entityId: membership.id,
+              toEmail: row.email,
+              toPersonId: row.personId,
+              vars,
+            });
+            email = dispatch
+              ? { outcome: "queued", toEmail: row.email, dispatch }
+              : { outcome: "skipped_disabled", toEmail: row.email };
+          }
+        } catch (err) {
+          if (!(err instanceof EmailConfigError)) throw err;
+          const emailRow = await dal.emailLog.insertQueuedInTx(c, {
+            templateKey: "org_member_approved",
+            toEmail: row.email,
+            toPersonId: row.personId,
+            entityType: "org_membership",
+            entityId: membership.id,
+            payload: { vars },
+          });
+          await dal.emailLog.markFailedInTx(c, emailRow.id, err.message, "render");
+          console.error(
+            `[admin] membership ${membership.id} activated but org_member_approved blocked: ${err.message}`,
+          );
+          email = { outcome: "blocked", toEmail: row.email, reason: err.message };
+        }
+      }
+
+      return {
+        membership,
+        memberName: memberName(row),
+        memberEmail: row.email,
+        email,
+        noop: false,
+        fromStatus,
+      };
+    });
+  } catch (err) {
+    if (
+      err instanceof MembershipNotFoundError ||
+      err instanceof MembershipStatusTransitionError ||
+      err instanceof OwnerMembershipActivationError ||
+      err instanceof AllianceInviteStatusError ||
+      err instanceof MembershipSelfLockoutError ||
+      err instanceof LastActiveStaffAdminError ||
+      err instanceof MemberOrgNotApprovedError
+    ) {
+      throw err;
+    }
     throw mapDalError(err, input.membershipId);
   }
 }

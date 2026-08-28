@@ -9,8 +9,14 @@
  * Exit 0 = pass. Restores original roles before exiting.
  */
 import { pool } from "../server/db/client";
+import {
+  changeMembershipStatus,
+  LastActiveStaffAdminError,
+} from "../server/services/member-approval";
 
-const BASE = "http://localhost:5000";
+const BASE = process.env.REPLIT_DEV_DOMAIN
+  ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+  : "http://127.0.0.1:5000";
 
 function cookieHeader(res: Response): string {
   const h = res.headers as unknown as { getSetCookie?: () => string[]; get: (n: string) => string | null };
@@ -62,14 +68,65 @@ async function main(): Promise<void> {
       console.error(`FAIL: unexpected status pair ${statuses.join("/")}`);
       process.exitCode = 1;
     }
+
+    // Restore roles before exercising the independent status-removal guard.
+    for (const membership of [a!, b!]) {
+      await pool.query(`update org_memberships set role = 'staff_admin' where id = $1`, [membership.id]);
+    }
+    const approver = await pool.query<{ id: string }>(
+      `select m.user_id as id
+         from org_memberships m join organizations o on o.id = m.org_id
+        where o.kind = 'platform_owner' and m.role = 'staff_approver' and m.status = 'active'
+        limit 1`,
+    );
+    const actorUserId = approver.rows[0]?.id;
+    if (!actorUserId) throw new Error("expected an active staff approver to act in the service concurrency test");
+
+    const removals = await Promise.allSettled(
+      [a!, b!].map((membership) =>
+        changeMembershipStatus({
+          membershipId: membership.id,
+          staffUserId: actorUserId,
+          status: "removed",
+        }),
+      ),
+    );
+    const fulfilled = removals.filter((result) => result.status === "fulfilled").length;
+    const lastAdminBlocks = removals.filter(
+      (result) => result.status === "rejected" && result.reason instanceof LastActiveStaffAdminError,
+    ).length;
+    const afterRemoval = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from org_memberships m join organizations o on o.id = m.org_id
+        where o.kind = 'platform_owner' and m.role = 'staff_admin' and m.status = 'active'`,
+    );
+    const activeAfterRemoval = Number(afterRemoval.rows[0]?.count ?? 0);
+    console.log(
+      `status removals: ${fulfilled} succeeded, ${lastAdminBlocks} blocked; active staff admins remaining: ${activeAfterRemoval}`,
+    );
+    if (fulfilled !== 1 || lastAdminBlocks !== 1 || activeAfterRemoval !== 1) {
+      console.error("FAIL: concurrent status removals did not preserve exactly one active staff admin");
+      process.exitCode = 1;
+    } else {
+      console.log("PASS: concurrent status removals preserved one active staff admin");
+    }
   } finally {
-    // Restore both to staff_admin.
+    // Restore both active staff-admin memberships.
     for (const m of [a!, b!]) {
-      await pool.query(`update org_memberships set role = 'staff_admin' where id = $1`, [m.id]);
+      await pool.query(
+        `update org_memberships set role = 'staff_admin', status = 'active' where id = $1`,
+        [m.id],
+      );
     }
     await pool.query(
-      `delete from approval_events where entity_type = 'org_membership' and note = 'Role changed via ADMIN-09'
-        and entity_id in ($1, $2) and created_at > now() - interval '2 minutes'`,
+      `delete from approval_events
+        where entity_type = 'org_membership'
+          and entity_id in ($1, $2)
+          and created_at > now() - interval '2 minutes'
+          and (
+            note = 'Role changed via ADMIN-09'
+            or (from_status = 'active' and to_status = 'removed')
+          )`,
       [a!.id, b!.id],
     );
     await pool.end();

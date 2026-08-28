@@ -7,6 +7,7 @@ import type { PoolClient } from "pg";
 import { q, withDbContext, type DbContext } from "../db/client";
 import type {
   MembershipRole,
+  MembershipStatus,
   MembershipWithOrganization,
   MembershipWithPerson,
   OrgMembership,
@@ -281,10 +282,12 @@ export async function removeById(ctx: DbContext, membershipId: string): Promise<
 // ---------------------------------------------------------------------------
 
 export type RoleAdminRow = OrgMembership & {
+  personId: string;
   firstName: string;
   lastName: string;
   email: string;
   orgName: string;
+  type: "Staff" | "Member";
   orgKind: "member_org" | "platform_owner";
   orgStatus: "pending" | "approved" | "disabled";
   userStatus: "invited" | "active" | "disabled";
@@ -299,8 +302,9 @@ export async function listForRoleAdmin(ctx: DbContext): Promise<RoleAdminRow[]> 
   return withDbContext(ctx, (c) =>
     q<RoleAdminRow>(
       c,
-      `select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email,
+       `select ${COLS}, p.id as "personId", p.first_name as "firstName", p.last_name as "lastName", p.email,
               o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus",
+               case when o.kind = 'platform_owner' then 'Staff' else 'Member' end as type,
               u.status as "userStatus"
          from org_memberships m
          join organizations o on o.id = m.org_id
@@ -311,12 +315,30 @@ export async function listForRoleAdmin(ctx: DbContext): Promise<RoleAdminRow[]> 
   );
 }
 
-/** One membership joined to org kind — what the role-change route validates against. */
+/**
+ * One membership joined to org kind, locked in the project's organization →
+ * membership order. Locking the organization first keeps status validation
+ * current and avoids deadlocks with organization approval/disable.
+ */
 export async function getRoleAdminRowInTx(c: PoolClient, membershipId: string): Promise<RoleAdminRow | null> {
+  const membershipOrg = await q<{ orgId: string }>(
+    c,
+    `select org_id as "orgId" from org_memberships where id = $1`,
+    [membershipId],
+  );
+  const orgId = membershipOrg[0]?.orgId;
+  if (!orgId) return null;
+  const lockedOrg = await q<{ id: string }>(
+    c,
+    `select id from organizations where id = $1 for update`,
+    [orgId],
+  );
+  if (!lockedOrg[0]) return null;
   const rows = await q<RoleAdminRow>(
     c,
-    `select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email,
+    `select ${COLS}, p.id as "personId", p.first_name as "firstName", p.last_name as "lastName", p.email,
             o.name as "orgName", o.kind as "orgKind", o.status as "orgStatus",
+            case when o.kind = 'platform_owner' then 'Staff' else 'Member' end as type,
             u.status as "userStatus"
        from org_memberships m
        join organizations o on o.id = m.org_id
@@ -377,6 +399,48 @@ export async function changeRoleInTx(
     toStatus: `role:${toRole}`,
     actorUserId,
     note: "Role changed via ADMIN-09",
+  });
+  return membership;
+}
+
+/**
+ * Change a membership's lifecycle status. The caller must validate the
+ * transition and any organization/role-specific rules while the membership
+ * row is locked. Approval stamps are set only when a pending membership is
+ * activated; all other existing approval history is intentionally preserved.
+ */
+export async function changeStatusInTx(
+  c: PoolClient,
+  membershipId: string,
+  fromStatus: MembershipStatus,
+  toStatus: MembershipStatus,
+  actorUserId: string,
+  approve = false,
+): Promise<OrgMembership> {
+  const rows = await q<OrgMembership>(
+    c,
+    `update org_memberships
+        set status = $2,
+            approved_at = case when $3::boolean then now() else approved_at end,
+            approved_by = case when $3::boolean then $4 else approved_by end
+      where id = $1 and status = $5
+      returning id, org_id as "orgId", user_id as "userId", role, status,
+                invited_by as "invitedBy", approved_at as "approvedAt", approved_by as "approvedBy",
+                created_at as "createdAt", updated_at as "updatedAt"`,
+    [membershipId, toStatus, approve, actorUserId, fromStatus],
+  );
+  const membership = rows[0];
+  if (!membership) {
+    throw new Error(
+      `memberships.changeStatusInTx: membership is no longer ${fromStatus}: ${membershipId}`,
+    );
+  }
+  await insertInTx(c, {
+    entityType: "org_membership",
+    entityId: membershipId,
+    fromStatus,
+    toStatus,
+    actorUserId,
   });
   return membership;
 }

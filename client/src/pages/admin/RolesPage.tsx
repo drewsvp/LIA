@@ -25,6 +25,7 @@ type Row = {
   lastName: string;
   email: string;
   orgName: string;
+  type: "Staff" | "Member";
   orgKind: "member_org" | "platform_owner";
   orgStatus: "pending" | "approved" | "disabled";
 };
@@ -39,6 +40,12 @@ const ROLE_NAMES: Record<Row["role"], string> = {
   staff_approver: "Staff approver",
 };
 
+const STATUS_NAMES: Record<Row["status"], string> = {
+  pending: "Pending",
+  active: "Active",
+  removed: "Removed",
+};
+
 /** The roles a row may legally move to, by its org kind. */
 function legalRoles(row: Row): Row["role"][] {
   if (row.orgKind !== "platform_owner") return ["owner", "member"];
@@ -46,6 +53,26 @@ function legalRoles(row: Row): Row["role"][] {
   const staffRoles: Row["role"][] = ["staff_admin", "staff_approver"];
   return staffRoles.includes(row.role) ? staffRoles : [row.role, ...staffRoles];
 }
+
+/** Lifecycle choices served by ADMIN-09 for this row's current state. */
+function legalStatuses(row: Row): Row["status"][] {
+  const allowed = new Set<Row["status"]>([row.status]);
+  if (row.status === "pending") {
+    allowed.add("removed");
+    if (row.orgKind === "member_org" && row.role === "member" && row.orgStatus === "approved") {
+      allowed.add("active");
+    }
+  } else if (row.status === "active") {
+    allowed.add("removed");
+  } else if (row.orgKind === "member_org" && row.role === "member") {
+    allowed.add("pending");
+  }
+  return (["pending", "active", "removed"] as Row["status"][]).filter((status) => allowed.has(status));
+}
+
+type PendingChange =
+  | { kind: "role"; row: Row; toRole: Row["role"] }
+  | { kind: "status"; row: Row; toStatus: Row["status"] };
 
 type InviteFields = {
   firstName: string;
@@ -60,7 +87,7 @@ export function RolesPage() {
   const queryClient = useQueryClient();
   const { session } = useSession();
   const [search, setSearch] = useState("");
-  const [pending, setPending] = useState<{ row: Row; toRole: Row["role"] } | null>(null);
+  const [pending, setPending] = useState<PendingChange | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
@@ -80,7 +107,14 @@ export function RolesPage() {
     const needle = search.trim().toLowerCase();
     if (needle === "") return rows;
     return rows.filter((r) =>
-      [`${r.firstName} ${r.lastName}`, r.email, r.orgName, ROLE_NAMES[r.role]].some((v) =>
+      [
+        `${r.firstName} ${r.lastName}`,
+        r.email,
+        r.orgName,
+        r.type,
+        ROLE_NAMES[r.role],
+        STATUS_NAMES[r.status],
+      ].some((v) =>
         v.toLowerCase().includes(needle),
       ),
     );
@@ -95,7 +129,9 @@ export function RolesPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: pending.toRole }),
+        body: JSON.stringify(
+          pending.kind === "role" ? { role: pending.toRole } : { status: pending.toStatus },
+        ),
       });
       let message = FAILURE;
       try {
@@ -111,6 +147,12 @@ export function RolesPage() {
     } finally {
       setBusy(false);
       await queryClient.invalidateQueries({ queryKey: ["/api/admin/roles"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/nav-counts"] });
+      await queryClient.invalidateQueries({
+        predicate: (query) =>
+          typeof query.queryKey[0] === "string" &&
+          query.queryKey[0].startsWith("/api/admin/members"),
+      });
     }
   }
 
@@ -250,7 +292,7 @@ export function RolesPage() {
         type="search"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by name, email, organization, or role"
+        placeholder="Search by name, email, organization, type, status, or role"
         aria-label="Search memberships"
       />
 
@@ -269,6 +311,7 @@ export function RolesPage() {
               <th>Name</th>
               <th>Email</th>
               <th>Organization</th>
+               <th>Type</th>
               <th>Status</th>
               <th>Role</th>
             </tr>
@@ -279,16 +322,46 @@ export function RolesPage() {
                 <td>{`${row.firstName} ${row.lastName}`.trim()}</td>
                 <td>{row.email}</td>
                 <td>{row.orgName}</td>
-                <td>{row.status}</td>
+                 <td>{row.type}</td>
+                 <td>
+                   <select
+                     value={
+                       pending?.kind === "status" && pending.row.id === row.id
+                         ? pending.toStatus
+                         : row.status
+                     }
+                     disabled={busy}
+                     aria-label={`Status for ${row.firstName} ${row.lastName} at ${row.orgName}`}
+                     onChange={(e) => {
+                       const toStatus = e.target.value as Row["status"];
+                       setResult(null);
+                       setPending(
+                         toStatus === row.status ? null : { kind: "status", row, toStatus },
+                       );
+                     }}
+                   >
+                     {legalStatuses(row).map((status) => (
+                       <option key={status} value={status}>
+                         {STATUS_NAMES[status]}
+                       </option>
+                     ))}
+                   </select>
+                 </td>
                 <td>
                   <select
-                    value={pending?.row.id === row.id ? pending.toRole : row.role}
+                     value={
+                       pending?.kind === "role" && pending.row.id === row.id
+                         ? pending.toRole
+                         : row.role
+                     }
                     disabled={busy}
                     aria-label={`Role for ${row.firstName} ${row.lastName} at ${row.orgName}`}
                     onChange={(e) => {
                       const toRole = e.target.value as Row["role"];
                       setResult(null);
-                      setPending(toRole === row.role ? null : { row, toRole });
+                       setPending(
+                         toRole === row.role ? null : { kind: "role", row, toRole },
+                       );
                     }}
                   >
                     {legalRoles(row).map((r) => (
@@ -306,21 +379,31 @@ export function RolesPage() {
 
       {pending && (() => {
         const isSelfDemotion =
+           pending.kind === "role" &&
           currentUserId !== undefined &&
           pending.row.userId === currentUserId &&
           pending.row.role === "staff_admin" &&
           pending.toRole !== "staff_admin";
+         const isSelfRemoval =
+           pending.kind === "status" &&
+           currentUserId !== undefined &&
+           pending.row.userId === currentUserId &&
+           pending.row.orgKind === "platform_owner" &&
+           pending.row.status === "active" &&
+           pending.toStatus === "removed";
         const isAllianceInviteConversion =
+           pending.kind === "role" &&
           pending.row.orgKind === "platform_owner" &&
           pending.row.status === "pending" &&
           pending.row.role === "member" &&
           pending.toRole === "staff_approver";
         return (
           <div className="adm-confirm">
-            {isSelfDemotion && (
+             {(isSelfDemotion || isSelfRemoval) && (
               <p className="adm-alert">
-                Warning: you are demoting your own staff admin role. You will lose admin access the next time your
-                session is resolved and will not be able to undo this yourself.
+                 {isSelfRemoval
+                   ? "You cannot remove your own staff membership because that would lock you out of staff access."
+                   : "Warning: you are demoting your own staff admin role. You will lose admin access the next time your session is resolved and will not be able to undo this yourself."}
               </p>
             )}
             {isAllianceInviteConversion ? (
@@ -329,15 +412,34 @@ export function RolesPage() {
                 at {pending.row.orgName} to Staff approver? This activates the existing account immediately, records
                 your approval, and sends the normal staff sign-in email. No duplicate account will be created.
               </p>
-            ) : (
+             ) : pending.kind === "role" ? (
               <p>
                 Change {`${pending.row.firstName} ${pending.row.lastName}`.trim()} at {pending.row.orgName} from{" "}
                 {ROLE_NAMES[pending.row.role]} to {ROLE_NAMES[pending.toRole]}? The change applies the next time their
                 session is resolved.
               </p>
+             ) : (
+               <p>
+                 Change {`${pending.row.firstName} ${pending.row.lastName}`.trim()} at{" "}
+                 {pending.row.orgName} from {STATUS_NAMES[pending.row.status]} to{" "}
+                 {STATUS_NAMES[pending.toStatus]}?
+                 {pending.toStatus === "active"
+                   ? " This approves the membership and sends the normal member login email."
+                   : pending.toStatus === "pending"
+                     ? " This returns the membership to the normal approval queue."
+                     : " They will lose access through this membership."}
+               </p>
             )}
-            <button className="adm-btn adm-btn-primary" disabled={busy || isSelfDemotion} onClick={() => void confirmChange()}>
-              {isAllianceInviteConversion ? "Convert to Staff approver" : "Change role"}
+             <button
+               className="adm-btn adm-btn-primary"
+               disabled={busy || isSelfDemotion || isSelfRemoval}
+               onClick={() => void confirmChange()}
+             >
+               {isAllianceInviteConversion
+                 ? "Convert to Staff approver"
+                 : pending.kind === "role"
+                   ? "Change role"
+                   : "Change status"}
             </button>
             <button className="adm-btn" disabled={busy} onClick={() => setPending(null)}>
               Cancel
