@@ -2755,6 +2755,70 @@ a.site-nav-btn {
   animation: adm-pulse 1.2s ease-in-out infinite alternate;
 }
 
+.adm-report-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin: 18px 0 10px;
+}
+
+.adm-report-category-filter {
+  max-width: 480px;
+  margin-bottom: 12px;
+}
+
+.adm-report-category-filter select {
+  min-width: 320px;
+  min-height: 92px;
+}
+
+.adm-report-category-filter small {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.adm-report-actions,
+.adm-report-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.adm-report-secondary {
+  display: block;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.adm-report-interests {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.adm-inactive-label {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #eeeeee;
+  color: #5f6670;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.adm-report-empty {
+  margin: 20px 0;
+}
+
+.adm-report-table {
+  min-width: 900px !important;
+}
+
 @keyframes adm-pulse {
   from { opacity: 0.55; }
   to { opacity: 1; }

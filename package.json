@@ -14,6 +14,7 @@
     "test:nav-guard": "tsx scripts/test-nav-guard.ts",
     "test:responsive-nav": "tsx scripts/test-responsive-nav.ts",
     "test:volunteer-interests": "tsx scripts/test-volunteer-interests.ts",
+    "test:volunteer-interest-report": "tsx scripts/test-volunteer-interest-report.ts",
     "test:profiles": "tsx scripts/test-profiles.ts",
     "test:volunteer-request-categories": "tsx scripts/test-volunteer-request-categories.ts",
     "test:matching-volunteer-alerts": "tsx scripts/test-matching-volunteer-alerts.ts",

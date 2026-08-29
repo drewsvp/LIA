@@ -1754,6 +1754,117 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  // Read-only audience report. Keep both endpoints behind the same admin-only
+  // boundary as category management: supporter contact data and consent state
+  // must not be visible to staff approvers or ordinary staff routes.
+  app.get("/api/admin/volunteer-interest-report/options", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const categories = await dal.volunteerInterests.listAll(staffCtx(req));
+      res.json({
+        categories,
+        accountStates: ["all", "invited", "active", "disabled"],
+        matchingAlertStates: ["all", "on", "off"],
+        categoryStates: ["all", "active", "inactive"],
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/admin/volunteer-interest-report", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const stringParam = (name: string, defaultValue = ""): string | null => {
+      const value = req.query[name];
+      if (value === undefined) return defaultValue;
+      return typeof value === "string" ? value : null;
+    };
+    const rawSearch = stringParam("search");
+    const rawCategoryState = stringParam("categoryState", "all");
+    const rawAccountState = stringParam("accountState", "active");
+    const rawMatchingAlerts = stringParam("matchingAlerts", "all");
+    const rawPage = stringParam("page", "1");
+    const rawPageSize = stringParam("pageSize", "25");
+    if (
+      rawSearch === null ||
+      rawCategoryState === null ||
+      rawAccountState === null ||
+      rawMatchingAlerts === null ||
+      rawPage === null ||
+      rawPageSize === null
+    ) {
+      res.status(400).json({ message: "Report filters must be single values." });
+      return;
+    }
+    const categoryStateValues = new Set(["all", "active", "inactive"]);
+    const accountStateValues = new Set(["all", "invited", "active", "disabled"]);
+    const matchingAlertValues = new Set(["all", "on", "off"]);
+    const page = Number(rawPage);
+    const pageSize = Number(rawPageSize);
+    if (rawSearch.trim().length > 200) {
+      res.status(400).json({ message: "Search must be 200 characters or fewer." });
+      return;
+    }
+    if (
+      !categoryStateValues.has(rawCategoryState) ||
+      !accountStateValues.has(rawAccountState) ||
+      !matchingAlertValues.has(rawMatchingAlerts) ||
+      !Number.isSafeInteger(page) ||
+      page < 1 ||
+      page > 1_000_000 ||
+      !Number.isSafeInteger(pageSize) ||
+      pageSize < 1 ||
+      pageSize > 100
+    ) {
+      res.status(400).json({ message: "One or more report filters are invalid." });
+      return;
+    }
+
+    const rawCategoryIds = req.query.categoryId ?? req.query.categoryIds;
+    const hasInvalidCategoryValue =
+      rawCategoryIds !== undefined &&
+      (typeof rawCategoryIds !== "string" &&
+        (!Array.isArray(rawCategoryIds) || rawCategoryIds.some((value) => typeof value !== "string")));
+    const categoryValues =
+      rawCategoryIds === undefined
+        ? []
+        : Array.isArray(rawCategoryIds)
+          ? rawCategoryIds.flatMap((value) => (typeof value === "string" ? value.split(",") : []))
+          : typeof rawCategoryIds === "string"
+            ? rawCategoryIds.split(",")
+            : [];
+    const categoryIds = [...new Set(categoryValues.map((value) => value.trim()).filter(Boolean))];
+    if (
+      hasInvalidCategoryValue ||
+      categoryValues.some((value) => value.trim() === "") ||
+      categoryIds.some((id) => !UUID_RE.test(id))
+    ) {
+      res.status(400).json({ message: "Volunteer category filters are invalid." });
+      return;
+    }
+
+    try {
+      const ctx = staffCtx(req);
+      if (categoryIds.length > 0) {
+        const categories = await dal.volunteerInterests.listAll(ctx);
+        if (categoryIds.some((id) => !categories.some((category) => category.id === id))) {
+          res.status(400).json({ message: "One or more volunteer categories no longer exist." });
+          return;
+        }
+      }
+      const report = await dal.volunteerInterests.listInterestReport(ctx, {
+        search: rawSearch,
+        categoryIds,
+        categoryState: rawCategoryState as "all" | "active" | "inactive",
+        accountState: rawAccountState as "all" | "invited" | "active" | "disabled",
+        matchingAlerts: rawMatchingAlerts as "all" | "on" | "off",
+        page,
+        pageSize,
+      });
+      res.json(report);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.post("/api/admin/volunteer-categories", requireStaffAdmin, async (req: Request, res: Response) => {
     const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
     if (name === "") {

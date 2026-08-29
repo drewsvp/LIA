@@ -15,6 +15,40 @@ const CATEGORY_COLS = `id, name, is_active as "isActive"`;
 export type VolunteerInterestOption = VolunteerCategory & { selected: boolean };
 export type VolunteerCategoryWithUsage = VolunteerCategory & { interestCount: number };
 
+export type VolunteerInterestReportCategory = {
+  id: string;
+  name: string;
+  isActive: boolean;
+};
+
+export type VolunteerInterestReportRow = {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  categories: VolunteerInterestReportCategory[];
+  accountState: "invited" | "active" | "disabled";
+  matchingAlertsEnabled: boolean;
+};
+
+export type VolunteerInterestReportFilters = {
+  search?: string;
+  categoryIds?: string[];
+  categoryState?: "all" | "active" | "inactive";
+  accountState?: "all" | "invited" | "active" | "disabled";
+  matchingAlerts?: "all" | "on" | "off";
+  page: number;
+  pageSize: number;
+};
+
+export type VolunteerInterestReport = {
+  rows: VolunteerInterestReportRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
 export class VolunteerCategoryNotFoundError extends Error {
   constructor() {
     super("One or more volunteer categories no longer exist.");
@@ -143,6 +177,112 @@ export async function listAll(ctx: DbContext): Promise<VolunteerCategory[]> {
   return withDbContext(ctx, (c) =>
     q<VolunteerCategory>(c, `select ${CATEGORY_COLS} from volunteer_categories order by lower(name), name`),
   );
+}
+
+/**
+ * Operational supporter report for staff admins. The account is the driving
+ * row, not the interest join: an active supporter with no saved interests is
+ * still useful to staff and must be included. Category details are returned
+ * separately from the alert preference so a missing preference row remains
+ * an explicit "off" rather than disappearing from the report.
+ */
+export async function listInterestReport(
+  ctx: DbContext,
+  filters: VolunteerInterestReportFilters,
+): Promise<VolunteerInterestReport> {
+  const search = filters.search?.trim() ?? "";
+  const categoryIds = filters.categoryIds ?? [];
+  const categoryState = filters.categoryState ?? "all";
+  const accountState = filters.accountState ?? "all";
+  const matchingAlerts = filters.matchingAlerts ?? "all";
+  const categoryStateActive = categoryState === "active";
+  const accountStateFilter = accountState === "all" ? null : accountState;
+  const matchingAlertsFilter = matchingAlerts === "all" ? null : matchingAlerts === "on";
+  const categoryIdsFilter = categoryIds.length > 0 ? categoryIds : null;
+  const categoryStateFilter = categoryState === "all" ? null : categoryStateActive;
+  const offset = (filters.page - 1) * filters.pageSize;
+
+  return withDbContext(ctx, async (c) => {
+    const whereParams = [
+      search,
+      categoryIdsFilter,
+      categoryStateFilter,
+      accountStateFilter,
+      matchingAlertsFilter,
+    ];
+    const where = `
+      u.kind = 'supporter'
+      and (
+        $1 = ''
+        or position(lower($1) in lower(p.first_name)) > 0
+        or position(lower($1) in lower(p.last_name)) > 0
+        or position(lower($1) in lower(concat_ws(' ', p.first_name, p.last_name))) > 0
+        or position(lower($1) in lower(p.email)) > 0
+        or position(lower($1) in lower(coalesce(p.phone, ''))) > 0
+      )
+      and (
+        ($2::uuid[] is null and $3::boolean is null)
+        or exists (
+          select 1
+            from person_volunteer_interests pvi_filter
+            join volunteer_categories vc_filter on vc_filter.id = pvi_filter.category_id
+           where pvi_filter.person_id = u.person_id
+             and ($2::uuid[] is null or pvi_filter.category_id = any($2::uuid[]))
+             and ($3::boolean is null or vc_filter.is_active = $3::boolean)
+        )
+      )
+      and ($4::text is null or u.status = $4::text)
+      and ($5::boolean is null or coalesce(vap.enabled, false) = $5::boolean)
+    `;
+    const countRows = await q<{ count: number }>(
+      c,
+      `select count(*)::int as count
+         from users u
+         join people p on p.id = u.person_id
+         left join volunteer_alert_preferences vap on vap.user_id = u.id
+        where ${where}`,
+      whereParams,
+    );
+    const rows = await q<VolunteerInterestReportRow>(
+      c,
+      `select u.id as "userId",
+              p.first_name as "firstName",
+              p.last_name as "lastName",
+              p.email,
+              p.phone,
+              coalesce(
+                (
+                  select json_agg(
+                    json_build_object(
+                      'id', vc.id,
+                      'name', vc.name,
+                      'isActive', vc.is_active
+                    )
+                    order by lower(vc.name), vc.name
+                  )
+                    from person_volunteer_interests pvi
+                    join volunteer_categories vc on vc.id = pvi.category_id
+                   where pvi.person_id = u.person_id
+                ),
+                '[]'::json
+              ) as categories,
+              u.status as "accountState",
+              coalesce(vap.enabled, false) as "matchingAlertsEnabled"
+         from users u
+         join people p on p.id = u.person_id
+         left join volunteer_alert_preferences vap on vap.user_id = u.id
+        where ${where}
+        order by lower(p.last_name), lower(p.first_name), lower(p.email), u.id
+        limit $6 offset $7`,
+      [...whereParams, filters.pageSize, offset],
+    );
+    return {
+      rows,
+      total: countRows[0]?.count ?? 0,
+      page: filters.page,
+      pageSize: filters.pageSize,
+    };
+  });
 }
 
 export async function create(ctx: DbContext, name: string): Promise<VolunteerCategory> {
