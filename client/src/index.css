@@ -2881,6 +2881,25 @@ a.site-nav-btn {
   color: var(--color-navy);
 }
 
+.adm-participant-section {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 2px solid #d0dbe6;
+}
+
+.adm-participant-summary {
+  margin: 0 0 12px;
+}
+
+.adm-participant-table {
+  min-width: 820px;
+}
+
+.adm-participant-lines {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .adm-fields {
   display: grid;
   grid-template-columns: 200px 1fr;

@@ -63,6 +63,33 @@ type RoleChild = {
   quantityRemaining: number;
 };
 
+type ItemParticipant = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  notes: string | null;
+  createdAt: string;
+  lines: { itemId: string; itemName: string; quantity: number }[];
+};
+
+type VolunteerParticipant = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  notes: string | null;
+  createdAt: string;
+  roles: { roleId: string; roleName: string }[];
+};
+
+type ParticipantsPayload = {
+  participants: ItemParticipant[] | VolunteerParticipant[];
+  counterTotal: number;
+};
+
 type VolunteerCategoryOption = {
   id: string;
   name: string;
@@ -636,6 +663,10 @@ export function RequestsPage() {
     queryKey: [`/api/admin/requests/${selected?.type}/${selected?.id}`],
     enabled: selected !== null,
   });
+  const participantsQuery = useQuery<ParticipantsPayload>({
+    queryKey: [`/api/admin/requests/${selected?.type}/${selected?.id}/participants`],
+    enabled: selected !== null,
+  });
 
   useEffect(() => {
     if (selected !== null) {
@@ -674,6 +705,9 @@ export function RequestsPage() {
     }
     if (selected) {
       await queryClient.invalidateQueries({ queryKey: [`/api/admin/requests/${selected.type}/${selected.id}`] });
+      await queryClient.invalidateQueries({
+        queryKey: [`/api/admin/requests/${selected.type}/${selected.id}/participants`],
+      });
     }
   }
 
@@ -896,6 +930,22 @@ export function RequestsPage() {
           : "No returned drafts.";
 
   const isEditable = detail?.editability?.editable ?? false;
+  const participantRows = participantsQuery.data?.participants ?? [];
+  const itemParticipantRows =
+    detail?.type === "item" ? (participantRows as ItemParticipant[]) : [];
+  const volunteerParticipantRows =
+    detail?.type === "volunteer" ? (participantRows as VolunteerParticipant[]) : [];
+  const pledgedTotal =
+    detail?.type === "item"
+      ? itemParticipantRows.reduce(
+          (total, participant) => total + participant.lines.reduce((lineTotal, line) => lineTotal + line.quantity, 0),
+          0,
+        )
+      : 0;
+  const signupRoleTotal =
+    detail?.type === "volunteer"
+      ? volunteerParticipantRows.reduce((total, participant) => total + participant.roles.length, 0)
+      : 0;
 
   return (
     <div>
@@ -1477,6 +1527,110 @@ export function RequestsPage() {
                   </dd>
                 </dl>
               )}
+
+              <section className="adm-participant-section" aria-labelledby="adm-participants-heading">
+                <h3 id="adm-participants-heading" className="adm-form-section-title">
+                  {detail.type === "item" ? "Donations" : "Volunteer signups"}
+                </h3>
+                {participantsQuery.isError ? (
+                  <p className="adm-alert">
+                    Participants could not be loaded. Please refresh the page and try again.
+                  </p>
+                ) : participantsQuery.isLoading ? (
+                  <p className="adm-muted">Loading participants…</p>
+                ) : detail.type === "item" ? (
+                  <>
+                    <p className="adm-muted adm-participant-summary">
+                      {itemParticipantRows.length} {itemParticipantRows.length === 1 ? "pledge" : "pledges"} ·{" "}
+                      {pledgedTotal} {pledgedTotal === 1 ? "item" : "items"} claimed · request counter:{" "}
+                      {participantsQuery.data?.counterTotal ?? 0}
+                    </p>
+                    {itemParticipantRows.length === 0 ? (
+                      <p className="adm-muted">No donations have been recorded for this request.</p>
+                    ) : (
+                      <div className="adm-table-wrap">
+                        <table className="adm-table adm-participant-table">
+                          <thead>
+                            <tr>
+                              <th>Donor</th>
+                              <th>Contact</th>
+                              <th>Items pledged</th>
+                              <th>Notes</th>
+                              <th>Pledged</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {itemParticipantRows.map((participant) => (
+                              <tr key={participant.id}>
+                                <td>{`${participant.firstName} ${participant.lastName}`.trim() || NOT_PROVIDED}</td>
+                                <td>
+                                  {participant.email}
+                                  {participant.phone ? <><br />{participant.phone}</> : null}
+                                </td>
+                                <td>
+                                  <ul className="adm-participant-lines">
+                                    {participant.lines.map((line) => (
+                                      <li key={line.itemId}>{line.itemName} × {line.quantity}</li>
+                                    ))}
+                                  </ul>
+                                </td>
+                                <td>{participant.notes ?? "—"}</td>
+                                <td>{formatDateTime(participant.createdAt)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="adm-muted adm-participant-summary">
+                      {volunteerParticipantRows.length}{" "}
+                      {volunteerParticipantRows.length === 1 ? "signup" : "signups"} · {signupRoleTotal}{" "}
+                      {signupRoleTotal === 1 ? "role" : "roles"} selected · request counter:{" "}
+                      {participantsQuery.data?.counterTotal ?? 0} interested
+                    </p>
+                    {volunteerParticipantRows.length === 0 ? (
+                      <p className="adm-muted">No volunteer signups have been recorded for this request.</p>
+                    ) : (
+                      <div className="adm-table-wrap">
+                        <table className="adm-table adm-participant-table">
+                          <thead>
+                            <tr>
+                              <th>Volunteer</th>
+                              <th>Contact</th>
+                              <th>Roles selected</th>
+                              <th>Notes</th>
+                              <th>Signed up</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {volunteerParticipantRows.map((participant) => (
+                              <tr key={participant.id}>
+                                <td>{`${participant.firstName} ${participant.lastName}`.trim() || NOT_PROVIDED}</td>
+                                <td>
+                                  {participant.email}
+                                  {participant.phone ? <><br />{participant.phone}</> : null}
+                                </td>
+                                <td>
+                                  <ul className="adm-participant-lines">
+                                    {participant.roles.map((role) => (
+                                      <li key={role.roleId}>{role.roleName}</li>
+                                    ))}
+                                  </ul>
+                                </td>
+                                <td>{participant.notes ?? "—"}</td>
+                                <td>{formatDateTime(participant.createdAt)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
 
               {/* Correction history — staff content edits and image uploads, separate from lifecycle events */}
               {detail.revisions && detail.revisions.length > 0 && (

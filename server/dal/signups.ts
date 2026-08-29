@@ -142,6 +142,37 @@ export async function listByRequest(ctx: DbContext, orgId: string, requestId: st
   );
 }
 
+/**
+ * Staff request-detail snapshot. Participants and the request's interested
+ * counter come from one SQL statement, so concurrent signup activity cannot
+ * make the visible reconciliation compare different database snapshots.
+ */
+export async function listByRequestWithInterestedTotal(
+  ctx: DbContext,
+  orgId: string,
+  requestId: string,
+): Promise<{ participants: SignupWithSupporter[]; counterTotal: number }> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<{ participants: SignupWithSupporter[]; counterTotal: number }>(
+      c,
+      `select coalesce(
+                (select json_agg(participant order by participant."createdAt" desc)
+                   from (${SUPPORTER_SELECT}
+                         where r.org_id = $1 and vs.volunteer_request_id = $2) participant),
+                '[]'::json
+              ) as participants,
+              (select coalesce(sum(vr.quantity_interested), 0)::int
+                 from volunteer_roles vr
+                 join volunteer_requests r on r.id = vr.volunteer_request_id
+                where r.org_id = $1 and r.id = $2) as "counterTotal"`,
+      [orgId, requestId],
+    ),
+  );
+  const row = rows[0];
+  if (!row) throw new Error("signups.listByRequestWithInterestedTotal returned no row");
+  return row;
+}
+
 export type SignupForProfile = {
   id: string;
   requestId: string;

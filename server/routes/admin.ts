@@ -540,6 +540,73 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  // ---- Request participation is a separate read so the admin detail can
+  // report its own loading/failure state. The request resolves the
+  // organization scope; callers cannot supply one.
+  app.get("/api/admin/requests/:type/:id/participants", requireStaff, async (req: Request, res: Response, next) => {
+    try {
+      const kind = parseKind(req.params.type);
+      const id = req.params.id ?? "";
+      if (!kind || !UUID_RE.test(id)) {
+        sendNotFound(res);
+        return;
+      }
+      const ctx = staffCtx(req);
+      const request =
+        kind === "item" ? await dal.itemRequests.getById(ctx, id) : await dal.volunteerRequests.getById(ctx, id);
+      if (!request) {
+        sendNotFound(res);
+        return;
+      }
+      const organization = await dal.organizations.getById(ctx, request.orgId);
+      if (!organization) {
+        sendNotFound(res);
+        return;
+      }
+
+      if (kind === "item") {
+        const snapshot = await dal.pledges.listByRequestWithClaimedTotal(ctx, request.orgId, id);
+        res.json({
+          counterTotal: snapshot.counterTotal,
+          participants: snapshot.participants.map((pledge) => ({
+            id: pledge.id,
+            firstName: pledge.firstName,
+            lastName: pledge.lastName,
+            email: pledge.email,
+            phone: pledge.phone,
+            notes: pledge.notes,
+            createdAt: pledge.createdAt,
+            lines: pledge.lines.map((line) => ({
+              itemId: line.itemId,
+              itemName: line.itemName,
+              quantity: line.quantity,
+            })),
+          })),
+        });
+      } else {
+        const snapshot = await dal.signups.listByRequestWithInterestedTotal(ctx, request.orgId, id);
+        res.json({
+          counterTotal: snapshot.counterTotal,
+          participants: snapshot.participants.map((signup) => ({
+            id: signup.id,
+            firstName: signup.firstName,
+            lastName: signup.lastName,
+            email: signup.email,
+            phone: signup.phone,
+            notes: signup.notes,
+            createdAt: signup.createdAt,
+            roles: signup.roles.map((role) => ({
+              roleId: role.roleId,
+              roleName: role.roleName,
+            })),
+          })),
+        });
+      }
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ---- §4: detail — the request as the public will see it, plus children.
   app.get("/api/admin/requests/:type/:id", requireStaff, async (req: Request, res: Response, next) => {
     try {

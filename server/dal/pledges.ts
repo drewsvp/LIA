@@ -142,6 +142,37 @@ export async function listByRequest(ctx: DbContext, orgId: string, requestId: st
   );
 }
 
+/**
+ * Staff request-detail snapshot. Participants and the request's claimed
+ * counter come from one SQL statement, so a concurrent pledge cannot make the
+ * visible reconciliation compare different database snapshots.
+ */
+export async function listByRequestWithClaimedTotal(
+  ctx: DbContext,
+  orgId: string,
+  requestId: string,
+): Promise<{ participants: PledgeWithSupporter[]; counterTotal: number }> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<{ participants: PledgeWithSupporter[]; counterTotal: number }>(
+      c,
+      `select coalesce(
+                (select json_agg(participant order by participant."createdAt" desc)
+                   from (${SUPPORTER_SELECT}
+                         where r.org_id = $1 and ip.item_request_id = $2) participant),
+                '[]'::json
+              ) as participants,
+              (select coalesce(sum(i.quantity_claimed), 0)::int
+                 from items i
+                 join item_requests r on r.id = i.item_request_id
+                where r.org_id = $1 and r.id = $2) as "counterTotal"`,
+      [orgId, requestId],
+    ),
+  );
+  const row = rows[0];
+  if (!row) throw new Error("pledges.listByRequestWithClaimedTotal returned no row");
+  return row;
+}
+
 export type PledgeForProfile = {
   id: string;
   requestId: string;
