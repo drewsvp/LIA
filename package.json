@@ -48,6 +48,7 @@
     "test:alliance-volunteer-publication": "tsx scripts/test-alliance-volunteer-publication.ts",
     "test:role-status-management": "tsx scripts/test-role-status-management.ts",
     "test:account-email-identity": "tsx scripts/test-account-email-identity.ts",
+    "test:deployment-migrations": "tsx scripts/test-deployment-migrations.ts",
     "test:admin-organization-context": "tsx scripts/test-admin-organization-context.ts",
     "test:admin-organization-edit": "tsx scripts/test-admin-organization-edit.ts",
     "test:admin-supporters": "tsx scripts/test-admin-supporters.ts",

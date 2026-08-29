@@ -16,6 +16,7 @@
  * on every request.
  */
 import { pool } from "./client";
+import { readMigrationFiles } from "./migration-files";
 
 /**
  * Custom PostgreSQL functions that must be present in the public schema.
@@ -110,7 +111,34 @@ export type DbRoutineCheckResult = {
   requiredTriggerCount: number;
   /** Diagnostic set when status === "error". */
   errorMessage?: string;
+  /** Code-versus-ledger comparison from the same startup check. */
+  schema: DbSchemaCheckResult;
 };
+
+export type DbSchemaCheckResult = {
+  status: "pending" | "ok" | "ahead" | "behind" | "error";
+  ok: boolean;
+  checkedAt: string | null;
+  expectedLatestMigration: string | null;
+  recordedLatestMigration: string | null;
+  expectedMigrationCount: number;
+  recordedMigrationCount: number;
+  missingMigrations: string[];
+  unexpectedMigrations: string[];
+  errorMessage?: string;
+};
+
+const pendingSchemaResult = (): DbSchemaCheckResult => ({
+  status: "pending",
+  ok: false,
+  checkedAt: null,
+  expectedLatestMigration: null,
+  recordedLatestMigration: null,
+  expectedMigrationCount: 0,
+  recordedMigrationCount: 0,
+  missingMigrations: [],
+  unexpectedMigrations: [],
+});
 
 let _checkResult: DbRoutineCheckResult = {
   status: "pending",
@@ -120,6 +148,7 @@ let _checkResult: DbRoutineCheckResult = {
   missingTriggers: [],
   requiredFunctionCount: REQUIRED_FUNCTIONS.length,
   requiredTriggerCount: REQUIRED_TRIGGERS.length,
+  schema: pendingSchemaResult(),
 };
 
 /**
@@ -145,6 +174,121 @@ type FunctionCheckOutcome =
 type TriggerCheckOutcome =
   | { checkFailed: false; missing: Array<{ name: string; table: string }> }
   | { checkFailed: true; error: string };
+
+// ---------------------------------------------------------------------------
+// Code/schema version check.
+// ---------------------------------------------------------------------------
+
+/**
+ * Compare migration filenames shipped in this application image with the
+ * database ledger. Unexpected ledger rows mean the database was advanced by a
+ * newer image; missing rows mean this image expects migrations not recorded in
+ * the database. Neither direction is silently treated as compatible.
+ */
+export async function checkDbSchemaVersion(): Promise<DbSchemaCheckResult> {
+  const checkedAt = new Date().toISOString();
+  let expected: string[];
+
+  try {
+    expected = readMigrationFiles().map(({ filename }) => filename);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[db-check] Could not read the application migration manifest:", err);
+    return {
+      ...pendingSchemaResult(),
+      status: "error",
+      checkedAt,
+      errorMessage: `Migration manifest failed: ${message}`,
+    };
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[db-check] Could not connect to database for schema-version check:", err);
+    return {
+      ...pendingSchemaResult(),
+      status: "error",
+      checkedAt,
+      expectedLatestMigration: expected.at(-1) ?? null,
+      expectedMigrationCount: expected.length,
+      errorMessage: `Connection failed: ${message}`,
+    };
+  }
+
+  try {
+    const result = await client.query<{ filename: string }>(
+      `select filename from schema_migrations order by filename`,
+    );
+    const recorded = result.rows.map(({ filename }) => String(filename));
+    const expectedSet = new Set(expected);
+    const recordedSet = new Set(recorded);
+    const missingMigrations = expected.filter((filename) => !recordedSet.has(filename));
+    const unexpectedMigrations = recorded.filter((filename) => !expectedSet.has(filename));
+
+    const status: DbSchemaCheckResult["status"] =
+      unexpectedMigrations.length > 0
+        ? "ahead"
+        : missingMigrations.length > 0
+          ? "behind"
+          : "ok";
+    const schemaResult: DbSchemaCheckResult = {
+      status,
+      ok: status === "ok",
+      checkedAt,
+      expectedLatestMigration: expected.at(-1) ?? null,
+      recordedLatestMigration: recorded.at(-1) ?? null,
+      expectedMigrationCount: expected.length,
+      recordedMigrationCount: recorded.length,
+      missingMigrations,
+      unexpectedMigrations,
+    };
+
+    if (status === "ahead") {
+      const alsoMissing =
+        missingMigrations.length > 0
+          ? ` The database also lacks ${missingMigrations.length} migration(s) shipped in this image.`
+          : "";
+      console.error(
+        `[db-check] ✖  CODE/SCHEMA VERSION MISMATCH: the database ledger contains ` +
+          `${unexpectedMigrations.length} migration(s) not shipped in this application image.\n` +
+          `           Database latest: ${schemaResult.recordedLatestMigration ?? "(none)"}; ` +
+          `code latest: ${schemaResult.expectedLatestMigration ?? "(none)"}.\n` +
+          `           The live database is ahead of the live site.${alsoMissing} ` +
+          `Check the most recent failed publish.`,
+      );
+    } else if (status === "behind") {
+      console.error(
+        `[db-check] ✖  CODE/SCHEMA VERSION MISMATCH: the application image expects ` +
+          `${missingMigrations.length} migration(s) not recorded in the database.\n` +
+          `           Code latest: ${schemaResult.expectedLatestMigration ?? "(none)"}; ` +
+          `database latest: ${schemaResult.recordedLatestMigration ?? "(none)"}.`,
+      );
+    } else {
+      console.log(
+        `[db-check] ✓  Code/schema versions match at ` +
+          `${schemaResult.expectedLatestMigration ?? "(no migrations)"}.`,
+      );
+    }
+
+    return schemaResult;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[db-check] Schema-version ledger query failed (non-fatal):", err);
+    return {
+      ...pendingSchemaResult(),
+      status: "error",
+      checkedAt,
+      expectedLatestMigration: expected.at(-1) ?? null,
+      expectedMigrationCount: expected.length,
+      errorMessage: `Ledger query failed: ${message}`,
+    };
+  } finally {
+    client.release();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Individual checks — exported for regression-test scripts.
@@ -287,7 +431,8 @@ export async function checkRequiredDbTriggers(): Promise<TriggerCheckOutcome> {
  * `.catch(() => {})` to swallow any unexpected rejection.
  */
 export async function runDbRoutineChecks(): Promise<void> {
-  const [fnOutcome, tgOutcome] = await Promise.all([
+  const [schema, fnOutcome, tgOutcome] = await Promise.all([
+    checkDbSchemaVersion(),
     checkRequiredDbFunctions(),
     checkRequiredDbTriggers(),
   ]);
@@ -312,6 +457,7 @@ export async function runDbRoutineChecks(): Promise<void> {
       requiredFunctionCount: REQUIRED_FUNCTIONS.length,
       requiredTriggerCount: REQUIRED_TRIGGERS.length,
       errorMessage: errors,
+      schema,
     };
 
     console.error(
@@ -333,6 +479,7 @@ export async function runDbRoutineChecks(): Promise<void> {
     missingTriggers,
     requiredFunctionCount: REQUIRED_FUNCTIONS.length,
     requiredTriggerCount: REQUIRED_TRIGGERS.length,
+    schema,
   };
 
   if (!anyMissing) {

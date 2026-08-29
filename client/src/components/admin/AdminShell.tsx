@@ -8,12 +8,8 @@
  * color/type tokens with rounded corners and light shadows matching the
  * public site style.
  *
- * A DB-routine-health banner appears below the nav when the startup check
- * found missing functions or triggers (status "missing"), or when the catalog
- * query could not complete and parity is unverified (status "error"). The
- * banner names each missing routine so the repair step is obvious. "pending"
- * (server just started, check not yet returned) is not surfaced — it resolves
- * quickly and is not an actionable state for staff.
+ * A DB-health banner appears below the nav when the startup check found a
+ * code/schema mismatch, missing functions or triggers, or could not complete.
  */
 import type { ReactElement, ReactNode } from "react";
 import { Link, useLocation } from "wouter";
@@ -37,6 +33,15 @@ type DbHealthResult = {
   requiredFunctionCount: number;
   requiredTriggerCount: number;
   errorMessage?: string;
+  schema: {
+    status: "pending" | "ok" | "ahead" | "behind" | "error";
+    ok: boolean;
+    expectedLatestMigration: string | null;
+    recordedLatestMigration: string | null;
+    missingMigrations: string[];
+    unexpectedMigrations: string[];
+    errorMessage?: string;
+  };
 };
 
 /** Which nav rows carry a queue badge (§4: organizations, requests, members). */
@@ -66,10 +71,14 @@ export function AdminShell({ children }: { children: ReactNode }): ReactElement 
       ? ALL_ADMIN_ROUTES
       : ALL_ADMIN_ROUTES.filter((r) => !STAFF_ADMIN_ONLY_SURFACES.has(r.id));
 
-  // Show the banner for "missing" (named routines) or "error" (check failed,
-  // parity unverified). Never show for "pending" or "ok".
+  const schemaProblem =
+    dbHealth?.schema.status === "ahead" ||
+    dbHealth?.schema.status === "behind" ||
+    dbHealth?.schema.status === "error";
   const showDbBanner =
-    dbHealth?.status === "missing" || dbHealth?.status === "error";
+    dbHealth?.status === "missing" ||
+    dbHealth?.status === "error" ||
+    schemaProblem;
 
   return (
     <div className="adm-layout">
@@ -100,7 +109,24 @@ export function AdminShell({ children }: { children: ReactNode }): ReactElement 
         )}
         {showDbBanner && (
           <div className="adm-nav-alert adm-nav-alert--db" role="alert">
-            {dbHealth?.status === "error" ? (
+            {schemaProblem ? (
+              <>
+                <strong>Code/database version mismatch</strong>
+                <p className="adm-db-missing-fix">
+                  {dbHealth?.schema.status === "ahead"
+                    ? "The live database is newer than this running site. Check the most recent failed publish."
+                    : dbHealth?.schema.status === "behind"
+                      ? "This running site expects database migrations that are not recorded as applied."
+                      : "The database version could not be verified at startup. Check server logs."}
+                </p>
+                {dbHealth?.schema.status !== "error" && (
+                  <span className="adm-db-missing-fix">
+                    Code: {dbHealth?.schema.expectedLatestMigration ?? "none"}; database:{" "}
+                    {dbHealth?.schema.recordedLatestMigration ?? "none"}
+                  </span>
+                )}
+              </>
+            ) : dbHealth?.status === "error" ? (
               <>
                 <strong>DB routine check failed</strong>
                 <p className="adm-db-missing-fix">

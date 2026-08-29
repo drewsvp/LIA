@@ -24,3 +24,29 @@ For newly introduced schema objects, assume Publish may materialize `schema.sql`
 **Why:** A table definition without its later primary-key constraint looked complete in the snapshot, while an idempotent `create table if not exists` migration would then skip the inline primary key permanently.
 
 **How to apply:** Compare the full fresh-schema object shape to the migration-created shape before release, including constraints that schema dumps emit as later `alter table` statements.
+
+## The candidate container owns production migrations
+
+Production migrations run at candidate startup before the server binds its
+port, never during the deployment build. All pending files share one outer
+transaction under a transaction-scoped advisory lock. A failed migration rolls
+back the whole pending batch and keeps the candidate unhealthy, leaving the
+previously promoted image available.
+
+The running image also compares its migration manifest with the database
+ledger. Ledger rows absent from the image mean the database is ahead of the
+running code and must produce a loud startup/admin-health warning. Missing
+ledger rows mean the database is behind the image and are likewise not treated
+as healthy.
+
+**Why:** A build can finish and mutate production even when promotion later
+fails, leaving the previous live image under newer constraints and triggers.
+Per-file commits also let a later migration failure expose earlier changes to
+the old image. Moving the same non-atomic runner without a version check merely
+moves, rather than closes, those failure windows.
+
+**How to apply:** Keep deployment builds side-effect-free. Keep future migration
+SQL compatible with PostgreSQL transactions, preserve the closed and audited
+exception for historical publish-synced ledger drift, and add every new
+migration to the code manifest by placing it in the numbered migrations
+directory. Never broaden duplicate-object tolerance as an automatic baseline.

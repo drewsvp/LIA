@@ -13,6 +13,7 @@ import { startDigestScheduler } from "./jobs/digest";
 import { startImageSweep } from "./jobs/image-sweep";
 import { setupVite, serveStatic } from "./vite";
 import { runDbRoutineChecks } from "./db/startup-checks";
+import { applyMigrations } from "./db/apply-migrations";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -74,6 +75,18 @@ const server = http.createServer(app);
 const port = 5000;
 
 async function start(): Promise<void> {
+  // Production migrations belong to the candidate container, not its build.
+  // Apply the whole pending batch before binding the port. A failed batch
+  // rolls back and prevents this image from becoming healthy, while the
+  // previously promoted image remains available.
+  if (process.env.NODE_ENV === "production") {
+    await applyMigrations();
+  }
+
+  // Check both routine presence and code/schema version before accepting
+  // traffic. These checks are diagnostic and never block startup themselves.
+  await runDbRoutineChecks();
+
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
@@ -100,14 +113,6 @@ async function start(): Promise<void> {
   startEmailSweep();
   startDigestScheduler();
   startImageSweep();
-
-  // Startup check: warn (and cache the result for GET /api/admin/db-health)
-  // if any required custom DB functions or triggers are absent. This can
-  // happen after a clean publish that did not replay all migrations.
-  runDbRoutineChecks().catch(() => {
-    // Already handled inside runDbRoutineChecks; swallow so startup
-    // never aborts due to the check itself.
-  });
 
   // Startup check: warn if quick login is enabled but seed accounts are missing.
   if (process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true") {

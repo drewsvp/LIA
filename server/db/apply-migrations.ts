@@ -25,9 +25,11 @@
  * real conflict and must fail.
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { pool } from "./client";
+import {
+  readMigrationFiles,
+  withoutTopLevelTransactionControl,
+} from "./migration-files";
 
 const BASELINE_FILE = "0001_initial_schema.sql";
 
@@ -83,94 +85,134 @@ function isAlreadyMaterialized(filename: string, err: unknown): boolean {
   return typeof code === "string" && DUPLICATE_OBJECT_CODES.has(code);
 }
 
-async function main(): Promise<void> {
-  const dir = path.resolve(import.meta.dirname, "../../migrations");
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
-  if (files.length === 0) throw new Error(`no .sql files found in ${dir}`);
+export async function applyMigrations(): Promise<void> {
+  const files = readMigrationFiles();
+  const client = await pool.connect();
+  let transactionStarted = false;
 
-  await pool.query(`create table if not exists schema_migrations (
-    filename   text primary key,
-    sha256     text not null,
-    applied_at timestamptz not null default now()
-  )`);
+  try {
+    await client.query("begin");
+    transactionStarted = true;
+    // Serialize startup/build-tool invocations. The lock is transaction-local,
+    // so it is released on either commit or rollback.
+    await client.query(`select pg_advisory_xact_lock(hashtext('lia-schema-migrations'))`);
+    await client.query(`create table if not exists schema_migrations (
+      filename   text primary key,
+      sha256     text not null,
+      applied_at timestamptz not null default now()
+    )`);
 
-  const recordedRows = await pool.query(`select filename, sha256 from schema_migrations`);
-  const recorded = new Map<string, string>(
-    recordedRows.rows.map((r): [string, string] => [String(r.filename), String(r.sha256)]),
-  );
+    const recordedRows = await client.query(`select filename, sha256 from schema_migrations`);
+    const recorded = new Map<string, string>(
+      recordedRows.rows.map((r): [string, string] => [String(r.filename), String(r.sha256)]),
+    );
 
-  for (const filename of files) {
-    const sql = readFileSync(path.join(dir, filename), "utf8");
-    const sha = createHash("sha256").update(sql).digest("hex");
-    const prior = recorded.get(filename);
+    for (const { filename, sql } of files) {
+      const sha = createHash("sha256").update(sql).digest("hex");
+      const prior = recorded.get(filename);
 
-    if (prior !== undefined) {
-      if (prior !== sha) {
-        throw new Error(
-          `${filename} changed after it was applied (recorded ${prior.slice(0, 12)}…, on disk ${sha.slice(0, 12)}…). ` +
-            `Applied migrations are immutable — write a new migration instead.`,
-        );
-      }
-      console.log(`  ${filename} — already applied`);
-      continue;
-    }
-
-    if (filename === BASELINE_FILE) {
-      const probe = await pool.query(`select to_regclass('public.people') is not null as present`);
-      if (probe.rows[0]?.present === true) {
-        await pool.query(`insert into schema_migrations (filename, sha256) values ($1, $2)`, [filename, sha]);
-        console.log(`  ${filename} — schema already present (pre-runner database); recorded without running`);
+      if (prior !== undefined) {
+        if (prior !== sha) {
+          throw new Error(
+            `${filename} changed after it was applied (recorded ${prior.slice(0, 12)}…, on disk ${sha.slice(0, 12)}…). ` +
+              `Applied migrations are immutable — write a new migration instead.`,
+          );
+        }
+        console.log(`  ${filename} — already applied`);
         continue;
       }
+
+      await client.query("savepoint migration_file");
+      try {
+        if (filename === BASELINE_FILE) {
+          const probe = await client.query(
+            `select to_regclass('public.people') is not null as present`,
+          );
+          if (probe.rows[0]?.present === true) {
+            await client.query(
+              `insert into schema_migrations (filename, sha256) values ($1, $2)`,
+              [filename, sha],
+            );
+            await client.query("release savepoint migration_file");
+            console.log(
+              `  ${filename} — schema already present (pre-runner database); recorded without running`,
+            );
+            recorded.set(filename, sha);
+            continue;
+          }
+        }
+
+        // Set the RLS context GUCs locally so migrations that write to
+        // FORCE ROW LEVEL SECURITY tables pass the system/staff policies.
+        await client.query(
+          `select set_config('app.context', 'system', true),
+                  set_config('app.user_id', '', true)`,
+        );
+        await client.query(withoutTopLevelTransactionControl(sql));
+        await client.query(
+          `insert into schema_migrations (filename, sha256) values ($1, $2)`,
+          [filename, sha],
+        );
+        await client.query("release savepoint migration_file");
+        console.log(`  ${filename} — applied`);
+        recorded.set(filename, sha);
+      } catch (err) {
+        try {
+          await client.query("rollback to savepoint migration_file");
+          await client.query("release savepoint migration_file");
+        } catch {
+          /* the original error is the one that matters */
+        }
+        if (isAlreadyMaterialized(filename, err)) {
+          // The objects are already there (publish synced the tables without
+          // the ledger). Keep this exception closed and explicit: anything
+          // beyond those objects in this file did not run.
+          await client.query(
+            `insert into schema_migrations (filename, sha256) values ($1, $2)`,
+            [filename, sha],
+          );
+          console.warn(
+            `  ${filename} — objects already exist (${(err as { code?: string }).code}); recorded WITHOUT running. ` +
+              `Anything else in this file did not run.`,
+          );
+          recorded.set(filename, sha);
+          continue;
+        }
+        throw new Error(
+          `${filename} failed: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
+      }
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query("begin");
-      // Set the RLS context GUCs locally so migrations that write to
-      // FORCE ROW LEVEL SECURITY tables pass the system/staff policies.
-      // The `true` third argument makes them transaction-local — they are
-      // cleared automatically on commit or rollback.
-      await client.query(
-        `select set_config('app.context', 'system', true),
-                set_config('app.user_id', '', true)`,
-      );
-      await client.query(sql);
-      await client.query(`insert into schema_migrations (filename, sha256) values ($1, $2)`, [filename, sha]);
-      await client.query("commit");
-      console.log(`  ${filename} — applied`);
-    } catch (err) {
+    await client.query("commit");
+    transactionStarted = false;
+    console.log(`migrations up to date (${recorded.size} recorded).`);
+  } catch (err) {
+    if (transactionStarted) {
       try {
         await client.query("rollback");
       } catch {
         /* the original error is the one that matters */
       }
-      if (isAlreadyMaterialized(filename, err)) {
-        // The objects are already there (publish synced the tables without the
-        // ledger). Record it so the deploy can proceed, and say exactly what
-        // was skipped — anything this migration does BEYOND creating those
-        // objects did not run.
-        await pool.query(`insert into schema_migrations (filename, sha256) values ($1, $2)`, [filename, sha]);
-        console.warn(
-          `  ${filename} — objects already exist (${(err as { code?: string }).code}); recorded WITHOUT running. ` +
-            `Anything else in this file did not run.`,
-        );
-        continue;
-      }
-      throw new Error(`${filename} failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-    } finally {
-      client.release();
     }
+    throw err;
+  } finally {
+    client.release();
   }
-
-  const total = await pool.query(`select count(*)::int as n from schema_migrations`);
-  console.log(`migrations up to date (${Number(total.rows[0].n)} recorded).`);
-  await pool.end();
 }
 
-main().catch((err) => {
-  console.error("apply-migrations failed:", err);
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  try {
+    await applyMigrations();
+  } finally {
+    await pool.end();
+  }
+}
+
+if (process.argv[1]?.endsWith("apply-migrations.ts")) {
+  main().catch((err) => {
+    console.error("apply-migrations failed:", err);
+    process.exit(1);
+  });
+}
