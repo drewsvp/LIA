@@ -20,8 +20,7 @@
  * org names only, validated server-side against the caller's memberships.
  * On failure the previous selection stands (§6).
  *
- * User menu (§11): shown when authenticated; contains Log out, and a MY PROFILE
- * link for supporter sessions (donor/volunteer accounts without an org portal).
+ * User menu (§11): shown when authenticated; contains MY PROFILE and Log out.
  * Reachable on every page so members never need to return to /dashboard to end
  * a session.
  */
@@ -40,8 +39,7 @@ import logoBlue from "../assets/alliance-logo-blue.png";
  * query data so no authenticated payloads linger, then navigates to /login.
  * Failures are stated inside the menu — never a silent no-op.
  */
-function NavUserMenu({ firstName, isSupporter }: { firstName: string; isSupporter: boolean }): ReactElement {
-  const [, navigate] = useLocation();
+function NavUserMenu({ firstName }: { firstName: string }): ReactElement {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -103,16 +101,14 @@ function NavUserMenu({ firstName, isSupporter }: { firstName: string; isSupporte
       </button>
       {open ? (
         <div className="site-nav-user-menu" role="menu">
-          {isSupporter ? (
-            <Link
-              href="/profile"
-              role="menuitem"
-              className="site-nav-user-menu-item"
-              onClick={() => setOpen(false)}
-            >
-              MY PROFILE
-            </Link>
-          ) : null}
+          <Link
+            href="/profile"
+            role="menuitem"
+            className="site-nav-user-menu-item"
+            onClick={() => setOpen(false)}
+          >
+            MY PROFILE
+          </Link>
           <button
             type="button"
             role="menuitem"
@@ -179,7 +175,6 @@ export function NavBar(): ReactElement {
   // authenticated visitor already has the user menu.
   const showMemberLogin = !isLoading && session?.authenticated !== true;
   const firstName = session?.user?.firstName ?? "";
-  const isSupporter = !isLoading && session?.isSupporter === true;
   // Admin link: visible to any staff session (approver or admin); both roles
   // can reach /admin/organizations (the first non-staff-admin-only surface).
   const showAdmin = !isLoading && session?.staffRole != null;
@@ -213,7 +208,7 @@ export function NavBar(): ReactElement {
                   ADMIN
                 </Link>
               ) : null}
-              {showUserMenu ? <NavUserMenu firstName={firstName} isSupporter={isSupporter} /> : null}
+              {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
             </div>
           )}
 
@@ -300,12 +295,12 @@ export function NavBar(): ReactElement {
             </Link>
           ) : null}
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />
-          {showUserMenu && isSupporter ? (
+          {showUserMenu ? (
             <Link href="/profile" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
               MY PROFILE
             </Link>
           ) : null}
-          {showUserMenu ? <NavUserMenu firstName={firstName} isSupporter={isSupporter} /> : null}
+          {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
         </nav>
       ) : null}
     </header>

@@ -18,6 +18,7 @@ import * as emailLog from "../dal/email-log";
 import { sendEmail, EMAIL_HEADER_CID_URL, getEmailHeaderAttachment } from "../email/send";
 import { finalizeHtml } from "../email/render";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
+import { renderProfileEmailChange } from "../email/templates/profile-email-change";
 
 /**
  * Absolute base URL for auth links and redirects.
@@ -158,6 +159,24 @@ export async function sendMagicLinkEmail(
     payload: { userId: user.id },
     subject: rendered.subject,
     html,
+    text: rendered.text,
+    attachments: [await getEmailHeaderAttachment()],
+  });
+}
+
+export async function sendProfileEmailChange(
+  input: { firstName: string; newEmail: string; personId: string; url: string },
+): Promise<void> {
+  const rendered = renderProfileEmailChange({ firstName: input.firstName, url: input.url });
+  await sendEmail({
+    templateKey: "profile_email_change",
+    toEmail: input.newEmail,
+    toPersonId: input.personId,
+    entityType: null,
+    entityId: null,
+    payload: {},
+    subject: rendered.subject,
+    html: finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL),
     text: rendered.text,
     attachments: [await getEmailHeaderAttachment()],
   });

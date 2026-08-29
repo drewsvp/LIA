@@ -1,7 +1,6 @@
 /**
- * SP-01 — Supporter profile (/profile). A logged-in donor/volunteer sees
- * every item donation and volunteer signup attached to their person record
- * (matched by email). Read-only; magic-link login is the only way in.
+ * SP-01 — Authenticated-user profile (/profile). Every logged-in person sees
+ * their own history and can update their personal contact information.
  * Unauthenticated visitors are sent to /login.
  */
 import { useEffect, useState, type ReactElement } from "react";
@@ -14,6 +13,7 @@ type ProfilePayload = {
   firstName: string;
   lastName: string;
   email: string;
+  phone: string | null;
   pledges: {
     id: string;
     requestId: string;
@@ -66,12 +66,112 @@ export function SupporterProfilePage(): ReactElement | null {
   const [matchingAlertsEnabled, setMatchingAlertsEnabled] = useState(false);
   const [savingInterests, setSavingInterests] = useState(false);
   const [interestResult, setInterestResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
+  const [savingContact, setSavingContact] = useState(false);
+  const [contactResult, setContactResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (!data) return;
     setSelectedInterests(new Set(data.volunteerInterests.filter((interest) => interest.selected).map((interest) => interest.id)));
     setMatchingAlertsEnabled(data.matchingVolunteerAlertsEnabled);
+    setFirstName(data.firstName);
+    setLastName(data.lastName);
+    setEmail(data.email);
+    setPhone(data.phone ?? "");
   }, [data]);
+
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("emailChange");
+    if (result === "confirmed") {
+      setContactResult({ kind: "ok", text: "Your new email address is confirmed and ready for future sign-in." });
+    } else if (result === "conflict") {
+      setContactResult({ kind: "error", text: "That email address is now in use by another account. Your current sign-in address was not changed." });
+    } else if (result === "invalid") {
+      setContactResult({ kind: "error", text: "That email confirmation link is invalid or has expired. Your current sign-in address was not changed." });
+    }
+  }, []);
+
+  function validateContact(): Record<string, string> {
+    const errors: Record<string, string> = {};
+    if (firstName.trim() === "") errors.firstName = "First name is required.";
+    else if (firstName.trim().length > 100) errors.firstName = "First name must be 100 characters or fewer.";
+    if (lastName.trim() === "") errors.lastName = "Last name is required.";
+    else if (lastName.trim().length > 100) errors.lastName = "Last name must be 100 characters or fewer.";
+    if (email.trim() === "") errors.email = "Email is required.";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254) {
+      errors.email = "Enter a valid email address.";
+    }
+    if (phone.trim().length > 50) errors.phone = "Phone must be 50 characters or fewer.";
+    return errors;
+  }
+
+  async function saveContactInformation(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const errors = validateContact();
+    setContactErrors(errors);
+    setContactResult(null);
+    if (Object.keys(errors).length > 0) return;
+
+    setSavingContact(true);
+    try {
+      const response = await fetch("/api/supporter/profile/contact", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, email, phone }),
+      });
+      let payload: {
+        message?: string;
+        fieldErrors?: Record<string, string>;
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        phone?: string | null;
+        pendingEmail?: string | null;
+      } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        // The generic failure copy below covers a malformed response.
+      }
+      if (!response.ok) {
+        if (payload.fieldErrors) setContactErrors(payload.fieldErrors);
+        throw new Error(
+          payload.message ??
+            (response.status === 409
+              ? "That email address is already in use by another account."
+              : "We couldn't save your contact information. Please try again."),
+        );
+      }
+      const updated = {
+        firstName: payload.firstName ?? firstName.trim(),
+        lastName: payload.lastName ?? lastName.trim(),
+        email: payload.email ?? email.trim().toLowerCase(),
+        phone: payload.phone ?? (phone.trim() === "" ? null : phone.trim()),
+      };
+      setFirstName(updated.firstName);
+      setLastName(updated.lastName);
+      setEmail(updated.email);
+      setPhone(updated.phone ?? "");
+      setContactErrors({});
+      queryClient.setQueryData<ProfilePayload>(["/api/supporter/profile"], (current) =>
+        current ? { ...current, ...updated } : current,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["/api/session"] });
+      setContactResult({ kind: "ok", text: payload.message ?? "Your contact information was saved." });
+    } catch (err) {
+      setContactResult({
+        kind: "error",
+        text: err instanceof Error ? err.message : "We couldn't save your contact information. Please try again.",
+      });
+    } finally {
+      setSavingContact(false);
+    }
+  }
 
   async function saveVolunteerInterests(): Promise<void> {
     setSavingInterests(true);
@@ -157,6 +257,88 @@ export function SupporterProfilePage(): ReactElement | null {
 
         {data && (
           <>
+            <section aria-labelledby="contact-information-heading" className="supporter-contact">
+              <h2 id="contact-information-heading" className="pb2-section-heading">
+                Contact Information
+              </h2>
+              <p className="supporter-contact-intro">
+                Keep your personal information current. This updates your account without changing your organization access or settings.
+              </p>
+              <form onSubmit={(event) => void saveContactInformation(event)} noValidate>
+                <div className="supporter-contact-grid">
+                  <label className="supporter-contact-field">
+                    <span>First name</span>
+                    <input
+                      className="pub-input"
+                      name="firstName"
+                      value={firstName}
+                      autoComplete="given-name"
+                      aria-invalid={contactErrors.firstName ? "true" : undefined}
+                      aria-describedby={contactErrors.firstName ? "profile-first-name-error" : undefined}
+                      onChange={(event) => setFirstName(event.target.value)}
+                      disabled={savingContact}
+                    />
+                    {contactErrors.firstName ? <small id="profile-first-name-error">{contactErrors.firstName}</small> : null}
+                  </label>
+                  <label className="supporter-contact-field">
+                    <span>Last name</span>
+                    <input
+                      className="pub-input"
+                      name="lastName"
+                      value={lastName}
+                      autoComplete="family-name"
+                      aria-invalid={contactErrors.lastName ? "true" : undefined}
+                      aria-describedby={contactErrors.lastName ? "profile-last-name-error" : undefined}
+                      onChange={(event) => setLastName(event.target.value)}
+                      disabled={savingContact}
+                    />
+                    {contactErrors.lastName ? <small id="profile-last-name-error">{contactErrors.lastName}</small> : null}
+                  </label>
+                  <label className="supporter-contact-field">
+                    <span>Email</span>
+                    <input
+                      className="pub-input"
+                      name="email"
+                      type="email"
+                      value={email}
+                      autoComplete="email"
+                      aria-invalid={contactErrors.email ? "true" : undefined}
+                      aria-describedby={contactErrors.email ? "profile-email-error" : undefined}
+                      onChange={(event) => setEmail(event.target.value)}
+                      disabled={savingContact}
+                    />
+                    {contactErrors.email ? <small id="profile-email-error">{contactErrors.email}</small> : null}
+                  </label>
+                  <label className="supporter-contact-field">
+                    <span>Phone <em>(optional)</em></span>
+                    <input
+                      className="pub-input"
+                      name="phone"
+                      type="tel"
+                      value={phone}
+                      autoComplete="tel"
+                      aria-invalid={contactErrors.phone ? "true" : undefined}
+                      aria-describedby={contactErrors.phone ? "profile-phone-error" : undefined}
+                      onChange={(event) => setPhone(event.target.value)}
+                      disabled={savingContact}
+                    />
+                    {contactErrors.phone ? <small id="profile-phone-error">{contactErrors.phone}</small> : null}
+                  </label>
+                </div>
+                <button type="submit" className="pub-btn supporter-contact-save" disabled={savingContact}>
+                  {savingContact ? "Saving…" : "Save contact information"}
+                </button>
+                {contactResult ? (
+                  <p
+                    role={contactResult.kind === "error" ? "alert" : "status"}
+                    className={contactResult.kind === "error" ? "supporter-contact-error" : "supporter-contact-success"}
+                  >
+                    {contactResult.text}
+                  </p>
+                ) : null}
+              </form>
+            </section>
+
             <section aria-labelledby="volunteer-interests-heading" className="supporter-interests">
               <h2 id="volunteer-interests-heading" className="pb2-section-heading">
                 Volunteer Interests

@@ -99,3 +99,12 @@ export const quickLoginIpLimiter = new FixedWindowLimiter(20, WINDOW_MS);
  * lock a real member out of requesting another link.
  */
 export const magicLinkVerifyIpLimiter = new FixedWindowLimiter(30, WINDOW_MS);
+
+/** Bounded profile email-change dispatches per authenticated account. */
+export const profileEmailChangeUserLimiter = new FixedWindowLimiter(3, WINDOW_MS);
+/** Bounded confirmation sends to the same normalized target address. */
+export const profileEmailChangeTargetLimiter = new FixedWindowLimiter(3, WINDOW_MS);
+/** Bounded profile email-change dispatches per source IP. */
+export const profileEmailChangeIpLimiter = new FixedWindowLimiter(10, WINDOW_MS);
+/** One send per account/target pair per minute prevents rapid resend loops. */
+export const profileEmailChangeCooldownLimiter = new FixedWindowLimiter(1, 60_000);

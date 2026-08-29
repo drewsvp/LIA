@@ -31,3 +31,4 @@
 - [Out-of-band need photos](managed-openai-availability.md) — externally produced photos still go through prompt builder + storage adapter + DAL write; pick rows by null image URL, never by gen status.
 - [Email brand settings](email-brand-settings.md) — singleton table (CHECK id=1), updated_by must be uuid not text; _brand module cache in render.ts; merge brandTokenVars() before template.render(), template vars win on collision.
 - [Production testing logins](production-testing-logins.md) — four seeded quick-login roles are intentionally enabled for final pre-go-live testing; don't treat them as a gap.
+- [Profile email changes](profile-email-changes.md) — require mailbox confirmation before moving login identity; keep the old address active and finalize both identity stores atomically.

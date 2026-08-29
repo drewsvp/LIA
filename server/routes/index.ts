@@ -10,14 +10,24 @@
  * the SPA shell; each currently renders a placeholder component. Unknown /api
  * paths and non-staff /api/admin requests return the identical 404 body.
  */
-import { randomBytes } from "node:crypto";
-import type { Express, Request, Response } from "express";
+import { createHash, randomBytes } from "node:crypto";
+import type { Express, NextFunction, Request, Response } from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "../auth/auth";
+import { appBaseUrl, sendProfileEmailChange } from "../auth/auth";
 import { resolveSessionInfo, ACTIVE_ORG_COOKIE } from "../auth/session";
 import { NOT_FOUND_BODY, requireStaff } from "../auth/guards";
-import { magicLinkEmailLimiter, magicLinkIpLimiter, magicLinkVerifyIpLimiter, quickLoginIpLimiter } from "../auth/rate-limit";
-import { PUBLIC, SYSTEM, pool } from "../db/client";
+import {
+  magicLinkEmailLimiter,
+  magicLinkIpLimiter,
+  magicLinkVerifyIpLimiter,
+  profileEmailChangeCooldownLimiter,
+  profileEmailChangeIpLimiter,
+  profileEmailChangeTargetLimiter,
+  profileEmailChangeUserLimiter,
+  quickLoginIpLimiter,
+} from "../auth/rate-limit";
+import { PUBLIC, SYSTEM, isUniqueViolation, pool, q, withDbContext } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as dal from "../dal";
 import * as storage from "../storage/object-storage";
@@ -397,6 +407,10 @@ export function registerRoutes(app: Express): void {
     quickLoginIpLimiter.resetAll();
     magicLinkIpLimiter.resetAll();
     magicLinkVerifyIpLimiter.resetAll();
+    profileEmailChangeUserLimiter.resetAll();
+    profileEmailChangeTargetLimiter.resetAll();
+    profileEmailChangeIpLimiter.resetAll();
+    profileEmailChangeCooldownLimiter.resetAll();
     res.json({ ok: true });
   });
 
@@ -543,6 +557,7 @@ export function registerRoutes(app: Express): void {
         firstName: session.user.firstName,
         lastName: session.user.lastName,
         email: session.user.email,
+        phone: (await dal.people.getById(SYSTEM, personId))?.phone ?? null,
         pledges,
         signups,
         volunteerInterests,
@@ -551,6 +566,234 @@ export function registerRoutes(app: Express): void {
         recentlyViewed,
       });
     } catch (err) {
+      next(err);
+    }
+  });
+
+  class ProfileEmailConflictError extends Error {
+    constructor() {
+      super("That email address is already in use by another account.");
+      this.name = "ProfileEmailConflictError";
+    }
+  }
+
+  // Contact details are a self-only update. The person id and auth subject
+  // come from the verified session, never from request data. Both identity
+  // stores are updated together only after a new email address is confirmed,
+  // so history and future magic-link sign-in remain attached to this person.
+  async function updateProfileContact(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const session = await resolveSessionInfo(req);
+      if (!session.authenticated || session.user === null || session.user.authSubject === null) {
+        res.status(401).json({ message: "Authentication required" });
+        return;
+      }
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const firstName = typeof body.firstName === "string" ? body.firstName.trim() : "";
+      const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
+      const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+      const fieldErrors: Record<string, string> = {};
+      if (firstName === "") fieldErrors.firstName = "First name is required.";
+      else if (firstName.length > 100) fieldErrors.firstName = "First name must be 100 characters or fewer.";
+      if (lastName === "") fieldErrors.lastName = "Last name is required.";
+      else if (lastName.length > 100) fieldErrors.lastName = "Last name must be 100 characters or fewer.";
+      if (email === "") fieldErrors.email = "Email is required.";
+      else if (email.length > 254 || !EMAIL_RE.test(email)) fieldErrors.email = "Enter a valid email address.";
+      if (phone.length > 50) fieldErrors.phone = "Phone must be 50 characters or fewer.";
+      if (Object.keys(fieldErrors).length > 0) {
+        res.status(400).json({ message: "Check the highlighted fields and try again.", fieldErrors });
+        return;
+      }
+
+      const emailChanged = email !== session.user.email.toLowerCase();
+      const confirmationToken = emailChanged ? randomBytes(32).toString("base64url") : null;
+      const ip = req.ip ?? "unknown";
+      const cooldownKey = `${session.user.id}:${email}`;
+      if (emailChanged) {
+        const consumed: Array<[typeof profileEmailChangeUserLimiter, string]> = [];
+        const take = (limiter: typeof profileEmailChangeUserLimiter, key: string): boolean => {
+          if (!limiter.consume(key)) return false;
+          consumed.push([limiter, key]);
+          return true;
+        };
+        if (
+          !take(profileEmailChangeUserLimiter, session.user.id) ||
+          !take(profileEmailChangeTargetLimiter, email) ||
+          !take(profileEmailChangeIpLimiter, ip) ||
+          !take(profileEmailChangeCooldownLimiter, cooldownKey)
+        ) {
+          for (const [limiter, key] of consumed) limiter.unconsume(key);
+          res.set("Retry-After", "60").status(429).json({
+            message: "Please wait before sending another email-change confirmation.",
+          });
+          return;
+        }
+      }
+      await withDbContext(SYSTEM, async (client) => {
+        await client.query(`select id from people where id = $1 for update`, [session.user!.personId]);
+        const person = await dal.people.getByIdInTx(client, session.user!.personId);
+        if (!person || person.id !== session.user!.personId) {
+          throw new Error("The signed-in account is not linked to its person record.");
+        }
+        const personWithEmail = await dal.people.findByEmailInTx(client, email);
+        if (personWithEmail && personWithEmail.id !== person.id) throw new ProfileEmailConflictError();
+        if (await dal.authProvider.emailInUseByAnotherUserInTx(client, email, session.user!.authSubject!)) {
+          throw new ProfileEmailConflictError();
+        }
+
+        await dal.people.updateContactInTx(client, person.id, {
+          firstName,
+          lastName,
+          email: emailChanged ? person.email : email,
+          phone: phone === "" ? null : phone,
+        });
+        await dal.authProvider.updateUserContactInTx(
+          client,
+          session.user!.authSubject!,
+          emailChanged ? person.email : email,
+          `${firstName} ${lastName}`,
+        );
+        if (confirmationToken) {
+          await dal.authProvider.createProfileEmailChangeInTx(client, {
+            userId: session.user!.id,
+            personId: person.id,
+            authUserId: session.user!.authSubject!,
+            newEmail: email,
+            tokenHash: createHash("sha256").update(confirmationToken).digest("hex"),
+          });
+        } else {
+          await dal.authProvider.cancelProfileEmailChangesInTx(client, session.user!.id);
+        }
+      });
+
+      if (confirmationToken) {
+        try {
+          await sendProfileEmailChange({
+            firstName,
+            newEmail: email,
+            personId: session.user.personId,
+            url: `${appBaseUrl()}/api/profile/email/confirm?token=${encodeURIComponent(confirmationToken)}`,
+          });
+        } catch (err) {
+          const failedTokenHash = createHash("sha256").update(confirmationToken).digest("hex");
+          await withDbContext(SYSTEM, (client) =>
+            dal.authProvider.deleteProfileEmailChangeByTokenInTx(client, failedTokenHash),
+          );
+          profileEmailChangeUserLimiter.unconsume(session.user.id);
+          profileEmailChangeTargetLimiter.unconsume(email);
+          profileEmailChangeIpLimiter.unconsume(ip);
+          profileEmailChangeCooldownLimiter.unconsume(cooldownKey);
+          console.error("profile email confirmation send failed:", err);
+          res.status(502).json({
+            message:
+              "Your name and phone were saved, but we couldn't send the email confirmation. Your sign-in address was not changed. Please try again.",
+            firstName,
+            lastName,
+            email: session.user.email,
+            phone: phone === "" ? null : phone,
+            pendingEmail: null,
+          });
+          return;
+        }
+      }
+
+      res.json({
+        message: confirmationToken
+          ? "Your contact information was saved. Check your new email to confirm the address change."
+          : "Your contact information was saved.",
+        firstName,
+        lastName,
+        email: confirmationToken ? session.user.email : email,
+        phone: phone === "" ? null : phone,
+        pendingEmail: confirmationToken ? email : null,
+      });
+    } catch (err) {
+      if (err instanceof ProfileEmailConflictError || isUniqueViolation(err)) {
+        res.status(409).json({ message: "That email address is already in use by another account." });
+        return;
+      }
+      next(err);
+    }
+  }
+
+  app.put("/api/supporter/profile/contact", updateProfileContact);
+  // Keep the shorter authenticated-user spelling available to clients that
+  // treat the profile as a general account surface.
+  app.put("/api/profile/contact", updateProfileContact);
+
+  app.get("/api/profile/email/confirm", (req: Request, res: Response) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    if (token === "" || !/^[A-Za-z0-9_-]{20,200}$/.test(token)) {
+      res.redirect(302, "/profile?emailChange=invalid");
+      return;
+    }
+    res
+      .status(200)
+      .set("Cache-Control", "no-store")
+      .set("Referrer-Policy", "no-referrer")
+      .type("html")
+      .send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confirm email change</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#06365d">
+  <main><h1>Confirm your new email</h1>
+  <p>Press the button below to make this address your sign-in email.</p>
+  <form method="post" action="/api/profile/email/confirm">
+    <input type="hidden" name="token" value="${token}">
+    <button type="submit" style="background:#02928f;color:white;border:0;border-radius:5px;padding:12px 24px;font-weight:700">Confirm email</button>
+  </form>
+  <p><a href="/profile">Cancel and return to profile</a></p></main>
+</body></html>`);
+  });
+
+  app.post("/api/profile/email/confirm", async (req: Request, res: Response, next) => {
+    try {
+      const token = typeof req.body?.token === "string" ? req.body.token : "";
+      if (token === "") {
+        res.redirect(302, "/profile?emailChange=invalid");
+        return;
+      }
+      const tokenHash = createHash("sha256").update(token).digest("hex");
+      const changed = await withDbContext(SYSTEM, async (client) => {
+        const pending = await dal.authProvider.getProfileEmailChangeInTx(client, tokenHash);
+        if (!pending) return false;
+        await client.query(`select id from people where id = $1 for update`, [pending.personId]);
+        const person = await dal.people.getByIdInTx(client, pending.personId);
+        const userRows = await q<{ authSubject: string | null; personId: string }>(
+          client,
+          `select auth_subject as "authSubject", person_id as "personId" from users where id = $1 for update`,
+          [pending.userId],
+        );
+        const user = userRows[0];
+        if (!person || !user || user.personId !== pending.personId || user.authSubject !== pending.authUserId) return false;
+        const personConflict = await dal.people.findByEmailInTx(client, pending.newEmail);
+        if (personConflict && personConflict.id !== pending.personId) throw new ProfileEmailConflictError();
+        if (await dal.authProvider.emailInUseByAnotherUserInTx(client, pending.newEmail, pending.authUserId)) {
+          throw new ProfileEmailConflictError();
+        }
+        await dal.people.updateContactInTx(client, person.id, {
+          firstName: person.firstName,
+          lastName: person.lastName,
+          email: pending.newEmail,
+          phone: person.phone,
+        });
+        await dal.authProvider.updateUserContactInTx(
+          client,
+          pending.authUserId,
+          pending.newEmail,
+          `${person.firstName} ${person.lastName}`,
+        );
+        await dal.authProvider.deleteProfileEmailChangesInTx(client, pending.userId);
+        return true;
+      });
+      res.redirect(302, changed ? "/profile?emailChange=confirmed" : "/profile?emailChange=invalid");
+    } catch (err) {
+      if (err instanceof ProfileEmailConflictError || isUniqueViolation(err)) {
+        res.redirect(302, "/profile?emailChange=conflict");
+        return;
+      }
       next(err);
     }
   });
