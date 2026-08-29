@@ -2411,18 +2411,50 @@ a.site-nav-btn {
 }
 
 /* ---------------- MP-13 (view donors and volunteers) ---------------- */
+.mp13-page {
+  min-width: 0;
+  overflow-x: hidden;
+  padding-bottom: 48px;
+}
+.mp13-hero {
+  display: block;
+  width: 100%;
+  max-width: 800px;
+  height: auto;
+  max-height: 450px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+.mp13-band {
+  --heading-color: #ffffff;
+  background: var(--color-navy);
+  color: #ffffff;
+  padding: 14px 16px;
+  text-align: center;
+}
+.mp13-band-title {
+  margin: 0;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
 .mp13-util {
   display: flex;
   justify-content: space-between;
   align-items: center;
   max-width: 1100px;
-  margin: 18px auto 0;
-  padding: 0 24px;
+  gap: 20px;
+  margin: 0 auto;
+  padding: 18px 24px 0;
 }
 .mp13-back {
+  display: inline-block;
   color: rgb(2, 146, 143);
   text-decoration: none;
   font-size: 14px;
+  font-weight: 700;
 }
 .mp13-back:hover {
   text-decoration: underline;
@@ -2430,12 +2462,18 @@ a.site-nav-btn {
 .mp13-org {
   color: rgb(2, 146, 143);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.mp13-body {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
 }
 .mp13-section {
-  max-width: 1100px;
-  margin: 0 auto 42px;
-  padding: 0 24px;
+  margin: 0 0 42px;
+  min-width: 0;
 }
 .mp13-heading {
   text-align: center;
@@ -2449,39 +2487,140 @@ a.site-nav-btn {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
 }
 .mp13-table th {
-  background: rgb(6, 54, 93);
+  background: var(--color-navy);
   color: #fff;
-  padding: 10px 8px;
-  font-size: 12.5px;
+  padding: 11px 8px;
+  font-size: 12px;
   font-weight: 700;
   text-align: center;
   border: 1px solid rgb(6, 54, 93);
+  line-height: 1.3;
 }
 .mp13-table td {
   border: 1px solid #d9e2ea;
-  padding: 9px 8px;
-  vertical-align: middle;
-  text-align: center;
+  padding: 10px 9px;
+  vertical-align: top;
+  text-align: left;
   color: #333;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.mp13-table tbody tr:nth-child(even) {
+  background: #f2f7f9;
+}
+.mp13-table tbody tr:hover {
+  background: #e8f3f4;
+}
+.mp13-table-volunteers th:nth-child(1) {
+  width: 12%;
+}
+.mp13-table-volunteers th:nth-child(2) {
+  width: 17%;
+}
+.mp13-table-volunteers th:nth-child(3) {
+  width: 12%;
+}
+.mp13-table-volunteers th:nth-child(4) {
+  width: 15%;
+}
+.mp13-table-volunteers th:nth-child(5) {
+  width: 19%;
+}
+.mp13-table-volunteers th:nth-child(6) {
+  width: 15%;
+}
+.mp13-table-volunteers th:nth-child(7) {
+  width: 10%;
+}
+.mp13-table-donors th:nth-child(1) {
+  width: 13%;
+}
+.mp13-table-donors th:nth-child(2) {
+  width: 19%;
+}
+.mp13-table-donors th:nth-child(3) {
+  width: 13%;
+}
+.mp13-table-donors th:nth-child(4) {
+  width: 19%;
+}
+.mp13-table-donors th:nth-child(5) {
+  width: 22%;
+}
+.mp13-table-donors th:nth-child(6) {
+  width: 14%;
+}
+.mp13-table td:nth-child(1),
+.mp13-table td:nth-child(3),
+.mp13-table td:last-child {
+  text-align: center;
 }
 .mp13-line {
   display: block;
 }
 .mp13-empty {
+  margin: 0;
+  border: 1px dashed #b8cbd4;
+  border-radius: var(--radius-card);
+  background: #fbfcfd;
   text-align: center;
   color: #555;
   font-size: 14px;
-  padding: 18px 0;
+  padding: 24px 16px;
+}
+.mp13-state {
+  margin: 0;
+  border-radius: var(--radius-card);
+  text-align: center;
+  font-size: 14px;
+  padding: 24px 16px;
+}
+.mp13-loading {
+  border: 1px solid #c9d9e2;
+  background: #f4f8fa;
+  color: var(--color-navy);
 }
 .mp13-error {
-  text-align: center;
-  color: #a33;
-  font-size: 14px;
-  padding: 18px 0;
+  border: 1px solid #e3b9b5;
+  background: #fff7f6;
+  color: #9a201a;
+  font-weight: 700;
 }
 @media (max-width: 720px) {
+  .mp13-page {
+    padding-bottom: 24px;
+  }
+  .mp13-hero {
+    width: 100%;
+    max-width: none;
+  }
+  .mp13-band {
+    padding: 12px 14px;
+  }
+  .mp13-band-title {
+    font-size: 16px;
+    letter-spacing: 2.5px;
+  }
+  .mp13-util {
+    padding: 16px 16px 0;
+  }
+  .mp13-body {
+    padding: 0 16px;
+  }
+  .mp13-section {
+    margin-bottom: 34px;
+  }
+  .mp13-heading {
+    font-size: 19px;
+    letter-spacing: 2px;
+    margin: 28px 0 14px;
+  }
   .mp13-table thead {
     display: none;
   }
@@ -2494,12 +2633,18 @@ a.site-nav-btn {
   }
   .mp13-table tr {
     border: 1px solid #d9e2ea;
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-card);
     margin-bottom: 14px;
+    overflow: hidden;
   }
   .mp13-table td {
     border: none;
     border-bottom: 1px solid #eef2f6;
     text-align: left;
+    padding: 10px 12px;
+    min-height: 50px;
   }
   .mp13-table td:last-child {
     border-bottom: none;
@@ -2511,6 +2656,24 @@ a.site-nav-btn {
     color: rgb(6, 54, 93);
     font-size: 12px;
     margin-bottom: 2px;
+  }
+  .mp13-table td:nth-child(1),
+  .mp13-table td:nth-child(3),
+  .mp13-table td:last-child {
+    text-align: left;
+  }
+  .mp13-line {
+    display: block;
+  }
+}
+@media (max-width: 420px) {
+  .mp13-util {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .mp13-org {
+    align-self: flex-end;
   }
 }
 

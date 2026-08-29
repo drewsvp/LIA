@@ -17,6 +17,8 @@
  */
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
+import supportersImg from "../../assets/dashboard/supporters.png";
+import { useSession } from "../../hooks/useSession";
 
 type DonorRow = {
   id: string;
@@ -50,9 +52,14 @@ function formatDate(iso: string): string {
 }
 
 export function SupportersPage() {
+  const { session } = useSession();
   const [donors, setDonors] = useState<TableState<DonorRow>>({ kind: "loading" });
   const [volunteers, setVolunteers] = useState<TableState<VolunteerRow>>({ kind: "loading" });
   const [orgName, setOrgName] = useState<string>("");
+  const sessionOrgName =
+    session?.organizationContext?.organizationName ??
+    session?.memberships.find((membership) => membership.orgId === session.activeOrgId)?.orgName ??
+    "";
 
   useEffect(() => {
     let cancelled = false;
@@ -89,90 +96,105 @@ export function SupportersPage() {
 
   return (
     <div className="mp13-page">
-      <div className="mp11-band">
-        <h1 className="mp11-band-title">YOUR DONORS/VOLUNTEERS</h1>
+      <img className="mp13-hero" src={supportersImg} alt="" />
+      <div className="mp13-band">
+        <h1 className="mp13-band-title">YOUR DONORS/VOLUNTEERS</h1>
       </div>
 
       <div className="mp13-util">
         <Link href="/dashboard" className="mp13-back">
           &lt; Back
         </Link>
-        <span className="mp13-org">{orgName}</span>
+        <span className="mp13-org">{orgName || sessionOrgName}</span>
       </div>
 
-      <section className="mp13-section">
-        <h2 className="mp13-heading">ITEM DONORS</h2>
-        {donors.kind === "error" && <p className="mp13-error">{TABLE_ERROR}</p>}
-        {donors.kind === "ready" && donors.rows.length === 0 && <p className="mp13-empty">No item donors yet.</p>}
-        {donors.kind === "ready" && donors.rows.length > 0 && (
-          <table className="mp13-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone Number</th>
-                <th>Request</th>
-                <th>Items</th>
-                <th>Claimed Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {donors.rows.map((row) => (
-                <tr key={row.id}>
-                  <td data-label="Name">{`${row.firstName} ${row.lastName}`.trim()}</td>
-                  <td data-label="Email">{row.email}</td>
-                  <td data-label="Phone Number">{row.phone ?? ""}</td>
-                  <td data-label="Request">{row.requestTitle}</td>
-                  <td data-label="Items">
-                    {row.lines.map((line, i) => (
-                      <span className="mp13-line" key={i}>
-                        {line.quantity}x {line.itemName}
-                      </span>
-                    ))}
-                  </td>
-                  <td data-label="Claimed Date">{formatDate(row.createdAt)}</td>
+      <main className="mp13-body">
+        <section className="mp13-section" aria-labelledby="mp13-item-donors-heading">
+          <h2 id="mp13-item-donors-heading" className="mp13-heading">ITEM DONORS</h2>
+          {donors.kind === "loading" && (
+            <p className="mp13-state mp13-loading" role="status">Loading item donors…</p>
+          )}
+          {donors.kind === "error" && (
+            <p className="mp13-state mp13-error" role="alert">{TABLE_ERROR}</p>
+          )}
+          {donors.kind === "ready" && donors.rows.length === 0 && (
+            <p className="mp13-empty">No item donors yet.</p>
+          )}
+          {donors.kind === "ready" && donors.rows.length > 0 && (
+            <table className="mp13-table mp13-table-donors">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone Number</th>
+                  <th>Request</th>
+                  <th>Items</th>
+                  <th>Claimed Date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </thead>
+              <tbody>
+                {donors.rows.map((row) => (
+                  <tr key={row.id}>
+                    <td data-label="Name">{`${row.firstName} ${row.lastName}`.trim()}</td>
+                    <td data-label="Email">{row.email}</td>
+                    <td data-label="Phone Number">{row.phone ?? ""}</td>
+                    <td data-label="Request">{row.requestTitle}</td>
+                    <td data-label="Items">
+                      {row.lines.map((line, i) => (
+                        <span className="mp13-line" key={i}>
+                          {line.quantity}x {line.itemName}
+                        </span>
+                      ))}
+                    </td>
+                    <td data-label="Claimed Date">{formatDate(row.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
 
-      <section className="mp13-section">
-        <h2 className="mp13-heading">VOLUNTEERS</h2>
-        {volunteers.kind === "error" && <p className="mp13-error">{TABLE_ERROR}</p>}
-        {volunteers.kind === "ready" && volunteers.rows.length === 0 && (
-          <p className="mp13-empty">No volunteers yet.</p>
-        )}
-        {volunteers.kind === "ready" && volunteers.rows.length > 0 && (
-          <table className="mp13-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone Number</th>
-                <th>Notes</th>
-                <th>Request</th>
-                <th>Roles</th>
-                <th>Expressed Interest Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {volunteers.rows.map((row) => (
-                <tr key={row.id}>
-                  <td data-label="Name">{`${row.firstName} ${row.lastName}`.trim()}</td>
-                  <td data-label="Email">{row.email}</td>
-                  <td data-label="Phone Number">{row.phone ?? ""}</td>
-                  <td data-label="Notes">{row.notes ?? ""}</td>
-                  <td data-label="Request">{row.requestTitle}</td>
-                  <td data-label="Roles">{row.roles.map((r) => r.roleName).join(", ")}</td>
-                  <td data-label="Expressed Interest Date">{formatDate(row.createdAt)}</td>
+        <section className="mp13-section" aria-labelledby="mp13-volunteers-heading">
+          <h2 id="mp13-volunteers-heading" className="mp13-heading">VOLUNTEERS</h2>
+          {volunteers.kind === "loading" && (
+            <p className="mp13-state mp13-loading" role="status">Loading volunteers…</p>
+          )}
+          {volunteers.kind === "error" && (
+            <p className="mp13-state mp13-error" role="alert">{TABLE_ERROR}</p>
+          )}
+          {volunteers.kind === "ready" && volunteers.rows.length === 0 && (
+            <p className="mp13-empty">No volunteers yet.</p>
+          )}
+          {volunteers.kind === "ready" && volunteers.rows.length > 0 && (
+            <table className="mp13-table mp13-table-volunteers">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone Number</th>
+                  <th>Notes</th>
+                  <th>Request</th>
+                  <th>Roles</th>
+                  <th>Expressed Interest Date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </thead>
+              <tbody>
+                {volunteers.rows.map((row) => (
+                  <tr key={row.id}>
+                    <td data-label="Name">{`${row.firstName} ${row.lastName}`.trim()}</td>
+                    <td data-label="Email">{row.email}</td>
+                    <td data-label="Phone Number">{row.phone ?? ""}</td>
+                    <td data-label="Notes">{row.notes ?? ""}</td>
+                    <td data-label="Request">{row.requestTitle}</td>
+                    <td data-label="Roles">{row.roles.map((r) => r.roleName).join(", ")}</td>
+                    <td data-label="Expressed Interest Date">{formatDate(row.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </main>
     </div>
   );
 }
