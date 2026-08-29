@@ -20,7 +20,8 @@
  * org names only, validated server-side against the caller's memberships.
  * On failure the previous selection stands (§6).
  *
- * User menu (§11): shown when authenticated; contains MY PROFILE and Log out.
+ * User menu (§11): shown when authenticated; contains the signed-in identity
+ * and Log out. MY PROFILE is a top-level utility button, not a menu item.
  * Reachable on every page so members never need to return to /dashboard to end
  * a session.
  */
@@ -102,14 +103,6 @@ function NavUserMenu({ firstName }: { firstName: string }): ReactElement {
       </button>
       {open ? (
         <div className="site-nav-user-menu" role="menu">
-          <Link
-            href="/profile"
-            role="menuitem"
-            className="site-nav-user-menu-item"
-            onClick={() => setOpen(false)}
-          >
-            MY PROFILE
-          </Link>
           <button
             type="button"
             role="menuitem"
@@ -212,6 +205,11 @@ export function NavBar(): ReactElement {
                   ADMIN
                 </Link>
               ) : null}
+              {showUserMenu ? (
+                <Link href="/profile" className="site-nav-btn">
+                  MY PROFILE
+                </Link>
+              ) : null}
               {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
             </div>
           )}
@@ -247,7 +245,7 @@ export function NavBar(): ReactElement {
           </div>
         </nav>
 
-        {/* Mobile: DASHBOARD and ADMIN stay outside the hamburger (§10) */}
+        {/* Mobile: authenticated utility buttons stay outside the hamburger (§10) */}
         <div className="site-nav-mobile-controls">
           {showDashboard ? (
             <Link href="/dashboard" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
@@ -257,6 +255,11 @@ export function NavBar(): ReactElement {
           {showAdmin ? (
             <Link href="/admin/organizations" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
               ADMIN
+            </Link>
+          ) : null}
+          {showUserMenu ? (
+            <Link href="/profile" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
+              MY PROFILE
             </Link>
           ) : null}
           <button
@@ -299,11 +302,6 @@ export function NavBar(): ReactElement {
             </Link>
           ) : null}
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />
-          {showUserMenu ? (
-            <Link href="/profile" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
-              MY PROFILE
-            </Link>
-          ) : null}
           {showUserMenu ? <NavUserMenu firstName={firstName} /> : null}
         </nav>
       ) : null}

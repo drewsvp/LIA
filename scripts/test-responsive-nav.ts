@@ -343,10 +343,7 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
     // both without breaking DOM order.
     const panelItems = await page.locator(".site-nav-panel > a:visible").allTextContents();
     const actualOrder = panelItems.map((item) => item.trim());
-    const expectedOrder = [
-      ...expected.map(({ text }) => text),
-      ...(authenticated ? ["MY PROFILE"] : []),
-    ];
+    const expectedOrder = expected.map(({ text }) => text);
     assertThat(
       JSON.stringify(actualOrder) === JSON.stringify(expectedOrder),
       "Mobile public destinations are in the wrong order.",
@@ -412,6 +409,10 @@ async function assertSignedOutNavigation(page: Page, width: number): Promise<voi
 
   assertThat((await page.locator(".site-nav-user-trigger:visible").count()) === 0, "Signed-out navigation shows a user menu.");
   assertThat((await page.locator(".site-nav-switcher:visible").count()) === 0, "Signed-out navigation shows an org switcher.");
+  assertThat(
+    (await page.locator('.site-nav a[href="/profile"]:visible').count()) === 0,
+    "Signed-out navigation shows a profile link.",
+  );
 
   if (mobile) {
     assertThat((await page.locator(".site-nav-stack:visible").count()) === 0, "Desktop navigation is visible at a mobile width.");
@@ -447,6 +448,10 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
         (expected.admin ? 1 : 0),
       expected.admin ? "ADMIN is not in the mobile control row." : "ADMIN is offered to a non-staff member.",
     );
+    assertThat(
+      (await page.locator('.site-nav-mobile-controls > a[href="/profile"]:visible').filter({ hasText: exactText("MY PROFILE") }).count()) === 1,
+      "MY PROFILE is not in the mobile authenticated control row.",
+    );
 
     await openMobileMenu(page);
     assertThat(
@@ -461,8 +466,8 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
       "User menu is not in the mobile panel.",
     );
     assertThat(
-      (await page.locator('.site-nav-panel > a[href="/profile"]:visible').count()) === 1,
-      "MY PROFILE is not directly available in the mobile panel.",
+      (await page.locator('.site-nav-panel > a[href="/profile"]:visible').count()) === 0,
+      "MY PROFILE is duplicated inside the mobile navigation panel.",
     );
   } else {
     assertThat((await page.locator(".site-nav-stack:visible").count()) === 1, "Desktop navigation is hidden above the breakpoint.");
@@ -490,6 +495,10 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
       expected.admin ? "ADMIN is not in the desktop top row." : "ADMIN is offered to a non-staff member.",
     );
     assertThat(
+      (await page.locator('.site-nav-top > a[href="/profile"]:visible').filter({ hasText: exactText("MY PROFILE") }).count()) === 1,
+      "MY PROFILE is not in the desktop authenticated utility row.",
+    );
+    assertThat(
       (await page.locator(".site-nav-top > .site-nav-user:visible").count()) === 1,
       "User menu is not in the desktop top row.",
     );
@@ -507,8 +516,8 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
     );
     await page.locator(".site-nav-user-trigger:visible").click();
     assertThat(
-      (await page.locator('.site-nav-user-menu a[href="/profile"]:visible').count()) === 1,
-      "MY PROFILE is not available in the desktop user menu.",
+      (await page.locator('.site-nav-user-menu a[href="/profile"]:visible').count()) === 0,
+      "MY PROFILE is duplicated inside the desktop user menu.",
     );
   }
 
@@ -524,6 +533,9 @@ async function assertAuthenticatedNavigation(page: Page, width: number, expected
     );
   }
   assertThat((await page.locator(".site-nav-user-trigger:visible").count()) === 1, "Expected exactly one visible user menu.");
+  const profile = page.locator('.site-nav a:visible[href="/profile"]').filter({ hasText: exactText("MY PROFILE") });
+  assertThat((await profile.count()) === 1, "MY PROFILE must appear exactly once and target /profile.");
+  assertThat((await profile.getAttribute("href")) === "/profile", "MY PROFILE must target /profile.");
   await assertPublicDestinations(page, true, mobile);
   const dashboard = page.locator('.site-nav a:visible[href="/dashboard"]').filter({ hasText: exactText("DASHBOARD") });
   assertThat(
@@ -774,6 +786,12 @@ async function runNavFlashCase(
       (await page.locator(".site-nav a[href='/admin/organizations']:visible").count()) === 0,
       `${label}: ADMIN link is visible during the session loading window.`,
     );
+    // Profile is authenticated-only and must not flash before /api/session
+    // resolves, even though it is now a persistent mobile control.
+    assertThat(
+      (await page.locator(".site-nav a[href='/profile']:visible").count()) === 0,
+      `${label}: MY PROFILE link is visible during the session loading window.`,
+    );
     // User menu chip (authenticated-only):
     //   showUserMenu = !isLoading && authenticated
     assertThat(
@@ -782,12 +800,12 @@ async function runNavFlashCase(
     );
     if (mobile) {
       // Mobile-specific: the mobile control row must not expose any
-      // session-gated links (DASHBOARD, ADMIN) while isLoading is true. The
+      // session-gated links (DASHBOARD, ADMIN, MY PROFILE) while isLoading is true. The
       // desktop assertions above catch .site-nav a[href=...]:visible globally,
       // but this assertion is explicit about the mobile control row being clean.
       assertThat(
         (await page.locator(".site-nav-mobile-controls a:visible").count()) === 0,
-        `${label}: mobile control row links (DASHBOARD / ADMIN) are visible during the session loading window.`,
+        `${label}: mobile control row links (DASHBOARD / ADMIN / MY PROFILE) are visible during the session loading window.`,
       );
     }
 
@@ -798,7 +816,7 @@ async function runNavFlashCase(
     if (mobile) {
       // At mobile widths the user menu lives inside the hamburger panel (closed
       // by default) and is not in the DOM until the panel opens. Wait for
-      // DASHBOARD in the always-visible mobile control row instead.
+      // MY PROFILE in the always-visible mobile control row instead.
       await page.waitForSelector(".site-nav-mobile-controls a[href='/dashboard']", {
         state: "attached",
         timeout: 10_000,
@@ -807,11 +825,19 @@ async function runNavFlashCase(
         (await page.locator(".site-nav-mobile-controls a[href='/dashboard']:visible").count()) === 1,
         `${label}: DASHBOARD not visible in the mobile control row after the session resolved.`,
       );
+      assertThat(
+        (await page.locator(".site-nav-mobile-controls a[href='/profile']:visible").count()) === 1,
+        `${label}: MY PROFILE not visible in the mobile control row after the session resolved.`,
+      );
     } else {
       await page.waitForSelector(".site-nav-user-trigger", { state: "attached", timeout: 10_000 });
       assertThat(
         (await page.locator(".site-nav-user-trigger:visible").count()) === 1,
         `${label}: user menu not visible after the session resolved.`,
+      );
+      assertThat(
+        (await page.locator(".site-nav-top a[href='/profile']:visible").count()) === 1,
+        `${label}: MY PROFILE not visible in the desktop utility row after the session resolved.`,
       );
     }
     assertThat(

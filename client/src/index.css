@@ -1019,6 +1019,10 @@ h3 {
 .site-nav-btn:hover {
   background: rgb(10, 70, 118);
 }
+.site-nav-btn:focus-visible {
+  outline: 3px solid var(--color-teal);
+  outline-offset: 2px;
+}
 a.site-nav-btn {
   color: #ffffff;
 }
