@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lint-adm-btn.sh — Catch adm-btn-outline used without the adm-btn base class.
+# lint-adm-btn.sh — Catch shared button variants used without their base class.
 #
 # IMPORTANT: This script must always run to completion.
 # It contains two independent checks: a TSX/TS source scan (Step 1) and a CSS
@@ -111,6 +111,56 @@ fi
 echo "lint-adm-btn: OK — all adm-btn-outline usages correctly pair with adm-btn."
 echo ""
 
+# Shared ui-btn variants are modifiers, not standalone button definitions.
+# A missing ui-btn base would silently drop the canonical geometry and focus
+# treatment while leaving only the semantic colour rule.
+UI_VARIANT_VIOLATIONS=$(
+  grep -rnE 'ui-btn-(primary|teal|secondary|selected|danger|compact)' client/src/ \
+    --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  | grep -vP '(^|[\s"'"'"'`=])ui-btn([\s"'"'"'`]|$)' \
+  || true
+)
+
+if [ -n "$UI_VARIANT_VIOLATIONS" ]; then
+  echo "lint-adm-btn: ERROR — ui-btn variant used without ui-btn base class."
+  echo "Every ui-btn-* variant in application source must also include ui-btn."
+  echo ""
+  echo "$UI_VARIANT_VIOLATIONS"
+  echo ""
+  exit 1
+fi
+
+echo "lint-adm-btn: OK — all ui-btn variants correctly pair with ui-btn."
+echo ""
+
+# Every native button must either use a named class contract or explicitly
+# document why it is a purpose-built control (for example, an inline text
+# disclosure). This prevents new browser-default action buttons from shipping.
+BARE_BUTTONS=$(
+  python - <<'PY'
+from pathlib import Path
+import re
+
+for path in Path("client/src").rglob("*.tsx"):
+    source = path.read_text()
+    for match in re.finditer(r"<button\b([\s\S]*?)>", source):
+        attrs = match.group(1)
+        if "className=" not in attrs and "data-button-pattern=" not in attrs:
+            line = source.count("\n", 0, match.start()) + 1
+            print(f"{path}:{line}")
+PY
+)
+
+if [ -n "$BARE_BUTTONS" ]; then
+  echo "lint-adm-btn: ERROR — native buttons need className or a documented data-button-pattern exception."
+  echo "$BARE_BUTTONS"
+  echo ""
+  exit 1
+fi
+
+echo "lint-adm-btn: OK — no undocumented browser-default buttons found."
+echo ""
+
 # ---------------------------------------------------------------------------
 # CSS structure check — verify .adm-btn and .adm-btn-outline share a selector.
 #
@@ -150,6 +200,14 @@ else
   echo "  Restore the combined selector in $CSS_FILE."
   exit 1
 fi
+
+for REQUIRED_SELECTOR in ".ui-btn" ".ui-btn-secondary" ".ui-btn-selected" ".ui-btn-danger"; do
+  if ! grep -qF "$REQUIRED_SELECTOR" "$CSS_FILE"; then
+    echo "  FAIL: shared button contract is missing $REQUIRED_SELECTOR."
+    exit 1
+  fi
+done
+echo "  PASS: shared base, secondary, selected, and destructive selectors are present."
 
 echo ""
 echo "lint-adm-btn: OK — CSS combined-selector check passed."

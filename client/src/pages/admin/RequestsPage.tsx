@@ -987,7 +987,11 @@ export function RequestsPage() {
         {(["all", "item", "volunteer"] as TypeFilter[]).map((f) => (
           <button
             key={f}
-            className={typeFilter === f ? "adm-filterbtn adm-filterbtn-on" : "adm-filterbtn"}
+            className={
+              typeFilter === f
+                ? "ui-btn ui-btn-selected adm-filterbtn adm-filterbtn-on"
+                : "ui-btn ui-btn-secondary adm-filterbtn"
+            }
             onClick={() => setTypeFilter(f)}
           >
             {f === "all" ? "All" : f === "item" ? "Items" : "Volunteer"}
@@ -1760,7 +1764,7 @@ export function RequestsPage() {
               <div className="adm-actions">
                 {/* Edit is independent of unapproval and remains available on active requests. */}
                 {isEditable && (
-                  <button className="adm-btn" disabled={busy} onClick={startEdit}>
+                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={startEdit}>
                     Edit Request
                   </button>
                 )}
@@ -1774,10 +1778,10 @@ export function RequestsPage() {
                     >
                       Approve
                     </button>
-                    <button className="adm-btn" disabled={busy} onClick={() => setReturning(true)}>
+                    <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setReturning(true)}>
                       Return to draft
                     </button>
-                    <button className="adm-btn" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
+                    <button className="adm-btn adm-btn-danger" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
                       Archive
                     </button>
                   </>
@@ -1791,7 +1795,7 @@ export function RequestsPage() {
                     >
                       Unapprove
                     </button>
-                    <button className="adm-btn" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
+                    <button className="adm-btn adm-btn-danger" disabled={busy} onClick={() => setConfirm({ kind: "archive" })}>
                       Archive
                     </button>
                   </>
@@ -1853,7 +1857,7 @@ export function RequestsPage() {
                   >
                     Unapprove
                   </button>
-                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
+                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
                     Cancel
                   </button>
                 </div>
@@ -1873,7 +1877,7 @@ export function RequestsPage() {
                   >
                     Approve
                   </button>
-                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
+                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
                     Cancel
                   </button>
                 </div>
@@ -1884,13 +1888,13 @@ export function RequestsPage() {
                   {/* §8 verbatim. */}
                   <p>Archive {request.title}? It will stop appearing publicly. No email is sent.</p>
                   <button
-                    className="adm-btn adm-btn-primary"
+                    className="adm-btn adm-btn-danger"
                     disabled={busy}
                     onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/archive`)}
                   >
                     Archive
                   </button>
-                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
+                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
                     Cancel
                   </button>
                 </div>

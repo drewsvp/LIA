@@ -442,6 +442,7 @@ export function VolunteerDetailPage(): ReactElement {
                                 {" "}
                                 <button
                                   type="button"
+                                  data-button-pattern="disclosure"
                                   onClick={() => setExpanded((prev) => ({ ...prev, [role.id]: !isExpanded }))}
                                   style={{
                                     background: "none",

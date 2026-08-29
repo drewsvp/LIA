@@ -187,6 +187,7 @@ function UpcomingDigestSection(): ReactElement {
                       <td>
                         <button
                           type="button"
+                          className="adm-btn adm-btn-outline"
                           onClick={() => void toggleExclusion(n)}
                           disabled={busyId === key}
                         >
@@ -327,7 +328,7 @@ export function SubscribersPage(): ReactElement {
           To
           <input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} />
         </label>
-        <button type="button" onClick={() => void exportCsv()} disabled={busy || rows.length === 0}>
+        <button className="adm-btn" type="button" onClick={() => void exportCsv()} disabled={busy || rows.length === 0}>
           Export
         </button>
       </div>
@@ -371,7 +372,7 @@ export function SubscribersPage(): ReactElement {
                 <td>{r.legacySource === null ? "Signed up" : "Imported"}</td>
                 <td>
                   {r.status === "subscribed" && (
-                    <button type="button" onClick={() => void unsubscribe(r)} disabled={busy}>
+                    <button className="adm-btn adm-btn-danger" type="button" onClick={() => void unsubscribe(r)} disabled={busy}>
                       Unsubscribe
                     </button>
                   )}

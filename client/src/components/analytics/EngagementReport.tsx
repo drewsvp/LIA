@@ -339,7 +339,7 @@ export function EngagementReport({ apiUrl, orgId, exportUrl }: EngagementReportP
           {exportUrl && (
             <div className="anl-export-row">
               <a
-                className="anl-export-btn"
+                className="ui-btn anl-export-btn"
                 href={(() => {
                   const params = new URLSearchParams();
                   if (from) params.set("from", from);

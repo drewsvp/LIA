@@ -127,7 +127,7 @@ export function OrganizationContextBanner({
   return (
     <aside className="org-context-banner" aria-label="Organization view">
       <span>You are viewing <strong>{organizationName}</strong> as an administrator.</span>
-      <button type="button" onClick={() => void exit()} disabled={busy}>
+      <button type="button" className="ui-btn ui-btn-secondary" onClick={() => void exit()} disabled={busy}>
         {busy ? "Exiting…" : "Exit organization view"}
       </button>
       {error ? <span className="org-context-banner-error" role="alert">{error}</span> : null}
@@ -178,7 +178,7 @@ export function SupporterContextBanner({
         Supporter view: <strong>{supporterName}</strong>. Staff and organization permissions are paused until you return.
         This view expires at {expiryText}.
       </span>
-      <button type="button" onClick={() => void exit()} disabled={busy}>
+      <button type="button" className="ui-btn" onClick={() => void exit()} disabled={busy}>
         {busy ? "Returning…" : "Return to staff session"}
       </button>
       {error ? <span className="org-context-banner-error" role="alert">{error}</span> : null}

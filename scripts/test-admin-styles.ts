@@ -82,11 +82,13 @@ function parseCookie(
   return cookie;
 }
 
-async function loginCookie(): Promise<Parameters<BrowserContext["addCookies"]>[0][number]> {
+async function loginCookie(
+  role: "staff_admin" | "org_owner" = "staff_admin",
+): Promise<Parameters<BrowserContext["addCookies"]>[0][number]> {
   const response = await fetch(`${BASE}/api/login/quick`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "staff_admin" }),
+    body: JSON.stringify({ role }),
   });
   if (!response.ok) {
     throw new Error(
@@ -102,6 +104,45 @@ async function loginCookie(): Promise<Parameters<BrowserContext["addCookies"]>[0
   return parseCookie(sessionCookie);
 }
 
+async function assertCenteredAction(page: Page, selector: string, label: string): Promise<void> {
+  await page.waitForSelector(selector, { state: "visible", timeout: 15_000 });
+  const layout = await page.locator(selector).first().evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const parentRect = element.parentElement!.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return {
+      display: style.display,
+      minHeight: style.minHeight,
+      buttonCenter: rect.left + rect.width / 2,
+      parentCenter: parentRect.left + parentRect.width / 2,
+    };
+  });
+  check(label, () => {
+    assert(layout.display === "flex", "Centered form action must remain block-level flex.", layout);
+    assert(parseFloat(layout.minHeight) >= 40, "Centered form action must keep the shared hit target.", layout);
+    assert(Math.abs(layout.buttonCenter - layout.parentCenter) <= 2, "Form action must remain horizontally centered.", layout);
+  });
+}
+
+async function checkCenteredMemberActions(browser: Awaited<ReturnType<typeof chromium.launch>>): Promise<void> {
+  console.log("\nCentered member form actions");
+
+  const anonymous = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const publicPage = await anonymous.newPage();
+  await publicPage.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  await assertCenteredAction(publicPage, ".mp1-submit", "login submit remains centered with shared geometry");
+  await publicPage.goto(`${BASE}/signup`, { waitUntil: "domcontentloaded" });
+  await assertCenteredAction(publicPage, ".mp3-submit", "signup submit remains centered with shared geometry");
+  await anonymous.close();
+
+  const owner = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await owner.addCookies([await loginCookie("org_owner")]);
+  const memberPage = await owner.newPage();
+  await memberPage.goto(`${BASE}/dashboard/organization`, { waitUntil: "domcontentloaded" });
+  await assertCenteredAction(memberPage, ".mp5-submit", "member settings submit remains centered with shared geometry");
+  await owner.close();
+}
+
 type StyleResult = {
   exists: boolean;
   borderRadius: string;
@@ -109,6 +150,11 @@ type StyleResult = {
   textTransform: string;
   borderColor: string;
   borderStyle: string;
+  display: string;
+  minHeight: string;
+  fontSize: string;
+  fontWeight: string;
+  letterSpacing: string;
 };
 
 /**
@@ -126,6 +172,11 @@ async function getComputedStyles(page: Page, selector: string): Promise<StyleRes
         textTransform: "",
         borderColor: "",
         borderStyle: "",
+        display: "",
+        minHeight: "",
+        fontSize: "",
+        fontWeight: "",
+        letterSpacing: "",
       };
     }
     const s = window.getComputedStyle(el);
@@ -136,6 +187,11 @@ async function getComputedStyles(page: Page, selector: string): Promise<StyleRes
       textTransform: s.textTransform,
       borderColor: s.borderColor,
       borderStyle: s.borderStyle,
+      display: s.display,
+      minHeight: s.minHeight,
+      fontSize: s.fontSize,
+      fontWeight: s.fontWeight,
+      letterSpacing: s.letterSpacing,
     };
   }, selector);
 }
@@ -301,6 +357,56 @@ async function checkRequestsPage(page: Page): Promise<void> {
       { borderRadius: filterbtnStyles.borderRadius },
     );
   });
+  check("request filters use the shared header-button contract", () => {
+    assert(
+      filterbtnStyles.display === "inline-flex" || filterbtnStyles.display === "flex",
+      "Request filters must use the shared flex button layout.",
+      filterbtnStyles,
+    );
+    assert(parseFloat(filterbtnStyles.minHeight) >= 40, "Request filters must retain a 40px minimum hit area.", filterbtnStyles);
+    assert(filterbtnStyles.fontWeight === "700", "Request filters must use the compact bold button type.", filterbtnStyles);
+    assert(filterbtnStyles.textTransform === "uppercase", "Request filters must use uppercase button labels.", filterbtnStyles);
+  });
+
+  const desktopFilterLayout = await page.evaluate(() => {
+    const group = document.querySelector<HTMLElement>('.adm-filter[role="group"]');
+    const buttons = Array.from(document.querySelectorAll<HTMLElement>(".adm-filterbtn"));
+    const groupRect = group?.getBoundingClientRect();
+    const style = group ? window.getComputedStyle(group) : null;
+    return {
+      groupWidth: groupRect?.width ?? 0,
+      contentWidth: group?.parentElement?.getBoundingClientRect().width ?? 0,
+      buttonWidths: buttons.map((button) => button.getBoundingClientRect().width),
+      gap: style ? parseFloat(style.columnGap || style.gap) : 0,
+      flexDirection: style?.flexDirection ?? "",
+      flexWrap: style?.flexWrap ?? "",
+    };
+  });
+  check("request filters are content-width buttons with visible gaps", () => {
+    assert(desktopFilterLayout.flexDirection === "row", "Request filters must lay out in a row.", desktopFilterLayout);
+    assert(desktopFilterLayout.flexWrap === "wrap", "Request filters must be allowed to wrap.", desktopFilterLayout);
+    assert(desktopFilterLayout.gap >= 8, "Request filters must have a visible gap.", desktopFilterLayout);
+    assert(
+      desktopFilterLayout.groupWidth < desktopFilterLayout.contentWidth * 0.75,
+      "Request filter group must not stretch across the page.",
+      desktopFilterLayout,
+    );
+    assert(
+      desktopFilterLayout.buttonWidths.every((width) => width < desktopFilterLayout.contentWidth * 0.5),
+      "Each request filter must stay content-sized rather than rendering as a bar.",
+      desktopFilterLayout,
+    );
+  });
+
+  await page.locator(".adm-filterbtn").first().focus();
+  const focusStyle = await page.locator(".adm-filterbtn").first().evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, outlineOffset: style.outlineOffset };
+  });
+  check("request filters retain a visible keyboard focus ring", () => {
+    assert(focusStyle.outlineStyle !== "none", "Focused request filter must have an outline.", focusStyle);
+    assert(parseFloat(focusStyle.outlineWidth) >= 3, "Focused request filter outline must be at least 3px.", focusStyle);
+  });
 
   // Action buttons when a row is selected.
   const btnStyles = await getComputedStyles(page, ".adm-btn");
@@ -314,6 +420,87 @@ async function checkRequestsPage(page: Page): Promise<void> {
       );
     });
   }
+
+  const firstRow = page.locator("tr.adm-row").first();
+  if (await firstRow.count() > 0) {
+    await firstRow.click();
+    const actionRow = page.locator(".adm-detail .adm-actions").first();
+    await actionRow.waitFor({ state: "visible", timeout: 10_000 }).catch(() => undefined);
+    if (await actionRow.count() > 0) {
+      const desktopActions = await actionRow.evaluate((element) => {
+        const style = window.getComputedStyle(element);
+        const buttons = Array.from(element.querySelectorAll<HTMLElement>(".adm-btn"));
+        return {
+          gap: parseFloat(style.columnGap || style.gap),
+          flexWrap: style.flexWrap,
+          buttonCount: buttons.length,
+          separated: buttons.every((button, index) => {
+            if (index === 0) return true;
+            const previous = buttons[index - 1]!.getBoundingClientRect();
+            const current = button.getBoundingClientRect();
+            return current.left - previous.right >= 8 || current.top - previous.bottom >= 8;
+          }),
+        };
+      });
+      check("request action buttons have deliberate spacing and wrapping", () => {
+        assert(desktopActions.flexWrap === "wrap", "Request actions must wrap.", desktopActions);
+        assert(desktopActions.gap >= 8, "Request actions must have a visible gap.", desktopActions);
+        assert(desktopActions.buttonCount > 0 && desktopActions.separated, "Request actions must not appear fused.", desktopActions);
+      });
+    }
+  }
+
+  await page.setViewportSize({ width: 375, height: 800 });
+  const mobileLayout = await page.evaluate(() => {
+    const group = document.querySelector<HTMLElement>('.adm-filter[role="group"]');
+    const actions = document.querySelector<HTMLElement>(".adm-detail .adm-actions");
+    return {
+      viewportWidth: window.innerWidth,
+      groupLeft: group?.getBoundingClientRect().left ?? 0,
+      groupRight: group?.getBoundingClientRect().right ?? 0,
+      actionsLeft: actions?.getBoundingClientRect().left ?? 0,
+      actionsRight: actions?.getBoundingClientRect().right ?? 0,
+    };
+  });
+  check("request filters and actions do not overflow on mobile", () => {
+    assert(mobileLayout.groupLeft >= 0, "Request filters must not overflow the left edge.", mobileLayout);
+    assert(mobileLayout.groupRight <= mobileLayout.viewportWidth + 1, "Request filters must stay in the viewport.", mobileLayout);
+    assert(
+      mobileLayout.actionsRight === 0 ||
+        (mobileLayout.actionsLeft >= 0 && mobileLayout.actionsRight <= mobileLayout.viewportWidth + 1),
+      "Request action group must stay in the viewport.",
+      mobileLayout,
+    );
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  const compactPager = await page.evaluate(() => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-btn ui-btn-secondary ui-btn-compact mp12-pager-btn";
+    button.textContent = "←";
+    document.body.append(button);
+    button.focus();
+    const style = window.getComputedStyle(button);
+    const result = {
+      minHeight: style.minHeight,
+      height: button.getBoundingClientRect().height,
+      borderRadius: style.borderRadius,
+      fontSize: style.fontSize,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+    };
+    button.remove();
+    return result;
+  });
+  check("member volunteer pager uses the compact shared button contract", () => {
+    assert(parseFloat(compactPager.minHeight) >= 40, "Pager must keep a 40px minimum hit target.", compactPager);
+    assert(compactPager.height >= 40, "Pager rendered height must be at least 40px.", compactPager);
+    assert(parseBorderRadius(compactPager.borderRadius) >= 5, "Pager must use the shared rounded geometry.", compactPager);
+    assert(parseFloat(compactPager.fontSize) <= 12, "Compact pager must use compact button typography.", compactPager);
+    assert(compactPager.outlineStyle !== "none", "Focused pager must have an outline.", compactPager);
+    assert(parseFloat(compactPager.outlineWidth) >= 3, "Focused pager outline must be at least 3px.", compactPager);
+  });
 
   // Request queue table (data-dependent).
   const tableStyles = await getComputedStyles(page, ".adm-table");
@@ -417,6 +604,45 @@ async function checkEmailLogPage(page: Page): Promise<void> {
   }
 }
 
+async function checkSubscriberActions(page: Page): Promise<void> {
+  console.log("\nSubscriber actions (/admin/subscribers)");
+  await page.goto(`${BASE}/admin/subscribers`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".adm-nav", { state: "visible", timeout: 15_000 });
+
+  const exportButton = page.getByRole("button", { name: "Export", exact: true });
+  await exportButton.waitFor({ state: "visible", timeout: 15_000 });
+  const exportStyles = await getComputedStyles(page, "button.adm-btn");
+  check("subscriber export uses shared action geometry", () => {
+    assert(exportStyles.exists, "Expected the subscriber Export action to use .adm-btn.", exportStyles);
+    assert(parseFloat(exportStyles.minHeight) >= 40, "Subscriber Export must have a 40px minimum hit target.", exportStyles);
+    assert(exportStyles.fontWeight === "700", "Subscriber Export must use shared bold typography.", exportStyles);
+    assert(exportStyles.textTransform === "uppercase", "Subscriber Export must use shared uppercase typography.", exportStyles);
+  });
+
+  await exportButton.focus();
+  const exportFocus = await exportButton.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
+  });
+  check("subscriber export retains shared keyboard focus feedback", () => {
+    assert(exportFocus.outlineStyle !== "none", "Focused subscriber Export must have an outline.", exportFocus);
+    assert(parseFloat(exportFocus.outlineWidth) >= 3, "Subscriber Export outline must be at least 3px.", exportFocus);
+  });
+
+  const unsubscribe = page.getByRole("button", { name: "Unsubscribe", exact: true }).first();
+  if (await unsubscribe.count() > 0) {
+    const styles = await unsubscribe.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return { color: style.color, borderColor: style.borderColor, minHeight: style.minHeight };
+    });
+    check("subscriber unsubscribe remains visually destructive", () => {
+      assert(styles.color === "rgb(164, 38, 44)", "Unsubscribe must use the destructive red treatment.", styles);
+      assert(styles.borderColor === "rgb(164, 38, 44)", "Unsubscribe must use a destructive red border.", styles);
+      assert(parseFloat(styles.minHeight) >= 40, "Unsubscribe must retain the shared hit target.", styles);
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const browser = await chromium.launch({
     headless: true,
@@ -424,6 +650,7 @@ async function main(): Promise<void> {
   });
 
   try {
+    await checkCenteredMemberActions(browser);
     const cookie = await loginCookie();
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     await context.addCookies([cookie]);
@@ -432,6 +659,7 @@ async function main(): Promise<void> {
     await checkOrganizationsPage(page);
     await checkRequestsPage(page);
     await checkEmailLogPage(page);
+    await checkSubscriberActions(page);
 
     await context.close();
   } finally {

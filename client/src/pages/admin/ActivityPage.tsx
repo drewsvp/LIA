@@ -101,7 +101,7 @@ export function ActivityPage(): ReactElement {
       {entityMode && (
         <div className="adm-act-entitymode">
           <span>Showing the full history of one {entityTypeName(filters.entityType).toLowerCase()}.</span>
-          <button type="button" onClick={showAll}>
+          <button type="button" className="adm-btn adm-btn-outline" onClick={showAll}>
             Show all activity
           </button>
         </div>

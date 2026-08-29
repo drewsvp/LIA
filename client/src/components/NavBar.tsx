@@ -203,17 +203,17 @@ export function NavBar(): ReactElement {
           {showMemberLogin ? null : (
             <div className="site-nav-top">
               {showDashboard ? (
-                <Link href="/dashboard" className="site-nav-btn">
+                <Link href="/dashboard" className="site-nav-btn ui-btn">
                   DASHBOARD
                 </Link>
               ) : null}
               {showAdmin ? (
-                <Link href="/admin/organizations" className="site-nav-btn">
+                <Link href="/admin/organizations" className="site-nav-btn ui-btn">
                   ADMIN
                 </Link>
               ) : null}
               {showUserMenu ? (
-                <Link href="/profile" className="site-nav-btn">
+                <Link href="/profile" className="site-nav-btn ui-btn">
                   MY PROFILE
                 </Link>
               ) : null}
@@ -244,7 +244,7 @@ export function NavBar(): ReactElement {
               VOLUNTEER
             </Link>
             {showMemberLogin ? (
-              <Link href="/login" className="site-nav-btn">
+              <Link href="/login" className="site-nav-btn ui-btn">
                 MEMBER LOGIN
               </Link>
             ) : null}
@@ -255,17 +255,17 @@ export function NavBar(): ReactElement {
         {/* Mobile: authenticated utility buttons stay outside the hamburger (§10) */}
         <div className="site-nav-mobile-controls">
           {showDashboard ? (
-            <Link href="/dashboard" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
+            <Link href="/dashboard" className="site-nav-btn ui-btn" onClick={() => setMenuOpen(false)}>
               DASHBOARD
             </Link>
           ) : null}
           {showAdmin ? (
-            <Link href="/admin/organizations" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
+            <Link href="/admin/organizations" className="site-nav-btn ui-btn" onClick={() => setMenuOpen(false)}>
               ADMIN
             </Link>
           ) : null}
           {showUserMenu ? (
-            <Link href="/profile" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
+            <Link href="/profile" className="site-nav-btn ui-btn" onClick={() => setMenuOpen(false)}>
               MY PROFILE
             </Link>
           ) : null}
@@ -304,7 +304,7 @@ export function NavBar(): ReactElement {
             VOLUNTEER
           </Link>
           {showMemberLogin ? (
-            <Link href="/login" className="site-nav-btn" onClick={() => setMenuOpen(false)}>
+            <Link href="/login" className="site-nav-btn ui-btn" onClick={() => setMenuOpen(false)}>
               MEMBER LOGIN
             </Link>
           ) : null}

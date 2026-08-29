@@ -533,7 +533,7 @@ export function VolunteersEditPage() {
             <div className="mp12-pager">
               <button
                 type="button"
-                className="mp12-pager-btn"
+                className="ui-btn ui-btn-secondary ui-btn-compact mp12-pager-btn"
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={safePage === 0}
                 aria-label="Previous role"
@@ -545,7 +545,7 @@ export function VolunteersEditPage() {
               </span>
               <button
                 type="button"
-                className="mp12-pager-btn"
+                className="ui-btn ui-btn-secondary ui-btn-compact mp12-pager-btn"
                 onClick={() => setPage((p) => Math.min(rows.length - 1, p + 1))}
                 disabled={safePage >= rows.length - 1}
                 aria-label="Next role"

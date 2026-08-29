@@ -170,7 +170,7 @@ export function LoginPage(): ReactElement | null {
                 {formError}
               </p>
             ) : null}
-            <button className="mp1-submit" type="submit" disabled={submitting}>
+            <button className="ui-btn mp1-submit" type="submit" disabled={submitting}>
               {submitting ? "Sending Link…" : "Send Login Link"}
             </button>
           </form>
@@ -185,7 +185,7 @@ export function LoginPage(): ReactElement | null {
                   {QUICK_LOGIN_ROLES.map(({ role, label, name }) => (
                     <button
                       key={role}
-                      className="mp1-quick-btn"
+                      className="ui-btn ui-btn-secondary mp1-quick-btn"
                       type="button"
                       disabled={quickLoading !== null}
                       onClick={() => void handleQuickLogin(role)}

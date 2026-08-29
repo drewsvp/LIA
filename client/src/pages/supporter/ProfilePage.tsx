@@ -331,7 +331,7 @@ export function SupporterProfilePage(): ReactElement | null {
                     {contactErrors.phone ? <small id="profile-phone-error">{contactErrors.phone}</small> : null}
                   </label>
                 </div>
-                <button type="submit" className="pub-btn supporter-contact-save" disabled={savingContact}>
+                <button type="submit" className="ui-btn ui-btn-teal pub-btn supporter-contact-save" disabled={savingContact}>
                   {savingContact ? "Saving…" : "Save contact information"}
                 </button>
                 {contactResult ? (
@@ -405,7 +405,7 @@ export function SupporterProfilePage(): ReactElement | null {
               )}
               <button
                 type="button"
-                className="pub-btn supporter-interests-save"
+                className="ui-btn ui-btn-teal pub-btn supporter-interests-save"
                 disabled={savingInterests}
                 onClick={() => void saveVolunteerInterests()}
               >
