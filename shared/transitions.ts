@@ -10,6 +10,7 @@
  */
 export const ENTITY_TYPE_NAMES: Record<string, string> = {
   organization: "Organization",
+  organization_context: "Organization view",
   item_request: "Item request",
   volunteer_request: "Volunteer request",
   org_membership: "Membership",
@@ -63,6 +64,12 @@ export function transitionLabel(
   note: string | null,
 ): string {
   const key = `${fromStatus ?? ""}:${toStatus}`;
+  if (entityType === "organization_context") {
+    if (toStatus === "entered") return "Entered organization view";
+    if (toStatus === "exited") return "Exited organization view";
+    if (toStatus === "invalidated") return "Organization view invalidated";
+    if (toStatus === "expired") return "Organization view expired";
+  }
   if (entityType === "item_request" || entityType === "volunteer_request") {
     if (toStatus === "archived") {
       if (note === "expired") return "Archived automatically after expiry";

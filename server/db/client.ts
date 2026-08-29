@@ -20,6 +20,7 @@
  */
 import pg from "pg";
 import type { PoolClient, QueryResultRow } from "pg";
+import { currentOrganizationContext } from "../auth/organization-context-store";
 
 const { Pool } = pg;
 
@@ -79,10 +80,21 @@ export async function withDbContext<T>(
   const client = await pool.connect();
   try {
     await client.query("begin");
-    await client.query("select set_config('app.context', $1, true), set_config('app.user_id', $2, true)", [
-      ctx.kind,
-      userId,
-    ]);
+    const organizationContext = currentOrganizationContext();
+    await client.query(
+      `select set_config('app.context', $1, true),
+              set_config('app.user_id', $2, true),
+              set_config('app.organization_context_id', $3, true),
+              set_config('app.organization_id', $4, true),
+              set_config('app.actor_user_id', $5, true)`,
+      [
+        ctx.kind,
+        userId,
+        organizationContext?.id ?? "",
+        organizationContext?.organizationId ?? "",
+        organizationContext?.actorUserId ?? "",
+      ],
+    );
     const result = await fn(client);
     await client.query("commit");
     return result;

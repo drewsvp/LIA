@@ -108,6 +108,7 @@ type Detail = {
   revisions: Array<{
     id: string;
     actorName: string | null;
+    contextOrganizationName: string | null;
     summary: string;
     createdAt: string;
   }>;
@@ -1486,6 +1487,7 @@ export function RequestsPage() {
                       <tr>
                         <th>When</th>
                         <th>By</th>
+                        <th>Organization context</th>
                         <th>What changed</th>
                       </tr>
                     </thead>
@@ -1494,6 +1496,7 @@ export function RequestsPage() {
                         <tr key={rev.id}>
                           <td className="adm-revisions-date">{formatDateTime(rev.createdAt)}</td>
                           <td>{rev.actorName ?? "Staff"}</td>
+                          <td>{rev.contextOrganizationName ?? "—"}</td>
                           <td>{rev.summary}</td>
                         </tr>
                       ))}

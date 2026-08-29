@@ -31,6 +31,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../hooks/useSession";
 import { apiRequest } from "../lib/queryClient";
 import logoBlue from "../assets/alliance-logo-blue.png";
+import { OrganizationContextBanner } from "./OrganizationContext";
 
 
 /**
@@ -130,7 +131,7 @@ function OrgSwitcher({ className }: { className: string }): ReactElement | null 
   const queryClient = useQueryClient();
   const [pendingOrgId, setPendingOrgId] = useState<string | null>(null);
 
-  if (!session?.authenticated || session.memberships.length < 2) return null;
+  if (!session?.authenticated || session.organizationContext !== null || session.memberships.length < 2) return null;
 
   async function choose(orgId: string): Promise<void> {
     setPendingOrgId(orgId);
@@ -166,7 +167,9 @@ export function NavBar(): ReactElement {
   const { session, isLoading } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const showDashboard = !isLoading && session?.authenticated === true && session.memberships.length >= 1;
+  const organizationContext = session?.organizationContext ?? null;
+  const contextActive = organizationContext !== null;
+  const showDashboard = !isLoading && session?.authenticated === true && (session.memberships.length >= 1 || contextActive);
   // The user menu (identity + log out) must be reachable for EVERY
   // authenticated session, membership or not — otherwise a member-less
   // login has no way to see who they are or sign out.
@@ -177,10 +180,11 @@ export function NavBar(): ReactElement {
   const firstName = session?.user?.firstName ?? "";
   // Admin link: visible to any staff session (approver or admin); both roles
   // can reach /admin/organizations (the first non-staff-admin-only surface).
-  const showAdmin = !isLoading && session?.staffRole != null;
+  const showAdmin = !isLoading && !contextActive && session?.staffRole != null;
 
   return (
     <header className="site-nav">
+      {organizationContext ? <OrganizationContextBanner organizationName={organizationContext.organizationName} /> : null}
       <div className="site-nav-inner">
         <Link href="/" className="site-nav-logo" onClick={() => setMenuOpen(false)}>
           <img

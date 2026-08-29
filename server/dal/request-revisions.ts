@@ -13,6 +13,8 @@ const SELECT_COLS = `rr.id,
   rr.entity_type as "entityType",
   rr.entity_id as "entityId",
   rr.actor_user_id as "actorUserId",
+  rr.organization_context_id as "organizationContextId",
+  rr.context_organization_id as "contextOrganizationId",
   rr.summary,
   rr.created_at as "createdAt"`;
 
@@ -42,10 +44,12 @@ export async function listByEntity(
     select ${SELECT_COLS},
            case when p.id is null then null
                 else nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), '')
-           end as "actorName"
+           end as "actorName",
+           co.name as "contextOrganizationName"
     from request_revisions rr
     left join users u on u.id = rr.actor_user_id
     left join people p on p.id = u.person_id
+    left join organizations co on co.id = rr.context_organization_id
     where rr.entity_type = $1 and rr.entity_id = $2
     order by rr.created_at desc`;
   return withDbContext(ctx, (c) => q<RequestRevisionWithActor>(c, sql, [entityType, entityId]));

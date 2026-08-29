@@ -108,6 +108,9 @@ export function DashboardGate({ children }: { children: ReactNode }): ReactEleme
     const error = new URLSearchParams(search).get("error");
     return <Redirect to={error ? `/login?error=${encodeURIComponent(error)}` : "/login"} replace />;
   }
+  // Staff organization view is deliberately valid without a membership in the
+  // target organization; the server scopes dashboard APIs to this context.
+  if (session.organizationContext !== null && session.organizationContext !== undefined) return <>{children}</>;
   // Supporter accounts have no org memberships by design — their home is the
   // profile page, never the pending-approval message or the dashboard.
   if (session.isSupporter && session.memberships.length === 0) return <Redirect to="/profile" replace />;

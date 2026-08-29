@@ -2214,7 +2214,11 @@ export function registerAdminRoutes(app: Express): void {
           actorUserId: r.actorUserId,
           actorName: r.actorName,
           note: r.note,
-          entity: entities[`${r.entityType}:${r.entityId}`] ?? null,
+          contextOrganizationName: r.contextOrganizationName,
+          entity:
+            r.entityType === "organization_context" && r.contextOrganizationName
+              ? { name: r.contextOrganizationName, path: null }
+              : (entities[`${r.entityType}:${r.entityId}`] ?? null),
         })),
       });
     } catch (err) {

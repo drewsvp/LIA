@@ -699,6 +699,34 @@ create policy approval_events_system_staff_all on approval_events
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 
+-- ---------------------------------------------------------------- admin organization contexts
+
+alter table admin_organization_contexts enable row level security;
+alter table admin_organization_contexts force row level security;
+
+drop policy if exists admin_organization_contexts_system_staff_all on admin_organization_contexts;
+create policy admin_organization_contexts_system_staff_all on admin_organization_contexts
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+alter table organization_context_actions enable row level security;
+alter table organization_context_actions force row level security;
+
+drop policy if exists organization_context_actions_system_staff_all on organization_context_actions;
+create policy organization_context_actions_system_staff_all on organization_context_actions
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+-- ---------------------------------------------------------------- request_revisions
+
+alter table request_revisions enable row level security;
+alter table request_revisions force row level security;
+
+drop policy if exists request_revisions_system_staff_all on request_revisions;
+create policy request_revisions_system_staff_all on request_revisions
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
 -- ---------------------------------------------------------------- email_log
 
 alter table email_log enable row level security;

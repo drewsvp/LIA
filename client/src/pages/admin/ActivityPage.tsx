@@ -18,6 +18,7 @@ type ActRow = {
   toStatus: string;
   actorUserId: string | null;
   actorName: string | null;
+  contextOrganizationName: string | null;
   note: string | null;
   entity: { name: string; path: string | null } | null;
 };
@@ -160,6 +161,7 @@ export function ActivityPage(): ReactElement {
               <th>Entity</th>
               <th>Transition</th>
               <th>Actor</th>
+              <th>Organization context</th>
               <th>Note</th>
             </tr>
           </thead>
@@ -183,6 +185,7 @@ export function ActivityPage(): ReactElement {
                 </td>
                 <td>{transitionLabel(r.entityType, r.fromStatus, r.toStatus, r.note)}</td>
                 <td>{r.actorUserId === null ? "Automated" : (r.actorName ?? "Unknown user")}</td>
+                <td>{r.contextOrganizationName ?? "—"}</td>
                 <td className="adm-act-note">{r.note ?? ""}</td>
               </tr>
             ))}

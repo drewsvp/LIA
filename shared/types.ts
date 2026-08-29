@@ -25,6 +25,7 @@ export type ArchivedReason = "manual" | "expired" | "fulfilled";
 export type ItemCondition = "new" | "gently_used" | "any";
 export type ApprovalEntityType =
   | "organization"
+  | "organization_context"
   | "org_membership"
   | "item_request"
   | "volunteer_request"
@@ -308,6 +309,8 @@ export type ApprovalEvent = {
   fromStatus: string | null;
   toStatus: string;
   actorUserId: string | null;
+  organizationContextId: string | null;
+  contextOrganizationId: string | null;
   note: string | null;
   createdAt: string;
 };
@@ -355,12 +358,17 @@ export type RequestRevision = {
   entityType: "item_request" | "volunteer_request";
   entityId: string;
   actorUserId: string;
+  organizationContextId: string | null;
+  contextOrganizationId: string | null;
   summary: string;
   createdAt: string;
 };
 
 /** Revision entry with the actor's display name joined in. */
-export type RequestRevisionWithActor = RequestRevision & { actorName: string | null };
+export type RequestRevisionWithActor = RequestRevision & {
+  actorName: string | null;
+  contextOrganizationName: string | null;
+};
 
 // ---------------------------------------------------------------- session
 
@@ -371,6 +379,12 @@ export type SessionInfo = {
   memberships: MembershipWithOrganization[];
   /** The organization the session currently acts as, when resolved. */
   activeOrgId: string | null;
+  organizationContext: {
+    id: string;
+    organizationId: string;
+    organizationName: string;
+    startedAt: string;
+  } | null;
   /** True when the user holds an active staff membership in the platform owner. */
   isStaff: boolean;
   /** True when the account is a supporter profile (donor/volunteer, no org portal). */

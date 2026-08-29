@@ -42,5 +42,6 @@ export * as volunteerAlerts from "./volunteer-alerts";
 export * as requestEngagement from "./request-engagement";
 export * as requestRevisions from "./request-revisions";
 export * as siteSettings from "./site-settings";
+export * as adminOrganizationContexts from "./admin-organization-contexts";
 
 export { SYSTEM, PUBLIC, type DbContext } from "../db/client";

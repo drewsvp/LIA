@@ -15,6 +15,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { resolveSessionInfo } from "./session";
 import type { SessionInfo } from "../../shared/types";
+import { runWithOrganizationContext } from "./organization-context-store";
 
 export type OrgRequestContext = {
   session: SessionInfo;
@@ -22,6 +23,7 @@ export type OrgRequestContext = {
   userId: string;
   /** The session-resolved organization id. The ONLY org id handlers may use. */
   orgId: string;
+  organizationContextId: string | null;
 };
 
 export type StaffRequestContext = {
@@ -60,7 +62,11 @@ export async function requireOrganization(req: Request, res: Response, next: Nex
       res.status(401).json({ message: "Authentication required" });
       return;
     }
-    if (session.memberships.length === 0) {
+    if (session.isStaff && session.organizationContext === null) {
+      res.status(403).json({ message: "Enter an organization view from the admin area." });
+      return;
+    }
+    if (session.organizationContext === null && session.memberships.length === 0) {
       res.status(403).json({ message: "No active organization membership" });
       return;
     }
@@ -68,8 +74,20 @@ export async function requireOrganization(req: Request, res: Response, next: Nex
       res.status(409).json({ message: "Select an organization to continue", code: "ORG_SELECTION_REQUIRED" });
       return;
     }
-    req.liaOrg = { session, userId: session.user.id, orgId: session.activeOrgId };
-    next();
+    req.liaOrg = {
+      session,
+      userId: session.user.id,
+      orgId: session.activeOrgId,
+      organizationContextId: session.organizationContext?.id ?? null,
+    };
+    if (session.organizationContext) {
+      runWithOrganizationContext(
+        { ...session.organizationContext, actorUserId: session.user.id },
+        next,
+      );
+    } else {
+      next();
+    }
   } catch (err) {
     next(err);
   }
@@ -78,7 +96,12 @@ export async function requireOrganization(req: Request, res: Response, next: Nex
 export async function requireStaff(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const session = await resolveSessionInfo(req);
-    if (!session.isStaff || session.user === null || session.staffRole === null) {
+    if (
+      !session.isStaff ||
+      session.user === null ||
+      session.staffRole === null ||
+      session.organizationContext !== null
+    ) {
       // Same response as a nonexistent route: admin does not exist for non-staff.
       res.status(404).json(NOT_FOUND_BODY);
       return;
@@ -111,7 +134,12 @@ export function staffContext(req: Request): StaffRequestContext {
 export async function requireStaffAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const session = await resolveSessionInfo(req);
-    if (!session.isStaff || session.user === null || session.staffRole !== "staff_admin") {
+    if (
+      !session.isStaff ||
+      session.user === null ||
+      session.staffRole !== "staff_admin" ||
+      session.organizationContext !== null
+    ) {
       res.status(404).json(NOT_FOUND_BODY);
       return;
     }

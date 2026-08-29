@@ -8,7 +8,10 @@ import { q, withDbContext, type DbContext } from "../db/client";
 import type { ApprovalEvent, ApprovalEntityType } from "../../shared/types";
 
 const COLS = `id, entity_type as "entityType", entity_id as "entityId", from_status as "fromStatus",
-  to_status as "toStatus", actor_user_id as "actorUserId", note, created_at as "createdAt"`;
+  to_status as "toStatus", actor_user_id as "actorUserId",
+  organization_context_id as "organizationContextId",
+  context_organization_id as "contextOrganizationId",
+  note, created_at as "createdAt"`;
 
 export type InsertApprovalEventInput = {
   entityType: ApprovalEntityType;
@@ -101,7 +104,10 @@ export type ActivityFilters = {
   limit?: number;
 };
 
-export type ActivityEventRow = ApprovalEvent & { actorName: string | null };
+export type ActivityEventRow = ApprovalEvent & {
+  actorName: string | null;
+  contextOrganizationName: string | null;
+};
 
 /** Filtered event list, newest first, actor name joined through users→people. */
 export async function listWithFilters(ctx: DbContext, f: ActivityFilters = {}): Promise<ActivityEventRow[]> {
@@ -132,12 +138,17 @@ export async function listWithFilters(ctx: DbContext, f: ActivityFilters = {}): 
   params.push(Math.min(f.limit ?? 200, 500));
   const sql = `select ae.id, ae.entity_type as "entityType", ae.entity_id as "entityId",
       ae.from_status as "fromStatus", ae.to_status as "toStatus",
-      ae.actor_user_id as "actorUserId", ae.note, ae.created_at as "createdAt",
+      ae.actor_user_id as "actorUserId",
+      ae.organization_context_id as "organizationContextId",
+      ae.context_organization_id as "contextOrganizationId",
+      ae.note, ae.created_at as "createdAt",
       case when p.id is null then null
-           else nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), '') end as "actorName"
+           else nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), '') end as "actorName",
+      co.name as "contextOrganizationName"
     from approval_events ae
     left join users u on u.id = ae.actor_user_id
     left join people p on p.id = u.person_id
+    left join organizations co on co.id = ae.context_organization_id
     ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
     order by ae.created_at desc
     limit $${params.length}`;

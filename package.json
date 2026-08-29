@@ -46,6 +46,7 @@
     "test:alliance-volunteer-publication": "tsx scripts/test-alliance-volunteer-publication.ts",
     "test:role-status-management": "tsx scripts/test-role-status-management.ts",
     "test:account-email-identity": "tsx scripts/test-account-email-identity.ts",
+    "test:admin-organization-context": "tsx scripts/test-admin-organization-context.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",
     "db:seed": "tsx server/db/seed.ts",
     "db:apply-auth-schema": "tsx server/auth/apply-auth-schema.ts",

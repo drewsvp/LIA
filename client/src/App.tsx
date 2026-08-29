@@ -101,6 +101,7 @@ function AdminGate({ route }: { route: SurfaceRoute }): ReactElement | null {
   const { session, isLoading } = useSession();
   if (isLoading) return null;
   if (!session?.isStaff) return <NotFound />;
+  if (session.organizationContext !== null) return <NotFound />;
   if (STAFF_ADMIN_ONLY_SURFACES.has(route.id) && session.staffRole !== "staff_admin") return <NotFound />;
   return <AdminShell>{ADMIN_PAGES[route.id]?.() ?? <PlaceholderPage route={route} />}</AdminShell>;
 }

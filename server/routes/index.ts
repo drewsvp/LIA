@@ -15,8 +15,12 @@ import type { Express, NextFunction, Request, Response } from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "../auth/auth";
 import { appBaseUrl, sendProfileEmailChange } from "../auth/auth";
-import { resolveSessionInfo, ACTIVE_ORG_COOKIE } from "../auth/session";
-import { NOT_FOUND_BODY, requireStaff } from "../auth/guards";
+import {
+  resolveSessionInfo,
+  ACTIVE_ORG_COOKIE,
+  ADMIN_ORG_CONTEXT_COOKIE,
+} from "../auth/session";
+import { NOT_FOUND_BODY, requireStaff, requireStaffAdmin, staffContext } from "../auth/guards";
 import {
   magicLinkEmailLimiter,
   magicLinkIpLimiter,
@@ -501,6 +505,15 @@ export function registerRoutes(app: Express): void {
   app.get("/api/session", async (req: Request, res: Response, next) => {
     try {
       const session = await resolveSessionInfo(req);
+      const signedCookies = (req as Request & { signedCookies?: Record<string, string> }).signedCookies;
+      if (signedCookies?.[ADMIN_ORG_CONTEXT_COOKIE] && session.organizationContext === null) {
+        res.clearCookie(ADMIN_ORG_CONTEXT_COOKIE, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: true,
+          signed: true,
+        });
+      }
       res.json(session);
     } catch (err) {
       next(err);
@@ -516,6 +529,10 @@ export function registerRoutes(app: Express): void {
         res.status(401).json({ message: "Authentication required" });
         return;
       }
+      if (session.organizationContext !== null) {
+        res.status(409).json({ message: "Exit organization view before switching organizations." });
+        return;
+      }
       const orgId: unknown = (req.body as Record<string, unknown> | undefined)?.orgId;
       if (typeof orgId !== "string" || !session.memberships.some((m) => m.orgId === orgId)) {
         res.status(400).json({ message: "Not one of your organizations." });
@@ -529,6 +546,75 @@ export function registerRoutes(app: Express): void {
         maxAge: 30 * 24 * 60 * 60 * 1000,
       });
       res.json({ ok: true, activeOrgId: orgId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/admin/organization-context", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const organizationId: unknown = (req.body as Record<string, unknown> | undefined)?.organizationId;
+      if (typeof organizationId !== "string" || !UUID_RE.test(organizationId)) {
+        res.status(400).json({ message: "Choose a valid organization." });
+        return;
+      }
+      const adminUserId = staffContext(req).userId;
+      const context = await dal.adminOrganizationContexts.start(
+        { kind: "staff", userId: adminUserId },
+        adminUserId,
+        organizationId,
+      );
+      res.cookie(ADMIN_ORG_CONTEXT_COOKIE, context.id, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        signed: true,
+        maxAge: 8 * 60 * 60 * 1000,
+      });
+      res.json({ ok: true, redirectTo: "/dashboard" });
+    } catch (err) {
+      if (err instanceof Error && err.message === "ORGANIZATION_NOT_ELIGIBLE") {
+        res.status(409).json({ message: "Only approved member organizations can be opened." });
+        return;
+      }
+      if (err instanceof Error && err.message === "ORGANIZATION_CONTEXT_ACTIVE") {
+        res.status(409).json({ message: "Exit the current organization view before opening another." });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  app.post("/api/session/organization-context/exit", async (req: Request, res: Response, next) => {
+    try {
+      const session = await resolveSessionInfo(req);
+      if (!session.authenticated || session.user === null || session.staffRole !== "staff_admin") {
+        res.status(404).json(NOT_FOUND_BODY);
+        return;
+      }
+      const signedCookies = (req as Request & { signedCookies?: Record<string, string> }).signedCookies;
+      const contextId = signedCookies?.[ADMIN_ORG_CONTEXT_COOKIE];
+      if (typeof contextId === "string" && UUID_RE.test(contextId)) {
+        await dal.adminOrganizationContexts.end(
+          { kind: "staff", userId: session.user.id },
+          contextId,
+          session.user.id,
+          session.organizationContext === null ? "invalidated" : "exited",
+        );
+      }
+      res.clearCookie(ADMIN_ORG_CONTEXT_COOKIE, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        signed: true,
+      });
+      res.clearCookie(ACTIVE_ORG_COOKIE, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        signed: true,
+      });
+      res.json({ ok: true, redirectTo: "/admin/roles" });
     } catch (err) {
       next(err);
     }

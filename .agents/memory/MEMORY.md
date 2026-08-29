@@ -33,3 +33,4 @@
 - [Production testing logins](production-testing-logins.md) — four seeded quick-login roles are intentionally enabled for final pre-go-live testing; don't treat them as a gap.
 - [Profile email changes](profile-email-changes.md) — require mailbox confirmation before moving login identity; keep the old address active and finalize both identity stores atomically.
 - [Account email identity](account-email-identity.md) — email, not name, is account identity; linked person/provider emails must match, and account-bearing merges or edits never change it implicitly.
+- [Organization-context lifecycle](organization-context-lifecycle.md) — server contexts expire durably and are revoked atomically when an organization becomes ineligible; lazy request checks are only defense in depth.

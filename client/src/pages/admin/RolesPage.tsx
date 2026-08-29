@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
+import { OrganizationLoginAsControls } from "../../components/OrganizationContext";
 
 type Row = {
   id: string;
@@ -25,6 +26,7 @@ type Row = {
   lastName: string;
   email: string;
   orgName: string;
+  orgId: string;
   type: "Staff" | "Member";
   orgKind: "member_org" | "platform_owner";
   orgStatus: "pending" | "approved" | "disabled";
@@ -126,6 +128,16 @@ export function RolesPage() {
       ),
     );
   }, [rows, search]);
+  const eligibleOrganizations = useMemo(
+    () => Array.from(
+      new Map(
+        rows
+          .filter((row) => row.orgKind === "member_org" && row.orgStatus === "approved" && row.status === "active")
+          .map((row) => [row.orgId, { id: row.orgId, name: row.orgName }]),
+      ).values(),
+    ),
+    [rows],
+  );
 
   async function confirmChange() {
     if (!pending) return;
@@ -454,6 +466,7 @@ export function RolesPage() {
           </div>
         );
       })()}
+      <OrganizationLoginAsControls organizations={eligibleOrganizations} />
     </div>
   );
 }

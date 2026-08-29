@@ -129,6 +129,7 @@ export function DashboardPage() {
   const overview = overviewQuery.data;
   // Org name resolves from the session even if the overview query fails.
   const sessionOrgName =
+    session?.organizationContext?.organizationName ??
     session?.memberships.find((m) => m.orgId === session.activeOrgId)?.orgName ?? "";
   const activeMembership = session?.memberships.find((m) => m.orgId === session.activeOrgId);
   const isPlatformOwner = activeMembership?.orgKind === "platform_owner";

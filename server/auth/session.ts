@@ -10,17 +10,20 @@ import { auth } from "./auth";
 import { SYSTEM } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as membershipsDal from "../dal/memberships";
+import * as organizationContextsDal from "../dal/admin-organization-contexts";
 import { normalizeEmail } from "../dal/people";
 import type { SessionInfo } from "../../shared/types";
 
 /** Cookie holding the chosen org id for users with multiple memberships (signed). */
 export const ACTIVE_ORG_COOKIE = "lia_active_org";
+export const ADMIN_ORG_CONTEXT_COOKIE = "lia_admin_org_context";
 
 const ANONYMOUS: SessionInfo = {
   authenticated: false,
   user: null,
   memberships: [],
   activeOrgId: null,
+  organizationContext: null,
   isStaff: false,
   isSupporter: false,
   staffRole: null,
@@ -50,11 +53,31 @@ export async function resolveSessionInfo(req: Request): Promise<SessionInfo> {
       (m.role === "staff_admin" || m.role === "staff_approver"),
   );
 
+  const cookies = (req as Request & { signedCookies?: Record<string, string> }).signedCookies;
+  let organizationContext: SessionInfo["organizationContext"] = null;
+  const contextId = cookies?.[ADMIN_ORG_CONTEXT_COOKIE];
+  if (
+    contextId &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contextId) &&
+    staffMembership?.role === "staff_admin"
+  ) {
+    const active = await organizationContextsDal.getActive(SYSTEM, contextId, user.id);
+    if (active) {
+      organizationContext = {
+        id: active.id,
+        organizationId: active.organizationId,
+        organizationName: active.organizationName,
+        startedAt: active.startedAt,
+      };
+    }
+  }
+
   let activeOrgId: string | null = null;
-  if (memberships.length === 1) {
+  if (organizationContext) {
+    activeOrgId = organizationContext.organizationId;
+  } else if (memberships.length === 1) {
     activeOrgId = memberships[0]?.orgId ?? null;
   } else if (memberships.length > 1) {
-    const cookies = (req as Request & { signedCookies?: Record<string, string> }).signedCookies;
     const chosen = cookies?.[ACTIVE_ORG_COOKIE];
     if (chosen && memberships.some((m) => m.orgId === chosen)) activeOrgId = chosen;
   }
@@ -64,6 +87,7 @@ export async function resolveSessionInfo(req: Request): Promise<SessionInfo> {
     user,
     memberships,
     activeOrgId,
+    organizationContext,
     isStaff: staffMembership !== undefined,
     isSupporter: user.kind === "supporter",
     staffRole:

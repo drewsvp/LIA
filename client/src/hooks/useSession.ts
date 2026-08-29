@@ -8,11 +8,22 @@
 import { useQuery } from "@tanstack/react-query";
 import type { SessionInfo } from "@shared/types";
 
+export type OrganizationContext = {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  startedAt: string;
+};
+
+export type SessionWithOrganizationContext = SessionInfo & {
+  organizationContext: OrganizationContext | null;
+};
+
 export function useSession(): {
-  session: SessionInfo | undefined;
+  session: SessionWithOrganizationContext | undefined;
   isLoading: boolean;
   isError: boolean;
 } {
-  const { data, isLoading, isError } = useQuery<SessionInfo>({ queryKey: ["/api/session"] });
+  const { data, isLoading, isError } = useQuery<SessionWithOrganizationContext>({ queryKey: ["/api/session"] });
   return { session: data, isLoading, isError };
 }

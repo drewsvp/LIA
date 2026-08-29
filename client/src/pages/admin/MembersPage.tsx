@@ -16,6 +16,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { OrganizationLoginAsControls } from "../../components/OrganizationContext";
+import { useSession } from "../../hooks/useSession";
 
 type Tab = "pending" | "active" | "removed";
 
@@ -28,6 +30,7 @@ type QueueRow = {
   lastName: string;
   email: string;
   orgName: string;
+  orgId: string;
   orgStatus: "pending" | "approved" | "disabled";
   inviterFirstName: string | null;
   inviterLastName: string | null;
@@ -90,6 +93,7 @@ async function postJson(path: string, body?: unknown): Promise<{ ok: boolean; me
 }
 
 export function MembersPage() {
+  const { session } = useSession();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("pending");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -157,6 +161,13 @@ export function MembersPage() {
   const orgNotApproved = detail !== null && detail.organization.status !== "approved";
 
   const emptyLine = tab === "pending" ? PENDING_EMPTY : tab === "active" ? "No active members." : "No removed members.";
+  const eligibleOrganizations = Array.from(
+    new Map(
+      rows
+        .filter((row) => row.orgStatus === "approved")
+        .map((row) => [row.orgId, { id: row.orgId, name: row.orgName }]),
+    ).values(),
+  );
 
   return (
     <div>
@@ -354,6 +365,9 @@ export function MembersPage() {
           )}
         </div>
       )}
+      {tab === "active" && session?.staffRole === "staff_admin"
+        ? <OrganizationLoginAsControls organizations={eligibleOrganizations} />
+        : null}
     </div>
   );
 }
