@@ -15,6 +15,11 @@ export async function listAll(ctx: DbContext): Promise<Population[]> {
   );
 }
 
+/** Transaction-composable variant used by organization profile saves. */
+export async function listAllInTx(c: PoolClient): Promise<Population[]> {
+  return q<Population>(c, `select ${COLS} from populations order by sort_order asc, name asc`);
+}
+
 export async function findBySlug(ctx: DbContext, slug: string): Promise<Population | null> {
   const rows = await withDbContext(ctx, (c) =>
     q<Population>(c, `select ${COLS} from populations where slug = $1`, [slug]),
@@ -33,6 +38,18 @@ export async function listByOrganization(ctx: DbContext, orgId: string): Promise
         where op.org_id = $1 order by p.sort_order asc, p.name asc`,
       [orgId],
     ),
+  );
+}
+
+/** Transaction-composable variant used by organization profile saves. */
+export async function listByOrganizationInTx(c: PoolClient, orgId: string): Promise<Population[]> {
+  return q<Population>(
+    c,
+    `select p.id, p.name, p.slug, p.sort_order as "sortOrder", p.is_active as "isActive"
+       from populations p
+       join organization_populations op on op.population_id = p.id
+      where op.org_id = $1 order by p.sort_order asc, p.name asc`,
+    [orgId],
   );
 }
 

@@ -41,9 +41,11 @@ export * as volunteerInterests from "./volunteer-interests";
 export * as volunteerAlerts from "./volunteer-alerts";
 export * as requestEngagement from "./request-engagement";
 export * as requestRevisions from "./request-revisions";
+export * as organizationRevisions from "./organization-revisions";
 export * as siteSettings from "./site-settings";
 export * as adminOrganizationContexts from "./admin-organization-contexts";
 export * as adminSupporters from "./admin-supporters";
 export * as supporterImpersonation from "./supporter-impersonation";
+export * as storageCleanup from "./storage-cleanup";
 
 export { SYSTEM, PUBLIC, type DbContext } from "../db/client";

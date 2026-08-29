@@ -14,6 +14,7 @@ import type { DeadlineType, ItemCondition } from "../../shared/types";
 import { parseProductUrl } from "../../shared/item-product-url";
 import { requireOrganization, orgContext, sendNotFound } from "../auth/guards";
 import { storeImage } from "../storage/object-storage";
+import { deleteImageOrQueue } from "../services/storage-cleanup";
 import { updateOrganizationSettings } from "../services/org-settings";
 import {
   submitMemberInvite,
@@ -107,6 +108,10 @@ export function registerMemberRoutes(app: Express): void {
           mission: org.mission,
           populationsOther: org.populationsOther,
           logoUrl: org.logoUrl,
+          addressLine1: org.addressLine1,
+          addressLine2: org.addressLine2,
+          state: org.state,
+          postalCode: org.postalCode,
         },
         populationIds: [...selectedIds],
         // Active rows plus anything this org already selected (a deactivated
@@ -145,6 +150,8 @@ export function registerMemberRoutes(app: Express): void {
   });
 
   async function handleOrganizationUpdate(req: Request, res: Response, next: NextFunction): Promise<void> {
+    let storedLogoUrl: string | undefined;
+    let saveCommitted = false;
     try {
       const { orgId } = orgContext(req);
       const body = (req.body ?? {}) as Record<string, unknown>;
@@ -197,11 +204,10 @@ export function registerMemberRoutes(app: Express): void {
 
       // "Image will update on submit" (§8): a failed store fails the save
       // loudly — silently keeping the old logo would be a silent failure.
-      let logoUrl: string | undefined;
       if (req.file) {
         try {
           const stored = await storeImage({ data: req.file.buffer, filename: req.file.originalname });
-          logoUrl = stored.url;
+          storedLogoUrl = stored.url;
         } catch (err) {
           console.error("[org-settings] logo storage failed — save rejected:", err);
           res.status(400).json({ message: SAVE_FAILURE });
@@ -210,20 +216,32 @@ export function registerMemberRoutes(app: Express): void {
       }
 
       try {
-        await updateOrganizationSettings({
+        const result = await updateOrganizationSettings({
           orgId,
-          name,
-          websiteUrl,
-          city,
-          phone,
-          mission,
-          populationIds,
-          populationsOther: populationsOtherRaw === "" ? null : populationsOtherRaw,
-          ...(logoUrl !== undefined ? { logoUrl } : {}),
-          contact: { firstName, lastName, email, phone: contactPhone },
+          fields: {
+            name,
+            websiteUrl,
+            city,
+            phone,
+            mission,
+            populationIds,
+            populationsOther: populationsOtherRaw === "" ? null : populationsOtherRaw,
+            ...(storedLogoUrl !== undefined ? { logoUrl: storedLogoUrl } : {}),
+            contact: { firstName, lastName, email, phone: contactPhone },
+          },
+          dbContext: SYSTEM,
         });
+        saveCommitted = true;
+        if (storedLogoUrl !== undefined && result.previousLogoUrl && result.previousLogoUrl !== storedLogoUrl) {
+          await deleteImageOrQueue(result.previousLogoUrl, "organization logo replaced by member").catch((err) => {
+            console.error(`[org-settings] could not delete or queue previous organization logo ${result.previousLogoUrl}:`, err);
+          });
+        }
         res.json({ ok: true });
       } catch (err) {
+        if (storedLogoUrl !== undefined && !saveCommitted) {
+          await deleteImageOrQueue(storedLogoUrl, "organization member save failed");
+        }
         // Name or contact-email collision: §8 has one failure voice here.
         if (err instanceof dal.people.AccountEmailChangeError || err instanceof dal.people.ContactEmailConflictError) {
           res.status(409).json({ message: err.message });

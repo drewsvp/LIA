@@ -71,6 +71,12 @@ export async function getById(ctx: DbContext, orgId: string): Promise<Organizati
   return rows[0] ?? null;
 }
 
+/** Transaction-composable organization lookup for multi-table profile saves. */
+export async function getByIdInTx(c: PoolClient, orgId: string): Promise<Organization | null> {
+  const rows = await q<Organization>(c, `select ${COLS} from organizations where id = $1 for update`, [orgId]);
+  return rows[0] ?? null;
+}
+
 export async function getBySlug(ctx: DbContext, slug: string): Promise<Organization | null> {
   const rows = await withDbContext(ctx, (c) =>
     q<Organization>(c, `select ${COLS} from organizations where slug = $1`, [slug]),

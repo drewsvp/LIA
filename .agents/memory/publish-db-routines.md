@@ -18,3 +18,9 @@ Wiring the migration runner into the deployment build command turns that disagre
 **Why:** Editing old migrations to be idempotent is not available as an escape: the runner enforces immutability by sha, and development has already recorded them.
 
 **How to apply:** When the ledger and the schema disagree, audit production against development by catalog query — columns, constraints, indexes, `relrowsecurity`/`relforcerowsecurity`, `pg_policy`, plus any top-level seed or backfill statements — before recording anything as applied. A duplicate-object error alone is not proof a file ran: the transaction rolls back, so everything after the failing statement is skipped forever. Baseline only an explicit, closed list of audited filenames, and close the real gap with a new idempotent repair migration rather than by skipping.
+
+For newly introduced schema objects, assume Publish may materialize `schema.sql` before the migration ledger advances. The schema snapshot must include every constraint, index, and RLS policy, and the still-unreleased migration should tolerate those objects already existing without skipping required secondary objects.
+
+**Why:** A table definition without its later primary-key constraint looked complete in the snapshot, while an idempotent `create table if not exists` migration would then skip the inline primary key permanently.
+
+**How to apply:** Compare the full fresh-schema object shape to the migration-created shape before release, including constraints that schema dumps emit as later `alter table` statements.

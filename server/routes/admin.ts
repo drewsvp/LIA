@@ -12,7 +12,7 @@
  * tell whether an email went out will send it again by hand).
  */
 import { createHash, randomBytes } from "node:crypto";
-import type { Express, Request, Response } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { requireStaff, requireStaffAdmin, staffContext, sendNotFound } from "../auth/guards";
 import {
@@ -53,6 +53,7 @@ import { ACTIVE_ORG_COOKIE, SUPPORTER_CONTEXT_COOKIE } from "../auth/session";
 import type { DeadlineType, MembershipRole, MembershipStatus } from "../../shared/types";
 import { dispatchQueuedEmails, headerImageDataUri, unresolvedVariables, leftoverPlaceholders, type PendingDispatch } from "../email/send";
 import { storeImage, deleteImage } from "../storage/object-storage";
+import { deleteImageOrQueue } from "../services/storage-cleanup";
 import { sourceNeedImage, NeedImageError } from "../services/need-image";
 import {
   approveOrganization,
@@ -62,6 +63,13 @@ import {
   NoOwnerMembershipError,
   OrgNotFoundError,
 } from "../services/org-approval";
+import {
+  updateOrganizationSettings,
+  OrganizationNotEditableError,
+  OrganizationNotFoundError,
+  OrganizationProfileValidationError,
+  type OrganizationProfileFields,
+} from "../services/org-settings";
 import {
   approveRequest,
   archiveRequest,
@@ -341,6 +349,10 @@ function isVolunteerCategoryNameConflict(err: unknown): boolean {
   return pgError.code === "23505" && pgError.constraint === "volunteer_categories_name_ci_key";
 }
 
+function profileText(body: Record<string, unknown>, key: string): string {
+  const value = body[key];
+  return typeof value === "string" ? value.trim() : "";
+}
 export function registerAdminRoutes(app: Express): void {
   // ---- Shell nav counts (ADMIN-01 §4).
   app.get("/api/admin/nav-counts", requireStaff, async (req: Request, res: Response, next) => {
@@ -645,11 +657,13 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
-      const [contact, populations] = await Promise.all([
+      const [contact, populations, revisions, populationOptions] = await Promise.all([
         organization.primaryContactPersonId
           ? dal.people.getById(ctx, organization.primaryContactPersonId)
           : Promise.resolve(null),
         dal.populations.listByOrganization(ctx, orgId),
+        dal.organizationRevisions.listByOrganization(ctx, orgId),
+        dal.populations.listAll(ctx),
       ]);
       res.json({
         organization,
@@ -657,11 +671,88 @@ export function registerAdminRoutes(app: Express): void {
           ? { firstName: contact.firstName, lastName: contact.lastName, email: contact.email, phone: contact.phone }
           : null,
         populations: populations.map((p) => ({ id: p.id, name: p.name })),
+        populationOptions: populationOptions
+          .filter((p) => p.isActive || populations.some((selected) => selected.id === p.id))
+          .map((p) => ({ id: p.id, name: p.name, slug: p.slug })),
+        revisions,
       });
     } catch (err) {
       next(err);
     }
   });
+
+  // ---- Direct organization profile editing. Staff approvers deliberately
+  // receive the guard's indistinguishable 404; Login As remains separate.
+  app.put(
+    "/api/admin/organizations/:id",
+    requireStaffAdmin,
+    (req: Request, res: Response, next: NextFunction) => {
+      imageUpload.single("logo")(req, res, (uploadErr: unknown) => {
+        if (uploadErr) {
+          console.error("[admin] organization logo upload rejected:", uploadErr);
+          res.status(400).json({ message: SAVE_FAILURE });
+          return;
+        }
+        void (async () => {
+          const orgId = req.params.id ?? "";
+          if (!UUID_RE.test(orgId)) {
+            sendNotFound(res);
+            return;
+          }
+          let storedLogoUrl: string | undefined;
+          let saveCommitted = false;
+          try {
+            if (req.file && !req.file.mimetype.startsWith("image/")) {
+              res.status(400).json({ message: "Please choose an image file. Nothing was changed." });
+              return;
+            }
+            const fields = parseOrganizationProfile((req.body ?? {}) as Record<string, unknown>);
+            if (req.file) {
+              const stored = await storeImage({ data: req.file.buffer, filename: req.file.originalname });
+              storedLogoUrl = stored.url;
+              fields.logoUrl = storedLogoUrl;
+            }
+            const actorUserId = staffContext(req).userId;
+            const result = await updateOrganizationSettings({
+              orgId,
+              fields,
+              auditActorUserId: actorUserId,
+              dbContext: staffCtx(req),
+            });
+            saveCommitted = true;
+            if (storedLogoUrl && result.previousLogoUrl && result.previousLogoUrl !== storedLogoUrl) {
+              await deleteImageOrQueue(result.previousLogoUrl, "organization logo replaced by staff admin").catch((err) => {
+                console.error(`[admin] could not delete or queue previous organization logo ${result.previousLogoUrl}:`, err);
+              });
+            }
+            res.json({ ok: true, organization: result.organization, message: "Organization updated." });
+          } catch (err) {
+            if (storedLogoUrl && !saveCommitted) {
+              await deleteImageOrQueue(storedLogoUrl, "organization staff-admin save failed");
+            }
+            if (err instanceof OrganizationNotFoundError || err instanceof OrganizationNotEditableError) {
+              sendNotFound(res);
+              return;
+            }
+            if (err instanceof OrganizationProfileValidationError) {
+              res.status(400).json({ message: `${err.message} Nothing was changed.` });
+              return;
+            }
+            if (err instanceof dal.people.AccountEmailChangeError || err instanceof dal.people.ContactEmailConflictError) {
+              res.status(409).json({ message: err.message });
+              return;
+            }
+            if (err instanceof dal.people.ContactNotVisibleError) {
+              res.status(409).json({ message: "That contact cannot be attached to this organization. Nothing was changed." });
+              return;
+            }
+            console.error(`[admin] organization update failed for ${orgId}:`, err);
+            res.status(500).json({ message: SAVE_FAILURE });
+          }
+        })().catch(next);
+      });
+    },
+  );
 
   // ---- Approve (ADMIN-01 §7): the one-transaction bundle, then dispatch.
   app.post("/api/admin/organizations/:id/approve", requireStaff, async (req: Request, res: Response) => {
@@ -3149,4 +3240,35 @@ export function registerAdminRoutes(app: Express): void {
       res.status(500).json({ message: SAVE_FAILURE });
     }
   });
+}
+
+function profileOptionalText(body: Record<string, unknown>, key: string): string | null {
+  const value = body[key];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function parseOrganizationProfile(body: Record<string, unknown>): OrganizationProfileFields {
+  const rawPopulationIds = body.populationIds;
+  const populationIds =
+    Array.isArray(rawPopulationIds) ? rawPopulationIds.filter((id): id is string => typeof id === "string") :
+    typeof rawPopulationIds === "string" ? [rawPopulationIds] : [];
+  return {
+    name: profileText(body, "name"),
+    websiteUrl: profileText(body, "websiteUrl"),
+    city: profileText(body, "city"),
+    phone: profileText(body, "phone"),
+    mission: profileText(body, "mission"),
+    populationIds,
+    populationsOther: profileOptionalText(body, "populationsOther"),
+    addressLine1: profileOptionalText(body, "addressLine1"),
+    addressLine2: profileOptionalText(body, "addressLine2"),
+    state: profileOptionalText(body, "state"),
+    postalCode: profileOptionalText(body, "postalCode"),
+    contact: {
+      firstName: profileText(body, "firstName"),
+      lastName: profileText(body, "lastName"),
+      email: profileText(body, "email"),
+      phone: profileText(body, "contactPhone"),
+    },
+  };
 }

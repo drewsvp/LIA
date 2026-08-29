@@ -721,6 +721,33 @@ CREATE TABLE public.approval_events (
 
 ALTER TABLE ONLY public.approval_events FORCE ROW LEVEL SECURITY;
 
+--
+-- Name: organization_revisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.organization_revisions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    actor_user_id uuid NOT NULL,
+    changed_fields jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.organization_revisions FORCE ROW LEVEL SECURITY;
+
+CREATE TABLE public.storage_cleanup_queue (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    object_url text NOT NULL,
+    reason text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_error text,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT storage_cleanup_queue_attempts_check CHECK ((attempts >= 0))
+);
+
+ALTER TABLE ONLY public.storage_cleanup_queue FORCE ROW LEVEL SECURITY;
+
 
 --
 -- Name: item_pledge_lines; Type: TABLE; Schema: public; Owner: -
@@ -1558,6 +1585,12 @@ ALTER TABLE ONLY public.admin_organization_contexts
 ALTER TABLE ONLY public.approval_events
     ADD CONSTRAINT approval_events_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY public.organization_revisions
+    ADD CONSTRAINT organization_revisions_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.storage_cleanup_queue
+    ADD CONSTRAINT storage_cleanup_queue_pkey PRIMARY KEY (id);
+
 
 --
 -- Name: digest_exclusions digest_exclusions_need_type_need_id_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2080,6 +2113,11 @@ CREATE INDEX approval_events_created_idx ON public.approval_events USING btree (
 
 CREATE INDEX approval_events_entity_idx ON public.approval_events USING btree (entity_type, entity_id, created_at DESC);
 
+CREATE INDEX organization_revisions_entity_idx ON public.organization_revisions USING btree (organization_id, created_at DESC);
+
+CREATE UNIQUE INDEX storage_cleanup_queue_object_url_key ON public.storage_cleanup_queue USING btree (object_url);
+CREATE INDEX storage_cleanup_queue_due_idx ON public.storage_cleanup_queue USING btree (next_attempt_at, created_at);
+
 
 --
 -- Name: digest_subscribers_email_key; Type: INDEX; Schema: public; Owner: -
@@ -2594,6 +2632,12 @@ ALTER TABLE ONLY public.admin_organization_contexts
 
 ALTER TABLE ONLY public.approval_events
     ADD CONSTRAINT approval_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
+
+ALTER TABLE ONLY public.organization_revisions
+    ADD CONSTRAINT organization_revisions_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
+
+ALTER TABLE ONLY public.organization_revisions
+    ADD CONSTRAINT organization_revisions_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
 
 
 --
@@ -3131,6 +3175,14 @@ CREATE POLICY approval_events_member_insert ON public.approval_events FOR INSERT
 --
 
 CREATE POLICY approval_events_system_staff_all ON public.approval_events USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+ALTER TABLE public.organization_revisions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY organization_revisions_system_staff_all ON public.organization_revisions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+ALTER TABLE public.storage_cleanup_queue ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY storage_cleanup_queue_system_staff_all ON public.storage_cleanup_queue USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --

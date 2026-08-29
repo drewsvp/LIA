@@ -14,6 +14,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../../lib/queryClient";
+import { useSession } from "../../hooks/useSession";
+import { OrganizationEditForm } from "../../components/admin/OrganizationEditForm";
 
 type QueueRow = {
   id: string;
@@ -44,9 +46,17 @@ type Detail = {
     status: "pending" | "approved" | "disabled";
     approvedAt: string | null;
     createdAt: string;
+    updatedAt: string;
   };
   contact: { firstName: string; lastName: string; email: string; phone: string | null } | null;
   populations: { id: string; name: string }[];
+  populationOptions?: { id: string; name: string; slug: string }[];
+  revisions?: {
+    id: string;
+    actorName: string | null;
+    changedFields: Record<string, { before: string | string[] | null; after: string | string[] | null }>;
+    createdAt: string;
+  }[];
 };
 
 type Tab = "pending" | "approved" | "disabled";
@@ -85,12 +95,42 @@ function addressText(org: Detail["organization"]): string | null {
   return parts.length > 0 ? parts.join(", ") : null;
 }
 
+function auditValue(value: string | string[] | null): string {
+  if (value === null || value === "") return "Not provided";
+  return Array.isArray(value) ? value.join(", ") : value;
+}
+
+function auditLabel(field: string): string {
+  const labels: Record<string, string> = {
+    name: "Organization name",
+    websiteUrl: "Website",
+    mission: "Mission statement",
+    phone: "Main phone",
+    addressLine1: "Address line 1",
+    addressLine2: "Address line 2",
+    city: "City",
+    state: "State",
+    postalCode: "Postal code",
+    addressFormatted: "Formatted address",
+    logoUrl: "Logo",
+    populationsOther: "Other population details",
+    populations: "Populations served",
+    "contact.firstName": "Contact first name",
+    "contact.lastName": "Contact last name",
+    "contact.email": "Contact email",
+    "contact.phone": "Contact phone",
+  };
+  return labels[field] ?? field;
+}
+
 export function OrganizationsPage() {
   const queryClient = useQueryClient();
+  const { session } = useSession();
   const [tab, setTab] = useState<Tab>("pending");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const detailRef = useRef<HTMLElement | null>(null);
 
@@ -113,12 +153,14 @@ export function OrganizationsPage() {
     setSelectedId(null);
     setPendingAction(null);
     setResult(null);
+    setEditing(false);
   }
 
   function selectRow(id: string) {
     setSelectedId(id);
     setPendingAction(null);
     setResult(null);
+    setEditing(false);
   }
 
   async function runAction(kind: "approve" | "disable") {
@@ -147,6 +189,7 @@ export function OrganizationsPage() {
   const org = detail?.organization ?? null;
   const contact = detail?.contact ?? null;
   const contactName = contact ? `${contact.firstName} ${contact.lastName}`.trim() : null;
+  const canEdit = session?.staffRole === "staff_admin";
 
   return (
     <main className="adm-page">
@@ -213,7 +256,32 @@ export function OrganizationsPage() {
             <p className="adm-danger">{DETAIL_ERROR}</p>
           ) : (
             <>
-              <h2 className="adm-detail-heading">{org.name}</h2>
+              <div className="adm-detail-title-row">
+                <h2 className="adm-detail-heading">{org.name}</h2>
+                {canEdit && !editing && (
+                  <button type="button" className="adm-btn adm-btn-outline" onClick={() => {
+                    setResult(null);
+                    setEditing(true);
+                  }}>
+                    Edit organization
+                  </button>
+                )}
+              </div>
+              {editing ? (
+                <OrganizationEditForm
+                  key={`${org.id}-${org.updatedAt ?? ""}`}
+                  detail={detail!}
+                  onCancel={() => setEditing(false)}
+                  onSaved={async (message) => {
+                    setEditing(false);
+                    setResult({ kind: "ok", text: message });
+                    await queryClient.invalidateQueries({ queryKey: [`/api/admin/organizations/${org.id}`] });
+                    for (const status of ["pending", "approved", "disabled"]) {
+                      await queryClient.invalidateQueries({ queryKey: [`/api/admin/organizations?status=${status}`] });
+                    }
+                  }}
+                />
+              ) : (
               <dl className="adm-fields">
                 <dt>Website</dt>
                 <dd>
@@ -256,6 +324,7 @@ export function OrganizationsPage() {
                   </>
                 )}
               </dl>
+              )}
 
               <div className="adm-actions">
                 {result && <p className={result.kind === "ok" ? "adm-result" : "adm-danger"}>{result.text}</p>}
@@ -305,6 +374,34 @@ export function OrganizationsPage() {
                   </div>
                 )}
               </div>
+
+              {(detail?.revisions?.length ?? 0) > 0 && (
+                <section className="adm-org-history" aria-label="Organization edit history">
+                  <h3>Profile edit history</h3>
+                  {detail!.revisions!.map((revision) => {
+                    const entries = Object.entries(revision.changedFields);
+                    return (
+                      <article key={revision.id}>
+                        <p>
+                          <strong>{revision.actorName ?? "Unknown staff user"}</strong>{" "}
+                          on {new Date(revision.createdAt).toLocaleString("en-US")}
+                        </p>
+                        {entries.length === 0 ? (
+                          <p>No field values changed.</p>
+                        ) : (
+                          <ul>
+                            {entries.map(([field, values]) => (
+                              <li key={field}>
+                                <strong>{auditLabel(field)}</strong>: {auditValue(values.before)} → {auditValue(values.after)}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </article>
+                    );
+                  })}
+                </section>
+              )}
             </>
           )}
         </section>

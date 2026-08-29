@@ -20,6 +20,7 @@ import * as itemRequests from "../dal/item-requests";
 import * as volunteerRequests from "../dal/volunteer-requests";
 import { SYSTEM } from "../db/client";
 import { sourceNeedImage, type RequestKind } from "../services/need-image";
+import { sweepStorageCleanup } from "../services/storage-cleanup";
 
 /** A stranded 'pending' row must be at least this old before the sweep
  *  touches it — a freshly-submitted request is normally resolved within
@@ -127,6 +128,9 @@ export async function sweepAllFailedImages(): Promise<Record<RequestKind, ImageS
   for (const kind of SWEEP_KINDS) {
     results[kind] = await sweepFailedImages(kind);
   }
+  await sweepStorageCleanup().catch((err) => {
+    console.error("[storage-cleanup] sweep could not query or update the retry queue:", err);
+  });
   return results;
 }
 

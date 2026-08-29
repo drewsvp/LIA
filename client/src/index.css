@@ -3063,6 +3063,141 @@ a.site-nav-btn {
   padding-left: 18px;
 }
 
+.adm-detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.adm-detail-title-row .adm-detail-heading {
+  margin-bottom: 0;
+}
+
+.adm-org-edit {
+  display: grid;
+  gap: 18px;
+}
+
+.adm-edit-section {
+  margin: 4px 0 -6px;
+  color: var(--color-navy);
+  font-size: 17px;
+}
+
+.adm-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.adm-edit-grid label,
+.adm-edit-logo,
+.adm-edit-populations {
+  display: grid;
+  gap: 5px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-navy);
+}
+
+.adm-edit-grid input,
+.adm-edit-grid textarea,
+.adm-edit-populations input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #aab6c0;
+  border-radius: 5px;
+  padding: 9px 10px;
+  font: inherit;
+  color: #222;
+  background: #fff;
+}
+
+.adm-edit-grid textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.adm-edit-wide {
+  grid-column: 1 / -1;
+}
+
+.adm-edit-populations {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid #d7dee4;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.adm-edit-populations legend {
+  padding: 0 5px;
+  font-weight: 700;
+  color: var(--color-navy);
+}
+
+.adm-edit-populations > label:not(.adm-edit-wide) {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 400;
+  color: #222;
+}
+
+.adm-edit-logo small {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+
+.adm-edit-logo .adm-btn {
+  justify-self: start;
+}
+
+.adm-edit-error {
+  margin: 0;
+  color: #b00020;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.adm-org-history {
+  margin-top: 22px;
+  border-top: 1px solid #e3e3e3;
+  padding-top: 16px;
+}
+
+.adm-org-history h3 {
+  margin: 0 0 12px;
+  color: var(--color-navy);
+}
+
+.adm-org-history article {
+  padding: 10px 0;
+  border-bottom: 1px solid #e7ebee;
+  font-size: 14px;
+}
+
+.adm-org-history article p {
+  margin: 0 0 6px;
+}
+
+.adm-org-history article ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+@media (max-width: 700px) {
+  .adm-edit-grid,
+  .adm-edit-populations {
+    grid-template-columns: 1fr;
+  }
+  .adm-detail-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .adm-fields {
   display: grid;
   grid-template-columns: 200px 1fr;
