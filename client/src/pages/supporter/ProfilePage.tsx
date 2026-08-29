@@ -20,6 +20,9 @@ type ProfilePayload = {
     requestTitle: string;
     orgName: string;
     createdAt: string;
+    status: "active" | "cancelled";
+    cancelledAt: string | null;
+    cancellationReason: string | null;
     lines: { itemId: string; itemName: string; quantity: number }[];
   }[];
   signups: {
@@ -28,6 +31,9 @@ type ProfilePayload = {
     requestTitle: string;
     orgName: string;
     createdAt: string;
+    status: "active" | "cancelled";
+    cancelledAt: string | null;
+    cancellationReason: string | null;
     roles: { roleId: string; roleName: string }[];
   }[];
   recentlyViewed: {
@@ -466,7 +472,7 @@ export function SupporterProfilePage(): ReactElement | null {
               data.pledges.map((pledge) => (
                 <div key={pledge.id} className="pb2-item-card">
                   <div className="pb2-item-card-header">
-                    {formatDate(pledge.createdAt)}
+                    {formatDate(pledge.createdAt)} · {pledge.status === "active" ? "Active" : "Cancelled"}
                   </div>
                   <div style={{ padding: "14px 16px", fontSize: 14 }}>
                     <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 16 }}>
@@ -482,6 +488,12 @@ export function SupporterProfilePage(): ReactElement | null {
                         </li>
                       ))}
                     </ul>
+                    {pledge.status === "cancelled" && (
+                      <p style={{ margin: "10px 0 0", fontWeight: 700 }}>
+                        Cancelled{pledge.cancelledAt ? ` ${formatDate(pledge.cancelledAt)}` : ""}
+                        {pledge.cancellationReason ? ` — ${pledge.cancellationReason}` : ""}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))
@@ -498,7 +510,7 @@ export function SupporterProfilePage(): ReactElement | null {
               data.signups.map((signup) => (
                 <div key={signup.id} className="pb2-item-card">
                   <div className="pb2-item-card-header">
-                    {formatDate(signup.createdAt)}
+                    {formatDate(signup.createdAt)} · {signup.status === "active" ? "Active" : "Cancelled"}
                   </div>
                   <div style={{ padding: "14px 16px", fontSize: 14 }}>
                     <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 16 }}>
@@ -512,6 +524,12 @@ export function SupporterProfilePage(): ReactElement | null {
                         <li key={role.roleId}>{role.roleName}</li>
                       ))}
                     </ul>
+                    {signup.status === "cancelled" && (
+                      <p style={{ margin: "10px 0 0", fontWeight: 700 }}>
+                        Cancelled{signup.cancelledAt ? ` ${formatDate(signup.cancelledAt)}` : ""}
+                        {signup.cancellationReason ? ` — ${signup.cancellationReason}` : ""}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))

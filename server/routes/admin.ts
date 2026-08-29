@@ -94,6 +94,12 @@ import {
   type StaffRequestEditInput,
 } from "../services/staff-request-edit";
 import {
+  manageParticipation,
+  ParticipationManagementError,
+  type ManageParticipationInput,
+  type ParticipationAction,
+} from "../services/participation-management";
+import {
   approveMembership,
   changeMembershipStatus,
   rejectMembership,
@@ -197,6 +203,79 @@ function parseParticipationFilters(req: Request): dal.adminParticipation.Partici
     ...(to ? { to } : {}),
     ...(snapshotAt ? { snapshotAt } : {}),
   };
+}
+
+class ParticipationValidationError extends Error {}
+
+function parseParticipationMutation(
+  kind: "donation" | "volunteer",
+  id: string,
+  action: ParticipationAction,
+  actorUserId: string,
+  raw: unknown,
+): ManageParticipationInput {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new ParticipationValidationError("Change details are required.");
+  const body = raw as Record<string, unknown>;
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (reason.length === 0) throw new ParticipationValidationError("A reason is required for every participation change.");
+  if (reason.length > 1000) throw new ParticipationValidationError("The reason must be 1,000 characters or fewer.");
+  const expectedUpdatedAt = typeof body.expectedUpdatedAt === "string" ? body.expectedUpdatedAt : "";
+  if (expectedUpdatedAt === "" || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+    throw new ParticipationValidationError("Reload this participation record before changing it.");
+  }
+  const expectedVersion = body.expectedVersion;
+  if (typeof expectedVersion !== "number" || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+    throw new ParticipationValidationError("Reload this participation record before changing it.");
+  }
+  const notesRaw = body.notes;
+  const notes =
+    notesRaw === null || notesRaw === undefined
+      ? null
+      : typeof notesRaw === "string" && notesRaw.trim().length <= 4000
+        ? notesRaw.trim() || null
+        : undefined;
+  if (notes === undefined) throw new ParticipationValidationError("Notes must be 4,000 characters or fewer.");
+  if (kind === "donation") {
+    let lines: Array<{ itemId: string; quantity: number }> | undefined;
+    if (action === "edit") {
+      if (!Array.isArray(body.lines) || body.lines.length === 0 || body.lines.length > 200) {
+        throw new ParticipationValidationError("Choose at least one item.");
+      }
+      lines = body.lines.map((rawLine) => {
+        if (!rawLine || typeof rawLine !== "object" || Array.isArray(rawLine)) {
+          throw new ParticipationValidationError("Each item selection must be valid.");
+        }
+        const line = rawLine as Record<string, unknown>;
+        if (typeof line.itemId !== "string" || !UUID_RE.test(line.itemId)) {
+          throw new ParticipationValidationError("An item selection is invalid.");
+        }
+        if (typeof line.quantity !== "number" || !Number.isInteger(line.quantity) || line.quantity < 1) {
+          throw new ParticipationValidationError("Every item quantity must be a whole number of at least 1.");
+        }
+        return { itemId: line.itemId, quantity: line.quantity };
+      });
+      if (new Set(lines.map((line) => line.itemId)).size !== lines.length) {
+        throw new ParticipationValidationError("Each item may be selected only once.");
+      }
+    }
+    return { kind, id, action, lines, notes, reason, actorUserId, expectedUpdatedAt, expectedVersion };
+  }
+  let roleIds: string[] | undefined;
+  if (action === "edit") {
+    if (
+      !Array.isArray(body.roleIds) ||
+      body.roleIds.length === 0 ||
+      body.roleIds.length > 200 ||
+      body.roleIds.some((roleId) => typeof roleId !== "string" || !UUID_RE.test(roleId))
+    ) {
+      throw new ParticipationValidationError("Choose at least one valid volunteer role.");
+    }
+    roleIds = body.roleIds as string[];
+    if (new Set(roleIds).size !== roleIds.length) {
+      throw new ParticipationValidationError("Each volunteer role may be selected only once.");
+    }
+  }
+  return { kind, id, action, roleIds, notes, reason, actorUserId, expectedUpdatedAt, expectedVersion };
 }
 
 /** ADMIN-09: the full membership-role enum and its display names. */
@@ -465,6 +544,97 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/participation/donations", requireStaffAdmin, participationList("donations"));
   app.get("/api/admin/participation/volunteers", requireStaffAdmin, participationList("volunteers"));
 
+  const participationDetail = (kind: "donation" | "volunteer") =>
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      const id = req.params.id ?? "";
+      if (!UUID_RE.test(id)) {
+        sendNotFound(res);
+        return;
+      }
+      try {
+        const ctx = staffCtx(req);
+        const record =
+          kind === "donation"
+            ? await dal.adminParticipation.getDonation(ctx, id)
+            : await dal.adminParticipation.getVolunteer(ctx, id);
+        if (!record) {
+          sendNotFound(res);
+          return;
+        }
+        const [history, choices] = await Promise.all([
+          dal.participationHistory.listForEntity(
+            ctx,
+            kind === "donation" ? "item_pledge" : "volunteer_signup",
+            id,
+          ),
+          kind === "donation"
+            ? dal.items.listByRequest(ctx, record.request.id)
+            : dal.volunteerRoles.listByRequest(ctx, record.request.id),
+        ]);
+        res.json({ record, history, choices });
+      } catch (error) {
+        next(error);
+      }
+    };
+  app.get("/api/admin/participation/donations/:id", requireStaffAdmin, participationDetail("donation"));
+  app.get("/api/admin/participation/volunteers/:id", requireStaffAdmin, participationDetail("volunteer"));
+
+  const participationMutation = (kind: "donation" | "volunteer", action: ParticipationAction) =>
+    async (req: Request, res: Response): Promise<void> => {
+      const id = req.params.id ?? "";
+      if (!UUID_RE.test(id)) {
+        sendNotFound(res);
+        return;
+      }
+      let input: ManageParticipationInput;
+      try {
+        input = parseParticipationMutation(kind, id, action, staffContext(req).userId, req.body);
+      } catch (error) {
+        res.status(400).json({
+          message: error instanceof ParticipationValidationError ? error.message : "The participation change is invalid.",
+        });
+        return;
+      }
+      try {
+        await manageParticipation(input);
+        const ctx = staffCtx(req);
+        const record =
+          kind === "donation"
+            ? await dal.adminParticipation.getDonation(ctx, id)
+            : await dal.adminParticipation.getVolunteer(ctx, id);
+        const noun = kind === "donation" ? "Donation" : "Volunteer signup";
+        const detail =
+          action === "edit"
+            ? input.kind === "donation"
+              ? `${input.lines?.length ?? 0} item selection${input.lines?.length === 1 ? "" : "s"} and notes saved`
+              : `${input.roleIds?.length ?? 0} role selection${input.roleIds?.length === 1 ? "" : "s"} and notes saved`
+            : action === "cancel"
+              ? "cancelled and removed from current availability totals"
+              : "reinstated and restored to current availability totals";
+        res.json({ record, message: `${noun} ${detail}.` });
+      } catch (error) {
+        if (error instanceof ParticipationManagementError) {
+          if (error.code === "not_found") {
+            sendNotFound(res);
+            return;
+          }
+          res.status(error.code === "invalid_input" || error.code === "invalid_relationship" ? 400 : 409).json({
+            message: `${error.message} Nothing was changed.`,
+            code: error.code,
+          });
+          return;
+        }
+        console.error(`[admin] ${action} ${kind} participation ${id} failed:`, error);
+        res.status(500).json({ message: SAVE_FAILURE });
+      }
+    };
+  for (const [pathKind, kind] of [["donations", "donation"], ["volunteers", "volunteer"]] as const) {
+    app.put(`/api/admin/participation/${pathKind}/:id`, requireStaffAdmin, participationMutation(kind, "edit"));
+    app.post(`/api/admin/participation/${pathKind}/:id/edit`, requireStaffAdmin, participationMutation(kind, "edit"));
+    app.post(`/api/admin/participation/${pathKind}/:id/cancel`, requireStaffAdmin, participationMutation(kind, "cancel"));
+    app.post(`/api/admin/participation/${pathKind}/:id/reinstate`, requireStaffAdmin, participationMutation(kind, "reinstate"));
+  }
+
   // --------------------------------------------------------------------------
   // ADMIN-14 — Supporter directory. This is deliberately staff-admin-only:
   // supporter-only accounts have no organization membership to scope through.
@@ -527,8 +697,8 @@ export function registerAdminRoutes(app: Express): void {
         signups,
         recentlyViewed,
         historySummary: {
-          donationCount: pledges.length,
-          volunteerSignupCount: signups.length,
+          donationCount: pledges.filter((pledge) => pledge.status === "active").length,
+          volunteerSignupCount: signups.filter((signup) => signup.status === "active").length,
           recentlyViewedCount: recentlyViewed.length,
         },
       });
@@ -993,6 +1163,7 @@ export function registerAdminRoutes(app: Express): void {
       if (kind === "item") {
         const snapshot = await dal.pledges.listByRequestWithClaimedTotal(ctx, request.orgId, id);
         res.json({
+          canManage: staffContext(req).staffRole === "staff_admin",
           counterTotal: snapshot.counterTotal,
           participants: snapshot.participants.map((pledge) => ({
             id: pledge.id,
@@ -1001,6 +1172,11 @@ export function registerAdminRoutes(app: Express): void {
             email: pledge.email,
             phone: pledge.phone,
             notes: pledge.notes,
+            status: pledge.status,
+            cancelledAt: pledge.cancelledAt,
+            cancelledByName: pledge.cancelledByName,
+            cancellationReason: pledge.cancellationReason,
+            updatedAt: pledge.updatedAt,
             createdAt: pledge.createdAt,
             lines: pledge.lines.map((line) => ({
               itemId: line.itemId,
@@ -1012,6 +1188,7 @@ export function registerAdminRoutes(app: Express): void {
       } else {
         const snapshot = await dal.signups.listByRequestWithInterestedTotal(ctx, request.orgId, id);
         res.json({
+          canManage: staffContext(req).staffRole === "staff_admin",
           counterTotal: snapshot.counterTotal,
           participants: snapshot.participants.map((signup) => ({
             id: signup.id,
@@ -1020,6 +1197,11 @@ export function registerAdminRoutes(app: Express): void {
             email: signup.email,
             phone: signup.phone,
             notes: signup.notes,
+            status: signup.status,
+            cancelledAt: signup.cancelledAt,
+            cancelledByName: signup.cancelledByName,
+            cancellationReason: signup.cancellationReason,
+            updatedAt: signup.updatedAt,
             createdAt: signup.createdAt,
             roles: signup.roles.map((role) => ({
               roleId: role.roleId,

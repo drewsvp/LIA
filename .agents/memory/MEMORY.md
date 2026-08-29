@@ -37,3 +37,4 @@
 - [Account email identity](account-email-identity.md) — email, not name, is account identity; linked person/provider emails must match, and account-bearing merges or edits never change it implicitly.
 - [Organization-context lifecycle](organization-context-lifecycle.md) — server contexts expire durably and are revoked atomically when an organization becomes ineligible; lazy request checks are only defense in depth.
 - [Append-only directory paging](append-only-directory-paging.md) — offset paging over immutable history must carry a server-time snapshot across pages and index the full stable ordering key.
+- [Optimistic mutation versions](optimistic-mutation-versions.md) — use locked monotonic versions, not timestamps; JS loses PostgreSQL microseconds and rounding permits same-millisecond overwrites.

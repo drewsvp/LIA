@@ -8,7 +8,9 @@ import { q, withDbContext, type DbContext } from "../db/client";
 import type { SignupWithSupporter, VolunteerSignup } from "../../shared/types";
 
 const COLS = `vs.id, vs.legacy_wix_id as "legacyWixId", vs.person_id as "personId",
-  vs.volunteer_request_id as "volunteerRequestId", vs.notes, vs.created_at as "createdAt",
+  vs.volunteer_request_id as "volunteerRequestId", vs.notes, vs.status,
+  vs.cancelled_at as "cancelledAt", vs.cancelled_by as "cancelledBy",
+  vs.cancellation_reason as "cancellationReason", vs.created_at as "createdAt",
   vs.updated_at as "updatedAt"`;
 
 export type RecordVolunteerSignupInput = {
@@ -113,6 +115,9 @@ export async function findByPersonAndRequest(
 
 const SUPPORTER_SELECT = `
   select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email, p.phone,
+         case when cancelled_person.id is null then null
+              else nullif(trim(concat_ws(' ', cancelled_person.first_name, cancelled_person.last_name)), '')
+         end as "cancelledByName",
          r.title as "requestTitle",
          coalesce(
            (select json_agg(json_build_object('roleId', sr.volunteer_role_id, 'roleName', vr.name)
@@ -122,7 +127,9 @@ const SUPPORTER_SELECT = `
            '[]'::json) as roles
     from volunteer_signups vs
     join people p on p.id = vs.person_id
-    join volunteer_requests r on r.id = vs.volunteer_request_id`;
+    join volunteer_requests r on r.id = vs.volunteer_request_id
+    left join users cancelled_user on cancelled_user.id = vs.cancelled_by
+    left join people cancelled_person on cancelled_person.id = cancelled_user.person_id`;
 
 /** All signups across an organization's requests, newest first (MP-13). */
 export async function listByOrganization(ctx: DbContext, orgId: string): Promise<SignupWithSupporter[]> {
@@ -179,6 +186,9 @@ export type SignupForProfile = {
   requestTitle: string;
   orgName: string;
   createdAt: string;
+  status: "active" | "cancelled";
+  cancelledAt: string | null;
+  cancellationReason: string | null;
   roles: { roleId: string; roleName: string }[];
 };
 
@@ -188,7 +198,8 @@ export async function listByPerson(ctx: DbContext, personId: string): Promise<Si
     q<SignupForProfile>(
       c,
       `select vs.id, vs.volunteer_request_id as "requestId", r.title as "requestTitle",
-              o.name as "orgName", vs.created_at as "createdAt",
+               o.name as "orgName", vs.created_at as "createdAt", vs.status,
+               vs.cancelled_at as "cancelledAt", vs.cancellation_reason as "cancellationReason",
               coalesce(
                 (select json_agg(json_build_object('roleId', sr.volunteer_role_id, 'roleName', vr.name)
                                  order by vr.sort_order)
@@ -219,7 +230,7 @@ export async function resolveRolesForRequest(
          join volunteer_requests r on r.id = vs.volunteer_request_id
          join volunteer_signup_roles sr on sr.volunteer_signup_id = vs.id
          join volunteer_roles vr on vr.id = sr.volunteer_role_id
-        where r.org_id = $1 and vs.volunteer_request_id = $2
+         where r.org_id = $1 and vs.volunteer_request_id = $2 and vs.status = 'active'
         order by vs.created_at asc, vr.sort_order asc`,
       [orgId, requestId],
     ),

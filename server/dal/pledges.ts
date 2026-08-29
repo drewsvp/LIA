@@ -9,7 +9,10 @@ import { q, withDbContext, type DbContext } from "../db/client";
 import type { ItemPledge, PledgeWithSupporter } from "../../shared/types";
 
 const COLS = `ip.id, ip.legacy_wix_id as "legacyWixId", ip.person_id as "personId",
-  ip.item_request_id as "itemRequestId", ip.notes, ip.created_at as "createdAt", ip.updated_at as "updatedAt"`;
+  ip.item_request_id as "itemRequestId", ip.notes, ip.status,
+  ip.cancelled_at as "cancelledAt", ip.cancelled_by as "cancelledBy",
+  ip.cancellation_reason as "cancellationReason",
+  ip.created_at as "createdAt", ip.updated_at as "updatedAt"`;
 
 export type PledgeLineInput = { itemId: string; quantity: number };
 
@@ -113,6 +116,9 @@ export async function findByPersonAndRequest(
 
 const SUPPORTER_SELECT = `
   select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email, p.phone,
+         case when cancelled_person.id is null then null
+              else nullif(trim(concat_ws(' ', cancelled_person.first_name, cancelled_person.last_name)), '')
+         end as "cancelledByName",
          r.title as "requestTitle",
          coalesce(
            (select json_agg(json_build_object('itemId', l.item_id, 'itemName', i.name, 'quantity', l.quantity)
@@ -122,7 +128,9 @@ const SUPPORTER_SELECT = `
            '[]'::json) as lines
     from item_pledges ip
     join people p on p.id = ip.person_id
-    join item_requests r on r.id = ip.item_request_id`;
+    join item_requests r on r.id = ip.item_request_id
+    left join users cancelled_user on cancelled_user.id = ip.cancelled_by
+    left join people cancelled_person on cancelled_person.id = cancelled_user.person_id`;
 
 /** All pledges across an organization's requests, newest first (MP-13). */
 export async function listByOrganization(ctx: DbContext, orgId: string): Promise<PledgeWithSupporter[]> {
@@ -179,6 +187,9 @@ export type PledgeForProfile = {
   requestTitle: string;
   orgName: string;
   createdAt: string;
+  status: "active" | "cancelled";
+  cancelledAt: string | null;
+  cancellationReason: string | null;
   lines: { itemId: string; itemName: string; quantity: number }[];
 };
 
@@ -188,8 +199,9 @@ export async function listByPerson(ctx: DbContext, personId: string): Promise<Pl
     q<PledgeForProfile>(
       c,
       `select ip.id, ip.item_request_id as "requestId", r.title as "requestTitle",
-              o.name as "orgName", ip.created_at as "createdAt",
-              coalesce(
+               o.name as "orgName", ip.created_at as "createdAt", ip.status,
+               ip.cancelled_at as "cancelledAt", ip.cancellation_reason as "cancellationReason",
+               coalesce(
                 (select json_agg(json_build_object('itemId', l.item_id, 'itemName', i.name, 'quantity', l.quantity)
                                  order by i.sort_order)
                    from item_pledge_lines l join items i on i.id = l.item_id
@@ -220,7 +232,7 @@ export async function resolveLinesForRequest(
          join item_requests r on r.id = ip.item_request_id
          join item_pledge_lines l on l.item_pledge_id = ip.id
          join items i on i.id = l.item_id
-        where r.org_id = $1 and ip.item_request_id = $2
+         where r.org_id = $1 and ip.item_request_id = $2 and ip.status = 'active'
         order by ip.created_at asc, i.sort_order asc`,
       [orgId, requestId],
     ),

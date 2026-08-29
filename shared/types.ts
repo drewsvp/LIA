@@ -29,9 +29,12 @@ export type ApprovalEntityType =
   | "org_membership"
   | "item_request"
   | "volunteer_request"
-  | "person";
+  | "person"
+  | "item_pledge"
+  | "volunteer_signup";
 export type EmailStatus = "queued" | "sending" | "sent" | "failed" | "skipped";
 export type SubscriberStatus = "subscribed" | "unsubscribed" | "bounced";
+export type ParticipationStatus = "active" | "cancelled";
 
 // ---------------------------------------------------------------- identity
 
@@ -253,6 +256,10 @@ export type ItemPledge = {
   personId: string;
   itemRequestId: string;
   notes: string | null;
+  status: ParticipationStatus;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancellationReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -270,6 +277,10 @@ export type VolunteerSignup = {
   personId: string;
   volunteerRequestId: string;
   notes: string | null;
+  status: ParticipationStatus;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancellationReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -286,6 +297,7 @@ export type PledgeWithSupporter = ItemPledge & {
   lastName: string;
   email: string;
   phone: string | null;
+  cancelledByName: string | null;
   requestTitle: string;
   /** One line per pledged item: quantity and item name. */
   lines: { itemId: string; itemName: string; quantity: number }[];
@@ -296,6 +308,7 @@ export type SignupWithSupporter = VolunteerSignup & {
   lastName: string;
   email: string;
   phone: string | null;
+  cancelledByName: string | null;
   requestTitle: string;
   roles: { roleId: string; roleName: string }[];
 };
@@ -413,9 +426,16 @@ export type AdminParticipationBase = {
   email: string;
   phone: string | null;
   notes: string | null;
+  status: ParticipationStatus;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancelledByName: string | null;
+  cancellationReason: string | null;
   organization: { id: string; name: string };
   request: AdminParticipationRequest;
   createdAt: string;
+  updatedAt: string;
+  participationVersion: number;
 };
 
 export type AdminParticipationLine = {
@@ -447,4 +467,17 @@ export type AdminParticipationPage<T> = {
   totalPages: number;
   /** Append-only paging boundary; pass this back when moving between pages. */
   snapshotAt: string;
+};
+
+export type ParticipationHistoryEntry = {
+  id: string;
+  entityType: "item_pledge" | "volunteer_signup";
+  entityId: string;
+  action: "edit" | "cancel" | "reinstate";
+  actorUserId: string;
+  actorName: string | null;
+  reason: string;
+  beforeState: Record<string, unknown>;
+  afterState: Record<string, unknown>;
+  createdAt: string;
 };

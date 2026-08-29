@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict jDpxSdoCYVtqHGx8YPvx8hSA7e9qaex4Lv98DNyETGOGsxXtW9To7MUxh0VUOFz
+\restrict 6b5vNGqD8cuhIORwwQsAacj8lfqzAQ0CEptvrzE219cSnzT0Kci9H9oVLjbfVQI
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -167,6 +167,20 @@ $$;
 
 
 --
+-- Name: increment_participation_version(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.increment_participation_version() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  new.participation_version := old.participation_version + 1;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: item_request_current_la_date(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -191,6 +205,255 @@ CREATE FUNCTION public.item_request_expired_on(p_deadline_type text, p_deadline_
       and p_deadline_date is not null
       and p_deadline_date < p_today
     );
+$$;
+
+
+--
+-- Name: manage_item_pledge(uuid, text, jsonb, text, text, uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.manage_item_pledge(p_pledge_id uuid, p_action text, p_lines jsonb, p_notes text, p_reason text, p_actor_user_id uuid, p_expected_updated_at timestamp with time zone) RETURNS jsonb
+    LANGUAGE plpgsql
+    AS $$
+declare
+  v_request_id uuid;
+  v_old_status text;
+  v_new_status text;
+  v_old_active boolean;
+  v_new_active boolean;
+  v_old_updated_at timestamptz;
+  v_old_notes text;
+  v_new_notes text;
+  v_old_lines jsonb;
+  v_new_lines jsonb;
+  v_line jsonb;
+  v_item_id uuid;
+  v_qty integer;
+  v_old_qty integer;
+  v_requested integer;
+  v_claimed integer;
+  v_delta integer;
+  v_before jsonb;
+  v_after jsonb;
+begin
+  if current_setting('app.context', true) <> 'staff' then
+    raise exception 'participation_staff_only';
+  end if;
+  if p_actor_user_id is null or p_reason is null or btrim(p_reason) = '' or length(btrim(p_reason)) > 1000 then
+    raise exception 'participation_reason_required';
+  end if;
+  if p_action not in ('edit', 'cancel', 'reinstate') then
+    raise exception 'participation_action_invalid';
+  end if;
+
+  select item_request_id into v_request_id
+    from item_pledges where id = p_pledge_id;
+  if v_request_id is null then raise exception 'participation_not_found'; end if;
+  perform 1 from item_requests where id = v_request_id for update;
+
+  select status, updated_at, notes into v_old_status, v_old_updated_at, v_old_notes
+    from item_pledges where id = p_pledge_id for update;
+  if p_expected_updated_at is not null and v_old_updated_at is distinct from p_expected_updated_at then
+    raise exception 'participation_stale';
+  end if;
+  if p_action = 'cancel' and v_old_status = 'cancelled' then raise exception 'participation_already_cancelled'; end if;
+  if p_action = 'reinstate' and v_old_status = 'active' then raise exception 'participation_already_active'; end if;
+  if p_action = 'edit' and p_lines is null then raise exception 'participation_lines_required'; end if;
+  if p_action = 'edit' and jsonb_typeof(p_lines) <> 'array' then raise exception 'participation_lines_invalid'; end if;
+  if p_action = 'edit' and jsonb_array_length(p_lines) = 0 then raise exception 'participation_lines_required'; end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object('itemId', item_id, 'quantity', quantity) order by item_id), '[]'::jsonb)
+    into v_old_lines from item_pledge_lines where item_pledge_id = p_pledge_id;
+  v_new_status := case when p_action = 'cancel' then 'cancelled' when p_action = 'reinstate' then 'active' else v_old_status end;
+  v_new_notes := case when p_action = 'edit' then p_notes else v_old_notes end;
+  v_old_active := v_old_status = 'active';
+  v_new_active := v_new_status = 'active';
+  v_new_lines := case when p_action = 'reinstate' then v_old_lines
+                      when p_action = 'cancel' then v_old_lines
+                      else p_lines end;
+
+  if jsonb_typeof(v_new_lines) <> 'array' then raise exception 'participation_lines_invalid'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(v_new_lines) a
+    group by a->>'itemId' having count(*) > 1
+  ) then raise exception 'participation_duplicate_item'; end if;
+
+  -- Lock every affected child before checking capacity. Request and child
+  -- locks are always acquired in this order by all participation routines.
+  for v_item_id in
+    select id from items
+     where item_request_id = v_request_id
+       and id in (
+         select (a->>'itemId')::uuid from jsonb_array_elements(v_new_lines) a
+         union
+         select item_id from item_pledge_lines where item_pledge_id = p_pledge_id
+       )
+     order by id
+  loop
+    perform 1 from items where id = v_item_id for update;
+  end loop;
+
+  for v_line in select * from jsonb_array_elements(v_new_lines) loop
+    begin v_item_id := (v_line->>'itemId')::uuid; exception when invalid_text_representation then raise exception 'participation_lines_invalid'; end;
+    begin v_qty := (v_line->>'quantity')::integer; exception when invalid_text_representation then raise exception 'participation_quantity_invalid'; end;
+    if v_qty is null or v_qty <= 0 then raise exception 'participation_quantity_invalid'; end if;
+    select quantity_requested, quantity_claimed into v_requested, v_claimed
+      from items where id = v_item_id and item_request_id = v_request_id;
+    if v_requested is null then raise exception 'participation_item_not_in_request'; end if;
+    select coalesce(sum(quantity), 0) into v_old_qty from item_pledge_lines
+      where item_pledge_id = p_pledge_id and item_id = v_item_id;
+    v_delta := (case when v_new_active then v_qty else 0 end) - (case when v_old_active then v_old_qty else 0 end);
+    if v_delta > 0 and v_claimed + v_delta > v_requested then raise exception 'participation_insufficient_quantity'; end if;
+  end loop;
+  -- Existing lines omitted from a replacement are released. This also
+  -- prevents a malformed replacement from leaving counter drift.
+  for v_item_id in select distinct item_id from item_pledge_lines where item_pledge_id = p_pledge_id loop
+    if not exists (select 1 from jsonb_array_elements(v_new_lines) a where (a->>'itemId')::uuid = v_item_id) then
+      select coalesce(sum(quantity), 0) into v_old_qty from item_pledge_lines
+        where item_pledge_id = p_pledge_id and item_id = v_item_id;
+      if v_old_active and v_old_qty > 0 then
+        perform set_config('app.counter_write', 'on', true);
+        update items set quantity_claimed = quantity_claimed - v_old_qty where id = v_item_id;
+        perform set_config('app.counter_write', 'off', true);
+      end if;
+    end if;
+  end loop;
+
+  for v_line in select * from jsonb_array_elements(v_new_lines) loop
+    v_item_id := (v_line->>'itemId')::uuid; v_qty := (v_line->>'quantity')::integer;
+    select coalesce(sum(quantity), 0) into v_old_qty from item_pledge_lines
+      where item_pledge_id = p_pledge_id and item_id = v_item_id;
+    v_delta := (case when v_new_active then v_qty else 0 end) - (case when v_old_active then v_old_qty else 0 end);
+    if v_delta <> 0 then
+      perform set_config('app.counter_write', 'on', true);
+      update items set quantity_claimed = quantity_claimed + v_delta where id = v_item_id;
+      perform set_config('app.counter_write', 'off', true);
+    end if;
+  end loop;
+
+  delete from item_pledge_lines where item_pledge_id = p_pledge_id;
+  insert into item_pledge_lines (item_pledge_id, item_id, quantity)
+    select p_pledge_id, (a->>'itemId')::uuid, (a->>'quantity')::integer
+      from jsonb_array_elements(v_new_lines) a;
+  update item_pledges
+     set status = v_new_status, notes = v_new_notes,
+         cancelled_at = case when p_action = 'cancel' then now() when p_action = 'reinstate' then null else cancelled_at end,
+         cancelled_by = case when p_action = 'cancel' then p_actor_user_id when p_action = 'reinstate' then null else cancelled_by end,
+         cancellation_reason = case when p_action = 'cancel' then btrim(p_reason) when p_action = 'reinstate' then null else cancellation_reason end
+   where id = p_pledge_id;
+
+  select coalesce(jsonb_agg(jsonb_build_object('itemId', item_id, 'quantity', quantity) order by item_id), '[]'::jsonb)
+    into v_new_lines from item_pledge_lines where item_pledge_id = p_pledge_id;
+  v_before := jsonb_build_object('status', v_old_status, 'notes', v_old_notes, 'lines', v_old_lines);
+  v_after := jsonb_build_object('status', v_new_status, 'notes', v_new_notes, 'lines', v_new_lines);
+  insert into participation_history(entity_type, entity_id, action, actor_user_id, reason, before_state, after_state)
+    values ('item_pledge', p_pledge_id, p_action, p_actor_user_id, btrim(p_reason), v_before, v_after);
+  return jsonb_build_object('id', p_pledge_id, 'status', v_new_status, 'updatedAt', (select updated_at from item_pledges where id = p_pledge_id));
+end;
+$$;
+
+
+--
+-- Name: manage_volunteer_signup(uuid, text, uuid[], text, text, uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.manage_volunteer_signup(p_signup_id uuid, p_action text, p_role_ids uuid[], p_notes text, p_reason text, p_actor_user_id uuid, p_expected_updated_at timestamp with time zone) RETURNS jsonb
+    LANGUAGE plpgsql
+    AS $$
+declare
+  v_request_id uuid;
+  v_old_status text;
+  v_new_status text;
+  v_old_active boolean;
+  v_new_active boolean;
+  v_old_updated_at timestamptz;
+  v_old_notes text;
+  v_new_notes text;
+  v_old_roles jsonb;
+  v_new_roles jsonb;
+  v_target_roles uuid[];
+  v_role_id uuid;
+  v_needed integer;
+  v_interested integer;
+  v_old_has boolean;
+  v_new_has boolean;
+  v_delta integer;
+  v_before jsonb;
+  v_after jsonb;
+begin
+  if current_setting('app.context', true) <> 'staff' then raise exception 'participation_staff_only'; end if;
+  if p_actor_user_id is null or p_reason is null or btrim(p_reason) = '' or length(btrim(p_reason)) > 1000 then raise exception 'participation_reason_required'; end if;
+  if p_action not in ('edit', 'cancel', 'reinstate') then raise exception 'participation_action_invalid'; end if;
+  select volunteer_request_id into v_request_id from volunteer_signups where id = p_signup_id;
+  if v_request_id is null then raise exception 'participation_not_found'; end if;
+  perform 1 from volunteer_requests where id = v_request_id for update;
+  select status, updated_at, notes into v_old_status, v_old_updated_at, v_old_notes from volunteer_signups where id = p_signup_id for update;
+  if p_expected_updated_at is not null and v_old_updated_at is distinct from p_expected_updated_at then raise exception 'participation_stale'; end if;
+  if p_action = 'cancel' and v_old_status = 'cancelled' then raise exception 'participation_already_cancelled'; end if;
+  if p_action = 'reinstate' and v_old_status = 'active' then raise exception 'participation_already_active'; end if;
+  if p_action = 'edit' and p_role_ids is null then raise exception 'participation_roles_required'; end if;
+  if p_action = 'edit' and cardinality(p_role_ids) = 0 then raise exception 'participation_roles_required'; end if;
+  if p_role_ids is not null and exists (select 1 from unnest(p_role_ids) x group by x having count(*) > 1) then raise exception 'participation_duplicate_role'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object('roleId', volunteer_role_id) order by volunteer_role_id), '[]'::jsonb)
+    into v_old_roles from volunteer_signup_roles where volunteer_signup_id = p_signup_id;
+  select coalesce(array_agg(volunteer_role_id order by volunteer_role_id), array[]::uuid[])
+    into v_target_roles from volunteer_signup_roles where volunteer_signup_id = p_signup_id;
+  if p_action = 'edit' then v_target_roles := p_role_ids; end if;
+  v_new_status := case when p_action = 'cancel' then 'cancelled' when p_action = 'reinstate' then 'active' else v_old_status end;
+  v_new_notes := case when p_action = 'edit' then p_notes else v_old_notes end;
+  v_old_active := v_old_status = 'active'; v_new_active := v_new_status = 'active';
+  for v_role_id in
+    select id from volunteer_roles where volunteer_request_id = v_request_id
+      and id in (select unnest(coalesce(p_role_ids, array[]::uuid[])) union select volunteer_role_id from volunteer_signup_roles where volunteer_signup_id = p_signup_id)
+    order by id
+  loop perform 1 from volunteer_roles where id = v_role_id for update; end loop;
+  for v_role_id in select unnest(v_target_roles) loop
+    if not exists (select 1 from volunteer_roles where id = v_role_id and volunteer_request_id = v_request_id) then raise exception 'participation_role_not_in_request'; end if;
+    select quantity_needed, quantity_interested into v_needed, v_interested from volunteer_roles where id = v_role_id;
+    v_old_has := exists (select 1 from volunteer_signup_roles where volunteer_signup_id = p_signup_id and volunteer_role_id = v_role_id);
+    v_new_has := (p_action in ('cancel', 'reinstate') and v_old_has) or (p_action = 'edit' and v_role_id = any(p_role_ids));
+    v_delta := (case when v_new_active and v_new_has then 1 else 0 end) - (case when v_old_active and v_old_has then 1 else 0 end);
+    if v_delta > 0 and v_interested + v_delta > v_needed then raise exception 'participation_role_full'; end if;
+    if v_delta <> 0 then
+      perform set_config('app.counter_write', 'on', true);
+      update volunteer_roles set quantity_interested = quantity_interested + v_delta where id = v_role_id;
+      perform set_config('app.counter_write', 'off', true);
+    end if;
+  end loop;
+  -- Remove old roles that are omitted by an edit.
+  if p_action = 'edit' then
+    for v_role_id in select volunteer_role_id from volunteer_signup_roles where volunteer_signup_id = p_signup_id and not (volunteer_role_id = any(p_role_ids)) loop
+      if v_old_active then
+        perform set_config('app.counter_write', 'on', true);
+        update volunteer_roles set quantity_interested = quantity_interested - 1 where id = v_role_id;
+        perform set_config('app.counter_write', 'off', true);
+      end if;
+    end loop;
+  end if;
+  if p_action in ('cancel', 'reinstate') then
+    -- The target roles are the original roles; their counters were adjusted
+    -- in the loop above. No replacement is needed, but the rows are retained.
+    null;
+  end if;
+  -- Keep the target list because deleting the join rows would otherwise make
+  -- cancellation/reinstatement lose the participation detail.
+  v_new_roles := coalesce(v_old_roles, '[]'::jsonb);
+  delete from volunteer_signup_roles where volunteer_signup_id = p_signup_id;
+  insert into volunteer_signup_roles (volunteer_signup_id, volunteer_role_id)
+    select p_signup_id, x from unnest(v_target_roles) x;
+  update volunteer_signups set status = v_new_status, notes = v_new_notes,
+    cancelled_at = case when p_action = 'cancel' then now() when p_action = 'reinstate' then null else cancelled_at end,
+    cancelled_by = case when p_action = 'cancel' then p_actor_user_id when p_action = 'reinstate' then null else cancelled_by end,
+    cancellation_reason = case when p_action = 'cancel' then btrim(p_reason) when p_action = 'reinstate' then null else cancellation_reason end
+    where id = p_signup_id;
+  select coalesce(jsonb_agg(jsonb_build_object('roleId', volunteer_role_id) order by volunteer_role_id), '[]'::jsonb)
+    into v_new_roles from volunteer_signup_roles where volunteer_signup_id = p_signup_id;
+  v_before := jsonb_build_object('status', v_old_status, 'notes', v_old_notes, 'roles', v_old_roles);
+  v_after := jsonb_build_object('status', v_new_status, 'notes', v_new_notes, 'roles', v_new_roles);
+  insert into participation_history(entity_type, entity_id, action, actor_user_id, reason, before_state, after_state)
+    values ('volunteer_signup', p_signup_id, p_action, p_actor_user_id, btrim(p_reason), v_before, v_after);
+  return jsonb_build_object('id', p_signup_id, 'status', v_new_status, 'updatedAt', (select updated_at from volunteer_signups where id = p_signup_id));
+end;
 $$;
 
 
@@ -300,6 +563,29 @@ $$;
 
 
 --
+-- Name: project_participation_history_to_activity(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.project_participation_history_to_activity() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  insert into approval_events (
+    entity_type, entity_id, from_status, to_status, actor_user_id, note
+  ) values (
+    new.entity_type,
+    new.entity_id,
+    new.before_state->>'status',
+    case when new.action = 'edit' then 'edited' else new.after_state->>'status' end,
+    new.actor_user_id,
+    new.action || ': ' || new.reason
+  );
+  return new;
+end;
+$$;
+
+
+--
 -- Name: protect_account_email_identity(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -314,12 +600,38 @@ begin
 
   if tg_op = 'UPDATE'
      and lower(btrim(old.email)) is distinct from new.email
-     and exists (select 1 from users where person_id = old.id) then
+     and exists (select 1 from users where person_id = old.id)
+     and not (
+       coalesce(current_setting('app.account_email_change_person_id', true), '') = old.id::text
+       and coalesce(current_setting('app.account_email_change_email', true), '') = new.email
+     ) then
     raise exception 'account_email_immutable'
       using hint = 'A linked login account must retain its email identity.';
   end if;
 
   return new;
+end;
+$$;
+
+
+--
+-- Name: protect_participation_history(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.protect_participation_history() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if tg_op = 'UPDATE' then
+    raise exception 'participation_history_is_append_only';
+  end if;
+  if old.entity_type = 'item_pledge' and exists (select 1 from item_pledges where id = old.entity_id) then
+    raise exception 'participation_history_is_append_only';
+  end if;
+  if old.entity_type = 'volunteer_signup' and exists (select 1 from volunteer_signups where id = old.entity_id) then
+    raise exception 'participation_history_is_append_only';
+  end if;
+  return old;
 end;
 $$;
 
@@ -608,6 +920,48 @@ $$;
 
 
 --
+-- Name: reopen_fulfilled_item_request_after_pledge_cancel(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reopen_fulfilled_item_request_after_pledge_cancel() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  v_actor uuid;
+  v_status text;
+  v_archived_reason text;
+  v_has_remaining boolean;
+begin
+  select status, archived_reason into v_status, v_archived_reason
+    from item_requests
+   where id = new.item_request_id
+   for update;
+  select exists (
+    select 1 from items
+     where item_request_id = new.item_request_id
+       and quantity_remaining > 0
+  ) into v_has_remaining;
+  v_actor := nullif(current_setting('app.user_id', true), '')::uuid;
+
+  if v_status = 'archived' and v_archived_reason = 'fulfilled' and v_has_remaining then
+    update item_requests
+       set status = 'active', archived_at = null, archived_reason = null
+     where id = new.item_request_id;
+    insert into approval_events(entity_type, entity_id, from_status, to_status, actor_user_id, note)
+      values ('item_request', new.item_request_id, 'archived', 'active', v_actor, 'participation changed; capacity reopened');
+  elsif v_status = 'active' and not v_has_remaining then
+    update item_requests
+       set status = 'archived', archived_at = now(), archived_reason = 'fulfilled'
+     where id = new.item_request_id;
+    insert into approval_events(entity_type, entity_id, from_status, to_status, actor_user_id, note)
+      values ('item_request', new.item_request_id, 'active', 'archived', v_actor, 'fulfilled');
+  end if;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: revoke_admin_organization_contexts_for_ineligible_org(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -641,6 +995,20 @@ begin
          context_row.id, context_row.organization_id);
     end loop;
   end if;
+  return new;
+end;
+$$;
+
+
+--
+-- Name: round_participation_updated_at(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.round_participation_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  new.updated_at := date_trunc('milliseconds', new.updated_at);
   return new;
 end;
 $$;
@@ -698,8 +1066,6 @@ CREATE TABLE public.admin_organization_contexts (
     expires_at timestamp with time zone DEFAULT (now() + '08:00:00'::interval) NOT NULL
 );
 
-ALTER TABLE ONLY public.admin_organization_contexts FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: approval_events; Type: TABLE; Schema: public; Owner: -
@@ -716,37 +1082,10 @@ CREATE TABLE public.approval_events (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     organization_context_id uuid,
     context_organization_id uuid,
-    CONSTRAINT approval_events_entity_type_check CHECK ((entity_type = ANY (ARRAY['organization'::text, 'organization_context'::text, 'org_membership'::text, 'item_request'::text, 'volunteer_request'::text, 'person'::text])))
+    CONSTRAINT approval_events_entity_type_check CHECK ((entity_type = ANY (ARRAY['organization'::text, 'organization_context'::text, 'org_membership'::text, 'item_request'::text, 'volunteer_request'::text, 'person'::text, 'item_pledge'::text, 'volunteer_signup'::text])))
 );
 
 ALTER TABLE ONLY public.approval_events FORCE ROW LEVEL SECURITY;
-
---
--- Name: organization_revisions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.organization_revisions (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    organization_id uuid NOT NULL,
-    actor_user_id uuid NOT NULL,
-    changed_fields jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-ALTER TABLE ONLY public.organization_revisions FORCE ROW LEVEL SECURITY;
-
-CREATE TABLE public.storage_cleanup_queue (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    object_url text NOT NULL,
-    reason text NOT NULL,
-    attempts integer DEFAULT 0 NOT NULL,
-    last_error text,
-    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT storage_cleanup_queue_attempts_check CHECK ((attempts >= 0))
-);
-
-ALTER TABLE ONLY public.storage_cleanup_queue FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -762,6 +1101,29 @@ CREATE TABLE public.item_pledge_lines (
 );
 
 ALTER TABLE ONLY public.item_pledge_lines FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: item_pledges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.item_pledges (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    legacy_wix_id text,
+    person_id uuid NOT NULL,
+    item_request_id uuid NOT NULL,
+    notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    cancelled_at timestamp with time zone,
+    cancelled_by uuid,
+    cancellation_reason text,
+    participation_version bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT item_pledges_status_check CHECK ((status = ANY (ARRAY['active'::text, 'cancelled'::text])))
+);
+
+ALTER TABLE ONLY public.item_pledges FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -831,6 +1193,29 @@ ALTER TABLE ONLY public.volunteer_signup_roles FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: volunteer_signups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.volunteer_signups (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    legacy_wix_id text,
+    person_id uuid NOT NULL,
+    volunteer_request_id uuid NOT NULL,
+    notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    cancelled_at timestamp with time zone,
+    cancelled_by uuid,
+    cancellation_reason text,
+    participation_version bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT volunteer_signups_status_check CHECK ((status = ANY (ARRAY['active'::text, 'cancelled'::text])))
+);
+
+ALTER TABLE ONLY public.volunteer_signups FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: counter_drift; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -838,20 +1223,22 @@ CREATE VIEW public.counter_drift AS
  SELECT 'item'::text AS kind,
     i.id,
     i.quantity_claimed AS stored,
-    COALESCE(sum(l.quantity), (0)::bigint) AS actual
-   FROM (public.items i
+    COALESCE(sum(l.quantity) FILTER (WHERE (ip.status = 'active'::text)), (0)::bigint) AS actual
+   FROM ((public.items i
      LEFT JOIN public.item_pledge_lines l ON ((l.item_id = i.id)))
+     LEFT JOIN public.item_pledges ip ON ((ip.id = l.item_pledge_id)))
   GROUP BY i.id, i.quantity_claimed
- HAVING (i.quantity_claimed <> COALESCE(sum(l.quantity), (0)::bigint))
+ HAVING (i.quantity_claimed <> COALESCE(sum(l.quantity) FILTER (WHERE (ip.status = 'active'::text)), (0)::bigint))
 UNION ALL
  SELECT 'role'::text AS kind,
     r.id,
     r.quantity_interested AS stored,
-    COALESCE(count(sr.id), (0)::bigint) AS actual
-   FROM (public.volunteer_roles r
+    COALESCE(count(sr.id) FILTER (WHERE (vs.status = 'active'::text)), (0)::bigint) AS actual
+   FROM ((public.volunteer_roles r
      LEFT JOIN public.volunteer_signup_roles sr ON ((sr.volunteer_role_id = r.id)))
+     LEFT JOIN public.volunteer_signups vs ON ((vs.id = sr.volunteer_signup_id)))
   GROUP BY r.id, r.quantity_interested
- HAVING (r.quantity_interested <> COALESCE(count(sr.id), (0)::bigint));
+ HAVING (r.quantity_interested <> COALESCE(count(sr.id) FILTER (WHERE (vs.status = 'active'::text)), (0)::bigint));
 
 
 --
@@ -1049,23 +1436,6 @@ ALTER TABLE ONLY public.email_template_overrides FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: item_pledges; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.item_pledges (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    legacy_wix_id text,
-    person_id uuid NOT NULL,
-    item_request_id uuid NOT NULL,
-    notes text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-ALTER TABLE ONLY public.item_pledges FORCE ROW LEVEL SECURITY;
-
-
---
 -- Name: item_requests; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1142,8 +1512,6 @@ CREATE TABLE public.organization_context_actions (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY public.organization_context_actions FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: organization_populations; Type: TABLE; Schema: public; Owner: -
@@ -1155,6 +1523,21 @@ CREATE TABLE public.organization_populations (
 );
 
 ALTER TABLE ONLY public.organization_populations FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: organization_revisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.organization_revisions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_id uuid NOT NULL,
+    actor_user_id uuid NOT NULL,
+    changed_fields jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.organization_revisions FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1192,6 +1575,27 @@ ALTER TABLE ONLY public.organizations FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: participation_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.participation_history (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_type text NOT NULL,
+    entity_id uuid NOT NULL,
+    action text NOT NULL,
+    actor_user_id uuid NOT NULL,
+    reason text NOT NULL,
+    before_state jsonb NOT NULL,
+    after_state jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT participation_history_action_check CHECK ((action = ANY (ARRAY['edit'::text, 'cancel'::text, 'reinstate'::text]))),
+    CONSTRAINT participation_history_entity_type_check CHECK ((entity_type = ANY (ARRAY['item_pledge'::text, 'volunteer_signup'::text])))
+);
+
+ALTER TABLE ONLY public.participation_history FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: people; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1221,8 +1625,6 @@ CREATE TABLE public.person_volunteer_interests (
     category_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-ALTER TABLE ONLY public.person_volunteer_interests FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1261,8 +1663,6 @@ CREATE TABLE public.request_engagement_events (
     CONSTRAINT request_engagement_request_target CHECK ((((request_kind = 'item'::text) AND (item_request_id IS NOT NULL) AND (volunteer_request_id IS NULL)) OR ((request_kind = 'volunteer'::text) AND (volunteer_request_id IS NOT NULL) AND (item_request_id IS NULL))))
 );
 
-ALTER TABLE ONLY public.request_engagement_events FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: TABLE request_engagement_events; Type: COMMENT; Schema: public; Owner: -
@@ -1293,8 +1693,6 @@ CREATE TABLE public.request_revisions (
     context_organization_id uuid,
     CONSTRAINT request_revisions_entity_type_check CHECK ((entity_type = ANY (ARRAY['item_request'::text, 'volunteer_request'::text])))
 );
-
-ALTER TABLE ONLY public.request_revisions FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1339,6 +1737,24 @@ CREATE TABLE public.site_settings (
 );
 
 ALTER TABLE ONLY public.site_settings FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: storage_cleanup_queue; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.storage_cleanup_queue (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    object_url text NOT NULL,
+    reason text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_error text,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT storage_cleanup_queue_attempts_check CHECK ((attempts >= 0))
+);
+
+ALTER TABLE ONLY public.storage_cleanup_queue FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1438,8 +1854,6 @@ CREATE TABLE public.volunteer_alert_preferences (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY public.volunteer_alert_preferences FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: TABLE volunteer_alert_preferences; Type: COMMENT; Schema: public; Owner: -
@@ -1466,8 +1880,6 @@ CREATE TABLE public.volunteer_categories (
     CONSTRAINT volunteer_categories_name_check CHECK ((btrim(name) <> ''::text))
 );
 
-ALTER TABLE ONLY public.volunteer_categories FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: volunteer_match_alert_claims; Type: TABLE; Schema: public; Owner: -
@@ -1480,8 +1892,6 @@ CREATE TABLE public.volunteer_match_alert_claims (
     claimed_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT volunteer_match_alert_claims_to_email_check CHECK ((btrim(to_email) <> ''::text))
 );
-
-ALTER TABLE ONLY public.volunteer_match_alert_claims FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1500,8 +1910,6 @@ CREATE TABLE public.volunteer_request_categories (
     category_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-ALTER TABLE ONLY public.volunteer_request_categories FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1546,23 +1954,6 @@ ALTER TABLE ONLY public.volunteer_requests FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: volunteer_signups; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.volunteer_signups (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    legacy_wix_id text,
-    person_id uuid NOT NULL,
-    volunteer_request_id uuid NOT NULL,
-    notes text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-ALTER TABLE ONLY public.volunteer_signups FORCE ROW LEVEL SECURITY;
-
-
---
 -- Name: account account_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1584,12 +1975,6 @@ ALTER TABLE ONLY public.admin_organization_contexts
 
 ALTER TABLE ONLY public.approval_events
     ADD CONSTRAINT approval_events_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY public.organization_revisions
-    ADD CONSTRAINT organization_revisions_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY public.storage_cleanup_queue
-    ADD CONSTRAINT storage_cleanup_queue_pkey PRIMARY KEY (id);
 
 
 --
@@ -1769,6 +2154,14 @@ ALTER TABLE ONLY public.organization_populations
 
 
 --
+-- Name: organization_revisions organization_revisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_revisions
+    ADD CONSTRAINT organization_revisions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: organizations organizations_legacy_wix_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1798,6 +2191,14 @@ ALTER TABLE ONLY public.organizations
 
 ALTER TABLE ONLY public.organizations
     ADD CONSTRAINT organizations_slug_key UNIQUE (slug);
+
+
+--
+-- Name: participation_history participation_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.participation_history
+    ADD CONSTRAINT participation_history_pkey PRIMARY KEY (id);
 
 
 --
@@ -1894,6 +2295,22 @@ ALTER TABLE ONLY public.session
 
 ALTER TABLE ONLY public.site_settings
     ADD CONSTRAINT site_settings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: storage_cleanup_queue storage_cleanup_queue_object_url_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.storage_cleanup_queue
+    ADD CONSTRAINT storage_cleanup_queue_object_url_key UNIQUE (object_url);
+
+
+--
+-- Name: storage_cleanup_queue storage_cleanup_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.storage_cleanup_queue
+    ADD CONSTRAINT storage_cleanup_queue_pkey PRIMARY KEY (id);
 
 
 --
@@ -2113,11 +2530,6 @@ CREATE INDEX approval_events_created_idx ON public.approval_events USING btree (
 
 CREATE INDEX approval_events_entity_idx ON public.approval_events USING btree (entity_type, entity_id, created_at DESC);
 
-CREATE INDEX organization_revisions_entity_idx ON public.organization_revisions USING btree (organization_id, created_at DESC);
-
-CREATE UNIQUE INDEX storage_cleanup_queue_object_url_key ON public.storage_cleanup_queue USING btree (object_url);
-CREATE INDEX storage_cleanup_queue_due_idx ON public.storage_cleanup_queue USING btree (next_attempt_at, created_at);
-
 
 --
 -- Name: digest_subscribers_email_key; Type: INDEX; Schema: public; Owner: -
@@ -2166,6 +2578,13 @@ CREATE INDEX email_log_status_idx ON public.email_log USING btree (status, creat
 --
 
 CREATE INDEX item_pledge_lines_item_idx ON public.item_pledge_lines USING btree (item_id);
+
+
+--
+-- Name: item_pledges_admin_participation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX item_pledges_admin_participation_idx ON public.item_pledges USING btree (created_at DESC, id DESC);
 
 
 --
@@ -2232,10 +2651,31 @@ CREATE INDEX organization_context_actions_created ON public.organization_context
 
 
 --
+-- Name: organization_revisions_entity_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX organization_revisions_entity_idx ON public.organization_revisions USING btree (organization_id, created_at DESC);
+
+
+--
 -- Name: organizations_kind_status_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX organizations_kind_status_idx ON public.organizations USING btree (kind, status);
+
+
+--
+-- Name: participation_history_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX participation_history_created_idx ON public.participation_history USING btree (created_at DESC);
+
+
+--
+-- Name: participation_history_entity_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX participation_history_entity_idx ON public.participation_history USING btree (entity_type, entity_id, created_at DESC);
 
 
 --
@@ -2299,6 +2739,13 @@ CREATE INDEX request_revisions_entity_idx ON public.request_revisions USING btre
 --
 
 CREATE INDEX "session_userId_idx" ON public.session USING btree ("userId");
+
+
+--
+-- Name: storage_cleanup_queue_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX storage_cleanup_queue_due_idx ON public.storage_cleanup_queue USING btree (next_attempt_at, created_at);
 
 
 --
@@ -2383,6 +2830,13 @@ CREATE INDEX volunteer_roles_request_idx ON public.volunteer_roles USING btree (
 --
 
 CREATE INDEX volunteer_signup_roles_role_idx ON public.volunteer_signup_roles USING btree (volunteer_role_id);
+
+
+--
+-- Name: volunteer_signups_admin_participation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX volunteer_signups_admin_participation_idx ON public.volunteer_signups USING btree (created_at DESC, id DESC);
 
 
 --
@@ -2505,6 +2959,13 @@ CREATE TRIGGER organizations_set_updated_at BEFORE UPDATE ON public.organization
 
 
 --
+-- Name: participation_history participation_history_activity_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER participation_history_activity_trigger AFTER INSERT ON public.participation_history FOR EACH ROW EXECUTE FUNCTION public.project_participation_history_to_activity();
+
+
+--
 -- Name: people people_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2523,6 +2984,20 @@ CREATE TRIGGER people_protect_account_email_identity BEFORE INSERT OR UPDATE ON 
 --
 
 CREATE TRIGGER people_set_updated_at BEFORE UPDATE ON public.people FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: participation_history protect_participation_history_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER protect_participation_history_trigger BEFORE DELETE OR UPDATE ON public.participation_history FOR EACH ROW EXECUTE FUNCTION public.protect_participation_history();
+
+
+--
+-- Name: item_pledges reopen_fulfilled_item_request_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER reopen_fulfilled_item_request_trigger AFTER UPDATE ON public.item_pledges FOR EACH ROW EXECUTE FUNCTION public.reopen_fulfilled_item_request_after_pledge_cancel();
 
 
 --
@@ -2603,6 +3078,34 @@ CREATE TRIGGER volunteer_signups_set_updated_at BEFORE UPDATE ON public.voluntee
 
 
 --
+-- Name: item_pledges zy_item_pledge_participation_version; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zy_item_pledge_participation_version BEFORE UPDATE ON public.item_pledges FOR EACH ROW EXECUTE FUNCTION public.increment_participation_version();
+
+
+--
+-- Name: volunteer_signups zy_volunteer_signup_participation_version; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zy_volunteer_signup_participation_version BEFORE UPDATE ON public.volunteer_signups FOR EACH ROW EXECUTE FUNCTION public.increment_participation_version();
+
+
+--
+-- Name: item_pledges zz_round_item_pledge_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_round_item_pledge_updated_at BEFORE INSERT OR UPDATE ON public.item_pledges FOR EACH ROW EXECUTE FUNCTION public.round_participation_updated_at();
+
+
+--
+-- Name: volunteer_signups zz_round_volunteer_signup_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER zz_round_volunteer_signup_updated_at BEFORE INSERT OR UPDATE ON public.volunteer_signups FOR EACH ROW EXECUTE FUNCTION public.round_participation_updated_at();
+
+
+--
 -- Name: account account_userId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2632,12 +3135,6 @@ ALTER TABLE ONLY public.admin_organization_contexts
 
 ALTER TABLE ONLY public.approval_events
     ADD CONSTRAINT approval_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
-
-ALTER TABLE ONLY public.organization_revisions
-    ADD CONSTRAINT organization_revisions_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
-
-ALTER TABLE ONLY public.organization_revisions
-    ADD CONSTRAINT organization_revisions_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
 
 
 --
@@ -2726,6 +3223,14 @@ ALTER TABLE ONLY public.item_pledge_lines
 
 ALTER TABLE ONLY public.item_pledge_lines
     ADD CONSTRAINT item_pledge_lines_item_pledge_id_fkey FOREIGN KEY (item_pledge_id) REFERENCES public.item_pledges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: item_pledges item_pledges_cancelled_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.item_pledges
+    ADD CONSTRAINT item_pledges_cancelled_by_fkey FOREIGN KEY (cancelled_by) REFERENCES public.users(id);
 
 
 --
@@ -2857,6 +3362,22 @@ ALTER TABLE ONLY public.organization_populations
 
 
 --
+-- Name: organization_revisions organization_revisions_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_revisions
+    ADD CONSTRAINT organization_revisions_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: organization_revisions organization_revisions_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_revisions
+    ADD CONSTRAINT organization_revisions_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
+
+
+--
 -- Name: organizations organizations_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2870,6 +3391,14 @@ ALTER TABLE ONLY public.organizations
 
 ALTER TABLE ONLY public.organizations
     ADD CONSTRAINT organizations_primary_contact_person_id_fkey FOREIGN KEY (primary_contact_person_id) REFERENCES public.people(id);
+
+
+--
+-- Name: participation_history participation_history_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.participation_history
+    ADD CONSTRAINT participation_history_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
 
 
 --
@@ -3129,6 +3658,14 @@ ALTER TABLE ONLY public.volunteer_signup_roles
 
 
 --
+-- Name: volunteer_signups volunteer_signups_cancelled_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.volunteer_signups
+    ADD CONSTRAINT volunteer_signups_cancelled_by_fkey FOREIGN KEY (cancelled_by) REFERENCES public.users(id);
+
+
+--
 -- Name: volunteer_signups volunteer_signups_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3142,19 +3679,6 @@ ALTER TABLE ONLY public.volunteer_signups
 
 ALTER TABLE ONLY public.volunteer_signups
     ADD CONSTRAINT volunteer_signups_volunteer_request_id_fkey FOREIGN KEY (volunteer_request_id) REFERENCES public.volunteer_requests(id);
-
-
---
--- Name: admin_organization_contexts; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.admin_organization_contexts ENABLE ROW LEVEL SECURITY;
-
---
--- Name: admin_organization_contexts admin_organization_contexts_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY admin_organization_contexts_system_staff_all ON public.admin_organization_contexts USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3175,14 +3699,6 @@ CREATE POLICY approval_events_member_insert ON public.approval_events FOR INSERT
 --
 
 CREATE POLICY approval_events_system_staff_all ON public.approval_events USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-ALTER TABLE public.organization_revisions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY organization_revisions_system_staff_all ON public.organization_revisions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-ALTER TABLE public.storage_cleanup_queue ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY storage_cleanup_queue_system_staff_all ON public.storage_cleanup_queue USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3435,19 +3951,6 @@ CREATE POLICY org_memberships_system_staff_all ON public.org_memberships USING (
 
 
 --
--- Name: organization_context_actions; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.organization_context_actions ENABLE ROW LEVEL SECURITY;
-
---
--- Name: organization_context_actions organization_context_actions_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY organization_context_actions_system_staff_all ON public.organization_context_actions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
 -- Name: organization_populations; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3467,6 +3970,19 @@ CREATE POLICY organization_populations_public_member_select ON public.organizati
 --
 
 CREATE POLICY organization_populations_system_staff_all ON public.organization_populations USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: organization_revisions; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.organization_revisions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: organization_revisions organization_revisions_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY organization_revisions_system_staff_all ON public.organization_revisions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3510,6 +4026,26 @@ CREATE POLICY organizations_system_staff_all ON public.organizations USING ((cur
 
 
 --
+-- Name: participation_history; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.participation_history ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: participation_history participation_history_system_staff_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY participation_history_system_staff_insert ON public.participation_history FOR INSERT WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: participation_history participation_history_system_staff_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY participation_history_system_staff_select ON public.participation_history FOR SELECT USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: people; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3546,48 +4082,6 @@ CREATE POLICY people_system_staff_all ON public.people USING ((current_setting('
 
 
 --
--- Name: person_volunteer_interests; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.person_volunteer_interests ENABLE ROW LEVEL SECURITY;
-
---
--- Name: person_volunteer_interests person_volunteer_interests_member_delete; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_member_delete ON public.person_volunteer_interests FOR DELETE USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))))));
-
-
---
--- Name: person_volunteer_interests person_volunteer_interests_member_insert; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_member_insert ON public.person_volunteer_interests FOR INSERT WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid)))) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_categories vc
-  WHERE ((vc.id = person_volunteer_interests.category_id) AND vc.is_active)))));
-
-
---
--- Name: person_volunteer_interests person_volunteer_interests_member_select; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_member_select ON public.person_volunteer_interests FOR SELECT USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.person_id = person_volunteer_interests.person_id) AND (u.id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))))));
-
-
---
--- Name: person_volunteer_interests person_volunteer_interests_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY person_volunteer_interests_system_staff_all ON public.person_volunteer_interests USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
 -- Name: populations; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3608,32 +4102,6 @@ CREATE POLICY populations_system_staff_all ON public.populations USING ((current
 
 
 --
--- Name: request_engagement_events; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.request_engagement_events ENABLE ROW LEVEL SECURITY;
-
---
--- Name: request_engagement_events request_engagement_events_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY request_engagement_events_system_staff_all ON public.request_engagement_events USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: request_revisions; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.request_revisions ENABLE ROW LEVEL SECURITY;
-
---
--- Name: request_revisions request_revisions_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY request_revisions_system_staff_all ON public.request_revisions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
 -- Name: site_settings; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3644,6 +4112,19 @@ ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY site_settings_system_staff_all ON public.site_settings USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: storage_cleanup_queue; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.storage_cleanup_queue ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: storage_cleanup_queue storage_cleanup_queue_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY storage_cleanup_queue_system_staff_all ON public.storage_cleanup_queue USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3690,107 +4171,6 @@ CREATE POLICY users_member_select_self ON public.users FOR SELECT USING (((curre
 --
 
 CREATE POLICY users_system_staff_all ON public.users USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_alert_preferences; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_alert_preferences ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_member_insert; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_member_insert ON public.volunteer_alert_preferences FOR INSERT WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.id = volunteer_alert_preferences.user_id) AND (u.kind = 'supporter'::text) AND (u.status = 'active'::text))))));
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_member_select; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_member_select ON public.volunteer_alert_preferences FOR SELECT USING (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid)));
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_member_update; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_member_update ON public.volunteer_alert_preferences FOR UPDATE USING (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))) WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (EXISTS ( SELECT 1
-   FROM public.users u
-  WHERE ((u.id = volunteer_alert_preferences.user_id) AND (u.kind = 'supporter'::text) AND (u.status = 'active'::text))))));
-
-
---
--- Name: volunteer_alert_preferences volunteer_alert_preferences_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_alert_preferences_system_staff_all ON public.volunteer_alert_preferences USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_categories; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_categories ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_categories volunteer_categories_member_select; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_categories_member_select ON public.volunteer_categories FOR SELECT USING ((current_setting('app.context'::text, true) = 'member'::text));
-
-
---
--- Name: volunteer_categories volunteer_categories_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_categories_system_staff_all ON public.volunteer_categories USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_match_alert_claims; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_match_alert_claims ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_match_alert_claims volunteer_match_alert_claims_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_match_alert_claims_system_staff_all ON public.volunteer_match_alert_claims USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: volunteer_request_categories; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.volunteer_request_categories ENABLE ROW LEVEL SECURITY;
-
---
--- Name: volunteer_request_categories volunteer_request_categories_member_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_request_categories_member_all ON public.volunteer_request_categories USING (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_requests r
-  WHERE ((r.id = volunteer_request_categories.volunteer_request_id) AND (r.org_id IN ( SELECT om.org_id
-           FROM public.org_memberships om
-          WHERE ((om.user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (om.status = 'active'::text))))))))) WITH CHECK (((current_setting('app.context'::text, true) = 'member'::text) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_requests r
-  WHERE ((r.id = volunteer_request_categories.volunteer_request_id) AND (r.org_id IN ( SELECT om.org_id
-           FROM public.org_memberships om
-          WHERE ((om.user_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid) AND (om.status = 'active'::text))))))) AND (EXISTS ( SELECT 1
-   FROM public.volunteer_categories vc
-  WHERE ((vc.id = volunteer_request_categories.category_id) AND vc.is_active)))));
-
-
---
--- Name: volunteer_request_categories volunteer_request_categories_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY volunteer_request_categories_system_staff_all ON public.volunteer_request_categories USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3935,5 +4315,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict jDpxSdoCYVtqHGx8YPvx8hSA7e9qaex4Lv98DNyETGOGsxXtW9To7MUxh0VUOFz
+\unrestrict 6b5vNGqD8cuhIORwwQsAacj8lfqzAQ0CEptvrzE219cSnzT0Kci9H9oVLjbfVQI
 

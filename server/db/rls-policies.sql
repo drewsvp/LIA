@@ -735,6 +735,19 @@ create policy supporter_admin_audit_system_staff_all on supporter_admin_audit
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 
+-- ---------------------------------------------------------------- participation_history
+
+alter table participation_history enable row level security;
+alter table participation_history force row level security;
+
+drop policy if exists participation_history_system_staff_all on participation_history;
+drop policy if exists participation_history_system_staff_select on participation_history;
+drop policy if exists participation_history_system_staff_insert on participation_history;
+create policy participation_history_system_staff_select on participation_history
+  for select using (current_setting('app.context', true) in ('system','staff'));
+create policy participation_history_system_staff_insert on participation_history
+  for insert with check (current_setting('app.context', true) in ('system','staff'));
+
 -- ---------------------------------------------------------------- request_revisions
 
 alter table request_revisions enable row level security;

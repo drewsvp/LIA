@@ -85,8 +85,8 @@ export async function list(
               p.last_name as "lastName", p.email, p.phone, u.status,
               u.last_login_at as "lastLoginAt", u.created_at as "createdAt",
               coalesce(vap.enabled, false) as "alertsEnabled",
-              (select count(*)::int from item_pledges ip where ip.person_id = u.person_id) as "pledgeCount",
-              (select count(*)::int from volunteer_signups vs where vs.person_id = u.person_id) as "signupCount",
+              (select count(*)::int from item_pledges ip where ip.person_id = u.person_id and ip.status = 'active') as "pledgeCount",
+              (select count(*)::int from volunteer_signups vs where vs.person_id = u.person_id and vs.status = 'active') as "signupCount",
               (select count(*)::int from request_engagement_events re where re.user_id = u.id) as "viewCount",
               count(*) over()::int as total
          from users u

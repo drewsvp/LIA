@@ -25,6 +25,7 @@ export type ParticipationFilters = {
   from?: string;
   to?: string;
   snapshotAt?: string;
+  participationId?: string;
 };
 
 export type AdminParticipationResult =
@@ -73,6 +74,7 @@ function filterSql(
   }
   if (filters.organizationId) clauses.push(`o.id = ${add(filters.organizationId)}`);
   if (filters.requestId) clauses.push(`${requestAlias}.id = ${add(filters.requestId)}`);
+  if (filters.participationId) clauses.push(`${tableAlias}.id = ${add(filters.participationId)}`);
   if (filters.from) {
     clauses.push(`(${tableAlias}.created_at at time zone 'America/Los_Angeles')::date >= ${add(filters.from)}::date`);
   }
@@ -139,10 +141,16 @@ async function list(
             c,
             `select ip.id, ip.person_id as "personId", p.needs_review as "personNeedsReview",
                     p.first_name as "firstName", p.last_name as "lastName", p.email, p.phone, ip.notes,
+                    ip.status, ip.cancelled_at as "cancelledAt", ip.cancelled_by as "cancelledBy",
+                    ip.cancellation_reason as "cancellationReason",
+                    nullif(trim(concat_ws(' ', cp.first_name, cp.last_name)), '') as "cancelledByName",
                     o.id as "organizationId", o.name as "organizationName",
                     r.id as "requestId", r.title as "requestTitle", ip.created_at as "createdAt",
+                    ip.updated_at as "updatedAt", ip.participation_version::int as "participationVersion",
                     ${childJson} as lines
                ${baseFrom}
+              left join users cu on cu.id = ip.cancelled_by
+              left join people cp on cp.id = cu.person_id
               where true ${rowWhere}
               order by ip.created_at desc, ip.id desc
               limit $${rowParams.length - 1} offset $${rowParams.length}`,
@@ -152,10 +160,16 @@ async function list(
             c,
             `select vs.id, vs.person_id as "personId", p.needs_review as "personNeedsReview",
                     p.first_name as "firstName", p.last_name as "lastName", p.email, p.phone, vs.notes,
+                    vs.status, vs.cancelled_at as "cancelledAt", vs.cancelled_by as "cancelledBy",
+                    vs.cancellation_reason as "cancellationReason",
+                    nullif(trim(concat_ws(' ', cp.first_name, cp.last_name)), '') as "cancelledByName",
                     o.id as "organizationId", o.name as "organizationName",
                     r.id as "requestId", r.title as "requestTitle", vs.created_at as "createdAt",
+                    vs.updated_at as "updatedAt", vs.participation_version::int as "participationVersion",
                     ${childJson} as roles
                ${baseFrom}
+              left join users cu on cu.id = vs.cancelled_by
+              left join people cp on cp.id = cu.person_id
               where true ${rowWhere}
               order by vs.created_at desc, vs.id desc
               limit $${rowParams.length - 1} offset $${rowParams.length}`,
@@ -197,4 +211,14 @@ export function listDonations(ctx: DbContext, filters: ParticipationFilters): Pr
 
 export function listVolunteers(ctx: DbContext, filters: ParticipationFilters): Promise<AdminParticipationResult> {
   return list(ctx, filters, "volunteer");
+}
+
+export async function getDonation(ctx: DbContext, id: string): Promise<AdminDonationRow | null> {
+  const result = await list(ctx, { page: 1, pageSize: 1, participationId: id }, "item");
+  return (result.rows[0] as AdminDonationRow | undefined) ?? null;
+}
+
+export async function getVolunteer(ctx: DbContext, id: string): Promise<AdminVolunteerRow | null> {
+  const result = await list(ctx, { page: 1, pageSize: 1, participationId: id }, "volunteer");
+  return (result.rows[0] as AdminVolunteerRow | undefined) ?? null;
 }

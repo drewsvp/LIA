@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { productUrlProblem } from "@shared/item-product-url";
 import { useNavigationGuard } from "../../hooks/useNavigationGuard";
+import { ParticipationManager } from "../../components/admin/ParticipationManager";
 
 type RequestKind = "item" | "volunteer";
 type Tab = "pending" | "active" | "archived" | "returned";
@@ -70,6 +71,11 @@ type ItemParticipant = {
   email: string;
   phone: string | null;
   notes: string | null;
+  status: "active" | "cancelled";
+  cancelledAt: string | null;
+  cancelledByName: string | null;
+  cancellationReason: string | null;
+  updatedAt: string;
   createdAt: string;
   lines: { itemId: string; itemName: string; quantity: number }[];
 };
@@ -81,6 +87,11 @@ type VolunteerParticipant = {
   email: string;
   phone: string | null;
   notes: string | null;
+  status: "active" | "cancelled";
+  cancelledAt: string | null;
+  cancelledByName: string | null;
+  cancellationReason: string | null;
+  updatedAt: string;
   createdAt: string;
   roles: { roleId: string; roleName: string }[];
 };
@@ -88,6 +99,7 @@ type VolunteerParticipant = {
 type ParticipantsPayload = {
   participants: ItemParticipant[] | VolunteerParticipant[];
   counterTotal: number;
+  canManage: boolean;
 };
 
 type VolunteerCategoryOption = {
@@ -937,14 +949,14 @@ export function RequestsPage() {
     detail?.type === "volunteer" ? (participantRows as VolunteerParticipant[]) : [];
   const pledgedTotal =
     detail?.type === "item"
-      ? itemParticipantRows.reduce(
+      ? itemParticipantRows.filter((participant) => participant.status === "active").reduce(
           (total, participant) => total + participant.lines.reduce((lineTotal, line) => lineTotal + line.quantity, 0),
           0,
         )
       : 0;
   const signupRoleTotal =
     detail?.type === "volunteer"
-      ? volunteerParticipantRows.reduce((total, participant) => total + participant.roles.length, 0)
+      ? volunteerParticipantRows.filter((participant) => participant.status === "active").reduce((total, participant) => total + participant.roles.length, 0)
       : 0;
 
   return (
@@ -1557,6 +1569,8 @@ export function RequestsPage() {
                               <th>Items pledged</th>
                               <th>Notes</th>
                               <th>Pledged</th>
+                              <th>Status</th>
+                              {participantsQuery.data?.canManage && <th>Actions</th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -1576,6 +1590,25 @@ export function RequestsPage() {
                                 </td>
                                 <td>{participant.notes ?? "—"}</td>
                                 <td>{formatDateTime(participant.createdAt)}</td>
+                                <td>
+                                  <strong>{participant.status === "active" ? "Active" : "Cancelled"}</strong>
+                                  {participant.status === "cancelled" && (
+                                    <small className="adm-participation-cancelled">
+                                      {participant.cancelledAt ? formatDateTime(participant.cancelledAt) : ""}
+                                      {participant.cancelledByName ? ` by ${participant.cancelledByName}` : ""}
+                                      {participant.cancellationReason ? ` — ${participant.cancellationReason}` : ""}
+                                    </small>
+                                  )}
+                                </td>
+                                {participantsQuery.data?.canManage && (
+                                  <td>
+                                    <ParticipationManager
+                                      kind="donations"
+                                      id={participant.id}
+                                      onChanged={() => void refreshAfterAction()}
+                                    />
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>
@@ -1603,6 +1636,8 @@ export function RequestsPage() {
                               <th>Roles selected</th>
                               <th>Notes</th>
                               <th>Signed up</th>
+                              <th>Status</th>
+                              {participantsQuery.data?.canManage && <th>Actions</th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -1622,6 +1657,25 @@ export function RequestsPage() {
                                 </td>
                                 <td>{participant.notes ?? "—"}</td>
                                 <td>{formatDateTime(participant.createdAt)}</td>
+                                <td>
+                                  <strong>{participant.status === "active" ? "Active" : "Cancelled"}</strong>
+                                  {participant.status === "cancelled" && (
+                                    <small className="adm-participation-cancelled">
+                                      {participant.cancelledAt ? formatDateTime(participant.cancelledAt) : ""}
+                                      {participant.cancelledByName ? ` by ${participant.cancelledByName}` : ""}
+                                      {participant.cancellationReason ? ` — ${participant.cancellationReason}` : ""}
+                                    </small>
+                                  )}
+                                </td>
+                                {participantsQuery.data?.canManage && (
+                                  <td>
+                                    <ParticipationManager
+                                      kind="volunteers"
+                                      id={participant.id}
+                                      onChanged={() => void refreshAfterAction()}
+                                    />
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>

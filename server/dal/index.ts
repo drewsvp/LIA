@@ -46,6 +46,7 @@ export * as siteSettings from "./site-settings";
 export * as adminOrganizationContexts from "./admin-organization-contexts";
 export * as adminSupporters from "./admin-supporters";
 export * as adminParticipation from "./admin-participation";
+export * as participationHistory from "./participation-history";
 export * as supporterImpersonation from "./supporter-impersonation";
 export * as storageCleanup from "./storage-cleanup";
 

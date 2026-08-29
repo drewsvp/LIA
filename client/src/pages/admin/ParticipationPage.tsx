@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
+import { ParticipationManager } from "../../components/admin/ParticipationManager";
 import type {
   AdminDonationRow,
   AdminParticipationPage,
@@ -167,6 +168,8 @@ function DonationsView({
                 <th>Request</th>
                 <th>Date</th>
                 <th>Items and quantities</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -182,6 +185,17 @@ function DonationsView({
                       {row.lines.map((line) => <li key={line.id}>{line.quantity} × {line.name}</li>)}
                     </ul>
                   </td>
+                  <td data-label="Status">
+                    <strong>{row.status === "active" ? "Active" : "Cancelled"}</strong>
+                    {row.status === "cancelled" && (
+                      <small className="adm-participation-cancelled">
+                        {row.cancelledAt ? formatDateTime(row.cancelledAt) : ""}
+                        {row.cancelledByName ? ` by ${row.cancelledByName}` : ""}
+                        {row.cancellationReason ? ` — ${row.cancellationReason}` : ""}
+                      </small>
+                    )}
+                  </td>
+                  <td data-label="Actions"><ParticipationManager kind="donations" id={row.id} /></td>
                 </tr>
               ))}
             </tbody>
@@ -239,6 +253,8 @@ function VolunteersView({
                 <th>Request</th>
                 <th>Date</th>
                 <th>Selected roles</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -254,6 +270,17 @@ function VolunteersView({
                       {row.roles.map((role) => <li key={role.id}>{role.name}</li>)}
                     </ul>
                   </td>
+                  <td data-label="Status">
+                    <strong>{row.status === "active" ? "Active" : "Cancelled"}</strong>
+                    {row.status === "cancelled" && (
+                      <small className="adm-participation-cancelled">
+                        {row.cancelledAt ? formatDateTime(row.cancelledAt) : ""}
+                        {row.cancelledByName ? ` by ${row.cancelledByName}` : ""}
+                        {row.cancellationReason ? ` — ${row.cancellationReason}` : ""}
+                      </small>
+                    )}
+                  </td>
+                  <td data-label="Actions"><ParticipationManager kind="volunteers" id={row.id} /></td>
                 </tr>
               ))}
             </tbody>
@@ -288,8 +315,8 @@ export function ParticipationPage(): ReactElement {
     <div className="adm-page adm-participation-page">
       <h1 className="adm-heading">Donations &amp; Volunteers</h1>
       <p className="adm-note">
-        Read-only participation history across all organizations. Supporter contact details and notes are shown for
-        operational follow-up.
+        Participation history across all organizations. Staff admins can correct selections, cancel records, or
+        reinstate them with an attributable reason.
       </p>
 
       <div className="adm-participation-filters" role="search" aria-label="Participation filters">

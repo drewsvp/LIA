@@ -38,6 +38,8 @@ const REQUIRED_FUNCTIONS: ReadonlyArray<{
   { name: "merge_people",                     migration: "0045_restore_routine_parity.sql" },
   { name: "record_item_pledge",               migration: "0045_restore_routine_parity.sql" },
   { name: "record_volunteer_signup",          migration: "0045_restore_routine_parity.sql" },
+  { name: "manage_item_pledge",               migration: "0058_manage_participation.sql" },
+  { name: "manage_volunteer_signup",           migration: "0058_manage_participation.sql" },
   { name: "reject_expired_item_pledge",       migration: "0045_restore_routine_parity.sql" },
   { name: "set_updated_at",                   migration: "0045_restore_routine_parity.sql" },
   { name: "protect_account_email_identity",   migration: "0051_enforce_normalized_people_email.sql" },

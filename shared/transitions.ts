@@ -15,6 +15,8 @@ export const ENTITY_TYPE_NAMES: Record<string, string> = {
   volunteer_request: "Volunteer request",
   org_membership: "Membership",
   person: "Person",
+  item_pledge: "Item pledge",
+  volunteer_signup: "Volunteer signup",
 };
 
 export function entityTypeName(entityType: string): string {
@@ -95,6 +97,11 @@ export function transitionLabel(
     if (label !== undefined) return label;
   }
   if (entityType === "person" && toStatus === "merged") return "Merged";
+  if (entityType === "item_pledge" || entityType === "volunteer_signup") {
+    if (toStatus === "edited") return "Participation corrected";
+    if (toStatus === "cancelled") return "Participation cancelled";
+    if (toStatus === "active" && fromStatus === "cancelled") return "Participation reinstated";
+  }
   // Never hide an event behind an unmapped pair — show the raw movement.
   return `${fromStatus ?? "created"} → ${toStatus}`;
 }

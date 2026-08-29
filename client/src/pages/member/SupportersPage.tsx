@@ -29,6 +29,10 @@ type DonorRow = {
   requestTitle: string;
   lines: { itemName: string; quantity: number }[];
   createdAt: string;
+  status: "active" | "cancelled";
+  cancelledAt: string | null;
+  cancelledByName: string | null;
+  cancellationReason: string | null;
 };
 
 type VolunteerRow = {
@@ -41,6 +45,10 @@ type VolunteerRow = {
   requestTitle: string;
   roles: { roleName: string }[];
   createdAt: string;
+  status: "active" | "cancelled";
+  cancelledAt: string | null;
+  cancelledByName: string | null;
+  cancellationReason: string | null;
 };
 
 type TableState<T> = { kind: "loading" } | { kind: "error" } | { kind: "ready"; rows: T[] };
@@ -130,6 +138,7 @@ export function SupportersPage() {
                   <th>Request</th>
                   <th>Items</th>
                   <th>Claimed Date</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -147,6 +156,16 @@ export function SupportersPage() {
                       ))}
                     </td>
                     <td data-label="Claimed Date">{formatDate(row.createdAt)}</td>
+                    <td data-label="Status">
+                      <strong>{row.status === "active" ? "Active" : "Cancelled"}</strong>
+                      {row.status === "cancelled" && (
+                        <span className="mp13-line">
+                          {row.cancelledAt ? ` ${formatDate(row.cancelledAt)}` : ""}
+                          {row.cancelledByName ? ` by ${row.cancelledByName}` : ""}
+                          {row.cancellationReason ? ` — ${row.cancellationReason}` : ""}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -176,6 +195,7 @@ export function SupportersPage() {
                   <th>Request</th>
                   <th>Roles</th>
                   <th>Expressed Interest Date</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,6 +208,16 @@ export function SupportersPage() {
                     <td data-label="Request">{row.requestTitle}</td>
                     <td data-label="Roles">{row.roles.map((r) => r.roleName).join(", ")}</td>
                     <td data-label="Expressed Interest Date">{formatDate(row.createdAt)}</td>
+                    <td data-label="Status">
+                      <strong>{row.status === "active" ? "Active" : "Cancelled"}</strong>
+                      {row.status === "cancelled" && (
+                        <span className="mp13-line">
+                          {row.cancelledAt ? ` ${formatDate(row.cancelledAt)}` : ""}
+                          {row.cancelledByName ? ` by ${row.cancelledByName}` : ""}
+                          {row.cancellationReason ? ` — ${row.cancellationReason}` : ""}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

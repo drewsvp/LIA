@@ -169,11 +169,11 @@ export async function listRecentlyViewedForUser(
               case
                 when l.request_kind = 'item' then exists (
                   select 1 from item_pledges ip
-                   where ip.person_id = $2 and ip.item_request_id = l.request_id
+                   where ip.person_id = $2 and ip.item_request_id = l.request_id and ip.status = 'active'
                 )
                 else exists (
                   select 1 from volunteer_signups vs
-                   where vs.person_id = $2 and vs.volunteer_request_id = l.request_id
+                   where vs.person_id = $2 and vs.volunteer_request_id = l.request_id and vs.status = 'active'
                 )
               end as converted
          from latest l
@@ -282,11 +282,11 @@ export async function getAnalyticsReport(
        ),
        conversions as (
          select 'item'::text as request_kind, item_request_id as request_id, count(*)::int as conversions
-           from item_pledges where ${CONVERSION_WINDOW}
+           from item_pledges where status = 'active' and ${CONVERSION_WINDOW}
           group by item_request_id
          union all
          select 'volunteer'::text, volunteer_request_id, count(*)::int
-           from volunteer_signups where ${CONVERSION_WINDOW}
+           from volunteer_signups where status = 'active' and ${CONVERSION_WINDOW}
           group by volunteer_request_id
        )
        select r.request_kind as "requestKind", r.request_id as "requestId",
@@ -327,10 +327,10 @@ export async function getAnalyticsReport(
        ),
        conversion_rows as (
          select ip.created_at, 'item'::text as request_kind, ip.item_request_id as request_id
-           from item_pledges ip
+           from item_pledges ip where ip.status = 'active'
          union all
          select vs.created_at, 'volunteer'::text, vs.volunteer_request_id
-           from volunteer_signups vs
+           from volunteer_signups vs where vs.status = 'active'
        ),
        conversions as (
          select (c.created_at at time zone 'America/Los_Angeles')::date as date,
@@ -427,12 +427,12 @@ export async function listUnconvertedViewers(
            and (
              (v.request_kind = 'item' and not exists (
                select 1 from item_pledges ip
-                where ip.person_id = u.person_id and ip.item_request_id = v.request_id
+                where ip.person_id = u.person_id and ip.item_request_id = v.request_id and ip.status = 'active'
              ))
              or
              (v.request_kind = 'volunteer' and not exists (
                select 1 from volunteer_signups vs
-                where vs.person_id = u.person_id and vs.volunteer_request_id = v.request_id
+                where vs.person_id = u.person_id and vs.volunteer_request_id = v.request_id and vs.status = 'active'
              ))
            )
       )`;
@@ -537,12 +537,12 @@ export async function listEligibleOutreachRecipients(
             and (
               (sr.request_kind = 'item' and not exists (
                 select 1 from item_pledges ip
-                 where ip.person_id = u.person_id and ip.item_request_id = sr.request_id
+                 where ip.person_id = u.person_id and ip.item_request_id = sr.request_id and ip.status = 'active'
               ))
               or
               (sr.request_kind = 'volunteer' and not exists (
                 select 1 from volunteer_signups vs
-                 where vs.person_id = u.person_id and vs.volunteer_request_id = sr.request_id
+                 where vs.person_id = u.person_id and vs.volunteer_request_id = sr.request_id and vs.status = 'active'
               ))
             )
        )
