@@ -43,6 +43,7 @@
     "test:site-settings": "tsx scripts/test-site-settings.ts",
     "test:staff-admin-access": "tsx scripts/test-staff-admin-access.ts",
     "test:alliance-staff-conversion": "tsx scripts/test-alliance-staff-conversion.ts",
+    "test:alliance-volunteer-publication": "tsx scripts/test-alliance-volunteer-publication.ts",
     "test:role-status-management": "tsx scripts/test-role-status-management.ts",
     "test:account-email-identity": "tsx scripts/test-account-email-identity.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",

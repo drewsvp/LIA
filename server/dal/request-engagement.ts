@@ -1,4 +1,5 @@
 import { q, withDbContext, type DbContext } from "../db/client";
+import { PUBLIC_VOLUNTEER_ORGANIZATION_SQL } from "./volunteer-requests";
 
 export type EngagementEventType =
   | "card_click"
@@ -55,8 +56,7 @@ export async function recordPublicEvent(
                join organizations o on o.id = r.org_id
               where r.id = $1
                 and r.status = 'active'
-                and o.kind = 'member_org'
-                and o.status = 'approved'
+                and ${PUBLIC_VOLUNTEER_ORGANIZATION_SQL}
                 and not (
                   (r.expires_on is not null and r.expires_on < item_request_current_la_date())
                   or (
@@ -155,7 +155,7 @@ export async function listRecentlyViewedForUser(
                   )
                 )
                 else (
-                  vr.status = 'active' and o.status = 'approved' and o.kind = 'member_org'
+                  vr.status = 'active' and ${PUBLIC_VOLUNTEER_ORGANIZATION_SQL}
                   and not (
                     (vr.expires_on is not null and vr.expires_on < item_request_current_la_date())
                     or (
@@ -497,8 +497,7 @@ export async function listEligibleOutreachRecipients(
          union all
          select 'volunteer'::text, r.id, r.title, o.name,
                 r.status = 'active'
-                  and o.kind = 'member_org'
-                  and o.status = 'approved'
+                  and ${PUBLIC_VOLUNTEER_ORGANIZATION_SQL}
                   and not (
                     (r.expires_on is not null and r.expires_on < item_request_current_la_date())
                     or (

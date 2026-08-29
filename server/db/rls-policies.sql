@@ -120,7 +120,7 @@ drop policy if exists organizations_public_select on organizations;
 create policy organizations_public_select on organizations for select
   using (
     current_setting('app.context', true) = 'public'
-    and kind = 'member_org' and status = 'approved'
+    and status = 'approved'
   );
 
 drop policy if exists organizations_member_select on organizations;
@@ -198,10 +198,9 @@ create policy organization_populations_system_staff_all on organization_populati
   with check (current_setting('app.context', true) in ('system','staff'));
 
 drop policy if exists organization_populations_public_member_select on organization_populations;
--- Restates the parent org predicates (kept in lockstep with migration
--- 0007_scope_public_child_policies.sql). Member context keeps its broader
--- reach here: a member org reads populations for any approved member org,
--- matching organizations_member_select.
+-- Restates the public parent-org predicate. Approved platform-owner identity
+-- and populations are public because its profile and volunteer opportunities
+-- are public; request-kind policies still decide which needs can be exposed.
 create policy organization_populations_public_member_select on organization_populations
   for select
   using (
@@ -210,7 +209,6 @@ create policy organization_populations_public_member_select on organization_popu
       select 1
         from organizations o
        where o.id = organization_populations.org_id
-         and o.kind = 'member_org'
          and o.status = 'approved'
     )
   );
@@ -498,7 +496,11 @@ create policy volunteer_requests_public_select on volunteer_requests for select
   using (
     current_setting('app.context', true) = 'public'
     and status in ('active','archived')
-    and org_id in (select o.id from organizations o where o.kind = 'member_org' and o.status = 'approved')
+    and org_id in (
+      select o.id from organizations o
+       where o.status = 'approved'
+         and o.kind in ('member_org', 'platform_owner')
+    )
   );
 
 drop policy if exists volunteer_requests_member_select on volunteer_requests;
@@ -562,8 +564,8 @@ create policy volunteer_roles_public_select on volunteer_roles
         join organizations o on o.id = r.org_id
        where r.id = volunteer_roles.volunteer_request_id
          and r.status in ('active', 'archived')
-         and o.kind = 'member_org'
          and o.status = 'approved'
+         and o.kind in ('member_org', 'platform_owner')
     )
   );
 

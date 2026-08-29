@@ -1,27 +1,28 @@
 ---
-name: Public org visibility gate
-description: Why the public organization profile gates on status alone while public request browsing also requires kind = 'member_org'.
+name: Public org and request visibility gates
+description: Public organization identity is status-gated; request eligibility is kind-specific, with platform-owner volunteers public but its items excluded.
 ---
 
 # Public organization visibility
 
-Public **request** listings and request detail endpoints require both
-`organizations.status = 'approved'` **and** `organizations.kind = 'member_org'`.
-The public **organization profile** endpoint gates on `status = 'approved'` only.
+Public **organization identity** and population assignments gate on
+`organizations.status = 'approved'` only. Public request eligibility is
+kind-specific:
 
-**Why:** the platform owner organization is `kind = platform_owner,
-status = approved`. It is a real, publicly named organization with a slug that
-the product deliberately exposes as a shareable profile. Adding the `kind`
-filter there would 404 it. The kind filter exists on the request queries for a
-different reason — the platform owner does not post needs, so its rows would
-only ever be noise — not because its identity is private.
+- Item requests require an approved `member_org`.
+- Volunteer requests allow an approved `member_org` or `platform_owner`.
 
-**How to apply:** when adding a new public organization-scoped surface, decide
-which of the two rules applies. If the surface shows an organization's
-*identity*, gate on status. If it lists an organization's *requests*, keep both
-filters, and reuse the existing list query rather than writing new SQL — the
-org-scoped variants take an optional org id so the profile page can never
-surface a request the browse page hides.
+**Why:** The Alliance is a public organization and may publish volunteer
+opportunities through the normal approval workflow, but its item-donation
+requests remain intentionally private. Parent-table RLS must expose approved
+platform-owner identity or child volunteer policies that join organizations
+silently filter the opportunities back out.
+
+**How to apply:** use the shared volunteer organization predicate for every
+volunteer browse, detail, action, notification, digest, engagement, and outreach
+path. Keep item predicates explicitly member-org-only. For RLS changes, verify
+with a genuinely non-bypassing role; inspecting policy text under the runtime
+superuser does not prove joined parent policies work.
 
 Non-approved organizations (pending, disabled, rejected) and unknown slugs must
 be indistinguishable from each other: same JSON 404 body, same not-found page.

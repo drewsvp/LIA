@@ -19,6 +19,20 @@ import type {
 import { insertInTx } from "./approval-events";
 import { ALLOWED_TRANSITIONS, type ImageGenSweepRow } from "./item-requests";
 
+/**
+ * The public organization gate for volunteer opportunities. Unlike item
+ * requests, approved opportunities from the single platform owner are public.
+ * Keep SQL callers and route-level BYPASSRLS checks on this same definition.
+ */
+export const PUBLIC_VOLUNTEER_ORGANIZATION_SQL =
+  "o.status = 'approved' and o.kind in ('member_org', 'platform_owner')";
+
+export function isPublicVolunteerOrganization<T extends { status: string; kind: string }>(
+  org: T | null | undefined,
+): org is T {
+  return org?.status === "approved" && (org.kind === "member_org" || org.kind === "platform_owner");
+}
+
 const COLS = `r.id, r.legacy_wix_id as "legacyWixId", r.org_id as "orgId", r.title, r.description,
   r.details, r.event_location as "eventLocation", r.image_url as "imageUrl",
   r.image_generated as "imageGenerated", r.image_gen_status as "imageGenStatus",
@@ -446,7 +460,8 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
 }
 
 /**
- * Active volunteer requests of approved orgs with public org fields (PB-03).
+ * Active volunteer requests of approved member orgs and the approved platform
+ * owner, with public org fields (PB-03).
  * Passing orgId narrows the SAME predicate to one organization (PB-08) so the
  * profile page can never show a request the browse page would hide.
  */
@@ -465,7 +480,7 @@ export async function listActivePublic(ctx: DbContext, orgId?: string): Promise<
               o.website_url as "orgWebsiteUrl", o.city as "orgCity"
          from volunteer_requests r join organizations o on o.id = r.org_id
         where r.status = 'active' and not ${VOLUNTEER_REQUEST_EXPIRED}
-          and o.status = 'approved' and o.kind = 'member_org'
+          and ${PUBLIC_VOLUNTEER_ORGANIZATION_SQL}
           ${orgId === undefined ? "" : "and r.org_id = $1"}
         order by r.approved_at desc nulls last, r.created_at desc`,
       orgId === undefined ? [] : [orgId],

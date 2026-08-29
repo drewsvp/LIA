@@ -12,6 +12,7 @@
  * two runs and none can fall between them.
  */
 import { pool, q, withDbContext, type DbContext } from "../db/client";
+import { PUBLIC_VOLUNTEER_ORGANIZATION_SQL } from "./volunteer-requests";
 
 export type DigestRunStatus = "running" | "sent" | "skipped_empty";
 
@@ -193,8 +194,9 @@ export type NewNeed = {
 /**
  * Needs that transitioned to 'active' inside (from, to] — read from
  * approval_events so reinstatements count and approved_at rewrites don't
- * matter — and that are STILL active on an approved member org (a need
- * archived before the digest goes out is not advertised).
+ * matter — and that are STILL active under their kind-specific public
+ * organization gate (a need archived before the digest goes out is not
+ * advertised).
  *
  * Needs with an exclusion whose excluded_at is AFTER the window start are
  * omitted. Using excluded_at (not window_start) as the filter key means the
@@ -220,7 +222,7 @@ export async function newActiveNeeds(ctx: DbContext, from: string, to: string): 
        select r.id, 'volunteer' as type, r.title as name, o.name as "orgName", r.image_url as "imageUrl"
          from volunteer_requests r
          join organizations o on o.id = r.org_id
-        where r.status = 'active' and o.kind = 'member_org' and o.status = 'approved'
+        where r.status = 'active' and ${PUBLIC_VOLUNTEER_ORGANIZATION_SQL}
           and exists (select 1 from approval_events e
                        where e.entity_type = 'volunteer_request' and e.entity_id = r.id
                          and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)
@@ -320,7 +322,7 @@ export async function upcomingNeeds(ctx: DbContext): Promise<{ window: UpcomingW
                           and x.excluded_at > $1::timestamptz)) as excluded
          from volunteer_requests r
          join organizations o on o.id = r.org_id
-        where r.status = 'active' and o.kind = 'member_org' and o.status = 'approved'
+        where r.status = 'active' and ${PUBLIC_VOLUNTEER_ORGANIZATION_SQL}
           and exists (select 1 from approval_events e
                        where e.entity_type = 'volunteer_request' and e.entity_id = r.id
                          and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)

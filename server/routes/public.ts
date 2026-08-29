@@ -380,7 +380,7 @@ export function registerPublicRoutes(app: Express): void {
     }
   });
 
-  // ---- PB-03: browse active volunteer requests of approved member orgs.
+  // ---- PB-03: browse active volunteer requests of approved eligible orgs.
   app.get("/api/public/volunteer-requests", async (_req: Request, res: Response, next) => {
     try {
       const rows = await dal.volunteerRequests.listActivePublic(PUBLIC);
@@ -776,7 +776,7 @@ export function registerPublicRoutes(app: Express): void {
         loadPublicRoles(id),
         dal.populations.listByOrganization(PUBLIC, request.orgId),
       ]);
-      if (!org || org.status !== "approved" || org.kind !== "member_org") {
+      if (!dal.volunteerRequests.isPublicVolunteerOrganization(org)) {
         // Explicit check — BYPASSRLS role; see the item detail handler.
         res.status(404).json(NOT_FOUND_BODY);
         return;
@@ -833,7 +833,7 @@ export function registerPublicRoutes(app: Express): void {
       // way the detail GET and the item-side pledge handler behave.
       const gateRequest = await dal.volunteerRequests.getActiveAvailableById(PUBLIC, requestId);
       const gateOrg = gateRequest === null ? null : await dal.organizations.getById(PUBLIC, gateRequest.orgId);
-      const orgIsPublic = gateOrg !== null && gateOrg.status === "approved" && gateOrg.kind === "member_org";
+      const orgIsPublic = dal.volunteerRequests.isPublicVolunteerOrganization(gateOrg);
       if (gateRequest === null || !orgIsPublic) {
         res.status(404).json(NOT_FOUND_BODY);
         return;

@@ -10,6 +10,7 @@
 import type { PoolClient } from "pg";
 import { q, withDbContext, type DbContext } from "../db/client";
 import { replaceForPersonInTx } from "./volunteer-interests";
+import { PUBLIC_VOLUNTEER_ORGANIZATION_SQL } from "./volunteer-requests";
 
 export type VolunteerAlertPreference = {
   enabled: boolean;
@@ -148,8 +149,7 @@ export async function listMatchingRecipientsInTx(
        from volunteer_requests r
        join organizations o
          on o.id = r.org_id
-        and o.kind = 'member_org'
-        and o.status = 'approved'
+         and ${PUBLIC_VOLUNTEER_ORGANIZATION_SQL}
        join volunteer_request_categories vrc
          on vrc.volunteer_request_id = r.id
        join volunteer_categories vc

@@ -165,7 +165,7 @@ async function volunteerPreview(id: string): Promise<SharePreview | null> {
   const request = await dal.volunteerRequests.getActiveAvailableById(PUBLIC, id);
   if (!request) return null;
   const org = await dal.organizations.getById(PUBLIC, request.orgId);
-  if (!org || org.status !== "approved" || org.kind !== "member_org") return null;
+  if (!dal.volunteerRequests.isPublicVolunteerOrganization(org)) return null;
 
   const title = volunteerShareTitle(request.title, org.name);
   return {
