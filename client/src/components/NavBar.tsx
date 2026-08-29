@@ -32,7 +32,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../hooks/useSession";
 import { apiRequest } from "../lib/queryClient";
 import logoBlue from "../assets/alliance-logo-blue.png";
-import { OrganizationContextBanner } from "./OrganizationContext";
+import { OrganizationContextBanner, SupporterContextBanner } from "./OrganizationContext";
 
 
 /**
@@ -161,6 +161,7 @@ export function NavBar(): ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const organizationContext = session?.organizationContext ?? null;
+  const supporterContext = session?.supporterContext ?? null;
   const contextActive = organizationContext !== null;
   const showDashboard = !isLoading && session?.authenticated === true && (session.memberships.length >= 1 || contextActive);
   // The user menu (identity + log out) must be reachable for EVERY
@@ -178,6 +179,12 @@ export function NavBar(): ReactElement {
   return (
     <header className="site-nav">
       {organizationContext ? <OrganizationContextBanner organizationName={organizationContext.organizationName} /> : null}
+      {supporterContext ? (
+        <SupporterContextBanner
+          supporterName={supporterContext.supporterName}
+          expiresAt={supporterContext.expiresAt}
+        />
+      ) : null}
       <div className="site-nav-inner">
         <Link href="/" className="site-nav-logo" onClick={() => setMenuOpen(false)}>
           <img

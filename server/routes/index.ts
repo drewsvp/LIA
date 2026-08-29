@@ -19,6 +19,8 @@ import {
   resolveSessionInfo,
   ACTIVE_ORG_COOKIE,
   ADMIN_ORG_CONTEXT_COOKIE,
+  SUPPORTER_CONTEXT_COOKIE,
+  resolveBaseApplicationUser,
 } from "../auth/session";
 import { NOT_FOUND_BODY, requireStaff, requireStaffAdmin, staffContext } from "../auth/guards";
 import {
@@ -514,6 +516,14 @@ export function registerRoutes(app: Express): void {
           signed: true,
         });
       }
+      if (signedCookies?.[SUPPORTER_CONTEXT_COOKIE] && session.supporterContext === null) {
+        res.clearCookie(SUPPORTER_CONTEXT_COOKIE, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: true,
+          signed: true,
+        });
+      }
       res.json(session);
     } catch (err) {
       next(err);
@@ -615,6 +625,43 @@ export function registerRoutes(app: Express): void {
         signed: true,
       });
       res.json({ ok: true, redirectTo: "/admin/roles" });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/api/session/supporter-context/exit", async (req: Request, res: Response, next) => {
+    try {
+      const admin = await resolveBaseApplicationUser(req);
+      if (!admin) {
+        res.status(404).json(NOT_FOUND_BODY);
+        return;
+      }
+      const memberships = await dal.memberships.listActiveByUser(SYSTEM, admin.id);
+      const isStaffAdmin = memberships.some(
+        (membership) => membership.orgKind === "platform_owner" && membership.role === "staff_admin",
+      );
+      if (!isStaffAdmin) {
+        res.status(404).json(NOT_FOUND_BODY);
+        return;
+      }
+      const signedCookies = (req as Request & { signedCookies?: Record<string, string> }).signedCookies;
+      const contextId = signedCookies?.[SUPPORTER_CONTEXT_COOKIE];
+      if (typeof contextId === "string" && UUID_RE.test(contextId)) {
+        await dal.supporterImpersonation.end(
+          { kind: "staff", userId: admin.id },
+          contextId,
+          admin.id,
+          "exited",
+        );
+      }
+      res.clearCookie(SUPPORTER_CONTEXT_COOKIE, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        signed: true,
+      });
+      res.json({ ok: true, redirectTo: "/admin/supporters" });
     } catch (err) {
       next(err);
     }
@@ -870,8 +917,18 @@ export function registerRoutes(app: Express): void {
           pending.authUserId,
           pending.newEmail,
           `${person.firstName} ${person.lastName}`,
+          true,
         );
         await dal.authProvider.deleteProfileEmailChangesInTx(client, pending.userId);
+        if (pending.initiatedByUserId) {
+          await dal.adminSupporters.recordAuditInTx(client, {
+            actorUserId: pending.initiatedByUserId,
+            targetUserId: pending.userId,
+            action: "contact_email_confirm",
+            outcome: "success",
+            details: { newEmail: pending.newEmail },
+          });
+        }
         return true;
       });
       res.redirect(302, changed ? "/profile?emailChange=confirmed" : "/profile?emailChange=invalid");

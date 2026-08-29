@@ -18,6 +18,7 @@
 - [Policy migrations vs bootstrap](policy-migration-bootstrap.md) — migrations run before apply-rls on fresh DBs: policy drops need 'if exists'; rls-policies.sql must mirror policy changes.
 - [Digest run guard](digest-run-guard.md) — scheduled email jobs need occurrence claims, cross-process serialization, catch-up, and run-bound once-only fan-out; date-only guards lose same-day sends.
 - [Supporter accounts](supporter-accounts.md) — users.kind='supporter', zero memberships is valid; login routes them to /profile; provisioning never rolls back the public submission.
+- [Supporter support contexts](supporter-support-contexts.md) — keep the admin auth session underneath a durable, expiring supporter context; active org memberships disqualify targets.
 - [Need auto-image sourcing](need-image-sourcing.md) — AI-generation only for item + volunteer, fixed per-kind guardrail prompt; uploaded-wins enforced in SQL; gpt-image-1 rejects response_format.
 - [Public image asset sets](public-image-asset-sets.md) — one photo backs several graphics with different baked-in wording/crops; match new art by its words + surface, never by photo or filename.
 - [Polymorphic trigger rows](plpgsql-trigger-row-branches.md) — shared PL/pgSQL triggers must branch before referencing table-specific NEW/OLD fields; an AND guard does not prevent field-resolution errors.

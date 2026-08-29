@@ -43,5 +43,7 @@ export * as requestEngagement from "./request-engagement";
 export * as requestRevisions from "./request-revisions";
 export * as siteSettings from "./site-settings";
 export * as adminOrganizationContexts from "./admin-organization-contexts";
+export * as adminSupporters from "./admin-supporters";
+export * as supporterImpersonation from "./supporter-impersonation";
 
 export { SYSTEM, PUBLIC, type DbContext } from "../db/client";

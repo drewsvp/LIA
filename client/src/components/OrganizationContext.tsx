@@ -134,3 +134,54 @@ export function OrganizationContextBanner({
     </aside>
   );
 }
+
+export function SupporterContextBanner({
+  supporterName,
+  expiresAt,
+}: {
+  supporterName: string;
+  expiresAt: string;
+}): ReactElement {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function exit(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/session/supporter-context/exit", {
+        method: "POST",
+        credentials: "include",
+      });
+      const body = await responseBody(res);
+      if (!res.ok || body.ok === false) {
+        setError(body.message ?? "Unable to return to your staff session. Please try again.");
+        setBusy(false);
+        return;
+      }
+      window.location.assign(body.redirectTo ?? "/admin/supporters");
+    } catch {
+      setError("Unable to return to your staff session. Please try again.");
+      setBusy(false);
+    }
+  }
+
+  const expiry = new Date(expiresAt);
+  const expiryText = Number.isNaN(expiry.getTime())
+    ? "soon"
+    : expiry.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+  return (
+    <aside className="supporter-context-banner" aria-label="Supporter view">
+      <span>
+        Supporter view: <strong>{supporterName}</strong>. Staff and organization permissions are paused until you return.
+        This view expires at {expiryText}.
+      </span>
+      <button type="button" onClick={() => void exit()} disabled={busy}>
+        {busy ? "Returning…" : "Return to staff session"}
+      </button>
+      {error ? <span className="org-context-banner-error" role="alert">{error}</span> : null}
+    </aside>
+  );
+}

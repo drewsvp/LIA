@@ -385,6 +385,14 @@ export type SessionInfo = {
     organizationName: string;
     startedAt: string;
   } | null;
+  /** A temporary staff-admin supporter view; it removes staff/org authority. */
+  supporterContext: {
+    id: string;
+    supporterUserId: string;
+    supporterName: string;
+    startedAt: string;
+    expiresAt: string;
+  } | null;
   /** True when the user holds an active staff membership in the platform owner. */
   isStaff: boolean;
   /** True when the account is a supporter profile (donor/volunteer, no org portal). */

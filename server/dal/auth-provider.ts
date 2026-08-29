@@ -39,14 +39,17 @@ export async function updateUserContactInTx(
   authUserId: string,
   email: string,
   name: string,
+  emailVerified?: boolean,
 ): Promise<void> {
   const rows = await q<{ id: string }>(
     client,
     `update "user"
-        set email = $2, name = $3, "updatedAt" = now()
+        set email = $2, name = $3,
+            "emailVerified" = coalesce($4::boolean, "emailVerified"),
+            "updatedAt" = now()
       where id = $1
       returning id`,
-    [authUserId, email, name],
+    [authUserId, email, name, emailVerified ?? null],
   );
   if (!rows[0]) throw new Error(`auth-provider.updateUserContactInTx: user not found: ${authUserId}`);
 }
@@ -56,6 +59,7 @@ export type PendingProfileEmailChange = {
   personId: string;
   authUserId: string;
   newEmail: string;
+  initiatedByUserId?: string;
 };
 
 export async function createProfileEmailChangeInTx(
@@ -84,6 +88,7 @@ export async function createProfileEmailChangeInTx(
         personId: input.personId,
         authUserId: input.authUserId,
         newEmail: input.newEmail,
+        ...(input.initiatedByUserId ? { initiatedByUserId: input.initiatedByUserId } : {}),
       }),
     ],
   );

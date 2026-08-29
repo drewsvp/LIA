@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict J29AItAUEIV9Mz8OUWsWRKKbb8BLbqZ7qsFdXn3WSEY4LsFMQYy0PqIyA72cmrm
+\restrict jDpxSdoCYVtqHGx8YPvx8hSA7e9qaex4Lv98DNyETGOGsxXtW9To7MUxh0VUOFz
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -30,6 +30,61 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 --
 
 COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+
+
+--
+-- Name: capture_organization_context_action(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.capture_organization_context_action() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  context_id uuid;
+  organization_id uuid;
+  actor_id uuid;
+  row_json jsonb;
+  entity_id uuid;
+begin
+  context_id := nullif(current_setting('app.organization_context_id', true), '')::uuid;
+  if context_id is null then
+    if tg_op = 'DELETE' then return old; else return new; end if;
+  end if;
+  organization_id := nullif(current_setting('app.organization_id', true), '')::uuid;
+  actor_id := nullif(current_setting('app.actor_user_id', true), '')::uuid;
+  row_json := case when tg_op = 'DELETE' then to_jsonb(old) else to_jsonb(new) end;
+  entity_id := coalesce(
+    nullif(row_json ->> 'id', '')::uuid,
+    nullif(row_json ->> 'org_id', '')::uuid,
+    nullif(row_json ->> 'item_request_id', '')::uuid,
+    nullif(row_json ->> 'volunteer_request_id', '')::uuid
+  );
+  insert into organization_context_actions
+    (organization_context_id, organization_id, actor_user_id, action, entity_type, entity_id)
+  values
+    (context_id, organization_id, actor_id, lower(tg_op), tg_table_name, entity_id);
+  if tg_op = 'DELETE' then return old; else return new; end if;
+end;
+$$;
+
+
+--
+-- Name: capture_organization_context_attribution(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.capture_organization_context_attribution() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if nullif(current_setting('app.organization_context_id', true), '') is not null then
+    new.organization_context_id :=
+      nullif(current_setting('app.organization_context_id', true), '')::uuid;
+    new.context_organization_id :=
+      nullif(current_setting('app.organization_id', true), '')::uuid;
+  end if;
+  return new;
+end;
+$$;
 
 
 --
@@ -180,6 +235,17 @@ begin
     raise exception 'merge_people: both records have login accounts';
   end if;
 
+  if exists (
+    select 1
+      from users u
+      join people duplicate_person on duplicate_person.id = u.person_id
+      join people survivor_person on survivor_person.id = p_survivor
+     where u.person_id = p_duplicate
+       and lower(btrim(duplicate_person.email)) is distinct from lower(btrim(survivor_person.email))
+  ) then
+    raise exception 'merge_people: login account email would change';
+  end if;
+
   select format('Merged %s %s <%s> (%s) into %s.',
                 first_name, last_name, email, id, p_survivor)
     into v_note
@@ -189,39 +255,27 @@ begin
 
   update item_pledges set person_id = p_survivor where person_id = p_duplicate;
   get diagnostics n_pledges = row_count;
-
   update volunteer_signups set person_id = p_survivor where person_id = p_duplicate;
   get diagnostics n_signups = row_count;
-
   update users set person_id = p_survivor where person_id = p_duplicate;
   get diagnostics n_users = row_count;
-
   update digest_subscribers set person_id = p_survivor where person_id = p_duplicate;
   get diagnostics n_digest = row_count;
-
   update organizations set primary_contact_person_id = p_survivor
    where primary_contact_person_id = p_duplicate;
   get diagnostics n_org_contacts = row_count;
-
   update email_log set to_person_id = p_survivor where to_person_id = p_duplicate;
   get diagnostics n_email = row_count;
-
   update item_requests set contact_person_id = p_survivor where contact_person_id = p_duplicate;
   get diagnostics n_item_req_contacts = row_count;
-
   update volunteer_requests set contact_person_id = p_survivor where contact_person_id = p_duplicate;
   get diagnostics n_vol_req_contacts = row_count;
 
   select count(*)::int into n_volunteer_interests
-    from person_volunteer_interests
-   where person_id = p_duplicate;
-
+    from person_volunteer_interests where person_id = p_duplicate;
   insert into person_volunteer_interests (person_id, category_id)
-  select p_survivor, category_id
-    from person_volunteer_interests
-   where person_id = p_duplicate
-  on conflict do nothing;
-
+  select p_survivor, category_id from person_volunteer_interests
+   where person_id = p_duplicate on conflict do nothing;
   delete from person_volunteer_interests where person_id = p_duplicate;
 
   insert into approval_events
@@ -241,6 +295,31 @@ begin
     'itemRequestContacts', n_item_req_contacts,
     'volunteerRequestContacts', n_vol_req_contacts,
     'volunteerInterests', n_volunteer_interests);
+end;
+$$;
+
+
+--
+-- Name: protect_account_email_identity(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.protect_account_email_identity() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  new.email := lower(btrim(new.email));
+  if new.email = '' then
+    raise exception 'people_email_empty';
+  end if;
+
+  if tg_op = 'UPDATE'
+     and lower(btrim(old.email)) is distinct from new.email
+     and exists (select 1 from users where person_id = old.id) then
+    raise exception 'account_email_immutable'
+      using hint = 'A linked login account must retain its email identity.';
+  end if;
+
+  return new;
 end;
 $$;
 
@@ -393,6 +472,7 @@ declare
   v_role_id           uuid;
   v_remaining         integer;
   v_status            text;
+  v_expires_on        date;
   v_phone_digits      text;
   v_phone_match_count integer;
   v_match_list        text;
@@ -404,11 +484,23 @@ begin
   v_prior_context := coalesce(current_setting('app.context', true), '');
   perform set_config('app.context', 'system', true);
 
-  select status into v_status from volunteer_requests where id = p_request_id for update;
+  select status, expires_on
+    into v_status, v_expires_on
+    from volunteer_requests
+   where id = p_request_id
+   for update;
+
   if v_status is null then
     raise exception 'request_not_found';
   end if;
   if v_status is distinct from 'active' then
+    raise exception 'request_not_active';
+  end if;
+  -- Re-check expiry under the lock. The nightly job can lag; the route
+  -- pre-gate already filters, but a race between the gate read and this
+  -- write could still let an expired request through without this guard.
+  if v_expires_on is not null
+     and v_expires_on < (now() at time zone 'America/Los_Angeles')::date then
     raise exception 'request_not_active';
   end if;
 
@@ -516,6 +608,45 @@ $$;
 
 
 --
+-- Name: revoke_admin_organization_contexts_for_ineligible_org(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.revoke_admin_organization_contexts_for_ineligible_org() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  context_row record;
+begin
+  if old.kind = 'member_org'
+     and old.status = 'approved'
+     and (new.kind <> 'member_org' or new.status <> 'approved') then
+    for context_row in
+      update admin_organization_contexts
+         set ended_at = now()
+       where organization_id = new.id
+         and ended_at is null
+      returning id, admin_user_id, organization_id
+    loop
+      insert into organization_context_actions
+        (organization_context_id, organization_id, actor_user_id, action)
+      values
+        (context_row.id, context_row.organization_id, context_row.admin_user_id, 'invalidated');
+
+      insert into approval_events
+        (entity_type, entity_id, from_status, to_status, actor_user_id,
+         note, organization_context_id, context_organization_id)
+      values
+        ('organization_context', context_row.id, 'active', 'invalidated',
+         context_row.admin_user_id, 'Organization became ineligible',
+         context_row.id, context_row.organization_id);
+    end loop;
+  end if;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: set_updated_at(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -555,6 +686,22 @@ CREATE TABLE public.account (
 
 
 --
+-- Name: admin_organization_contexts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.admin_organization_contexts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    admin_user_id uuid NOT NULL,
+    organization_id uuid NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    ended_at timestamp with time zone,
+    expires_at timestamp with time zone DEFAULT (now() + '08:00:00'::interval) NOT NULL
+);
+
+ALTER TABLE ONLY public.admin_organization_contexts FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: approval_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -567,7 +714,9 @@ CREATE TABLE public.approval_events (
     actor_user_id uuid,
     note text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT approval_events_entity_type_check CHECK ((entity_type = ANY (ARRAY['organization'::text, 'org_membership'::text, 'item_request'::text, 'volunteer_request'::text, 'person'::text])))
+    organization_context_id uuid,
+    context_organization_id uuid,
+    CONSTRAINT approval_events_entity_type_check CHECK ((entity_type = ANY (ARRAY['organization'::text, 'organization_context'::text, 'org_membership'::text, 'item_request'::text, 'volunteer_request'::text, 'person'::text])))
 );
 
 ALTER TABLE ONLY public.approval_events FORCE ROW LEVEL SECURITY;
@@ -776,6 +925,29 @@ COMMENT ON COLUMN public.digest_subscribers.last_name IS 'PB-05 form value, stor
 
 
 --
+-- Name: email_brand_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_brand_settings (
+    id integer NOT NULL,
+    primary_color text DEFAULT 'rgb(6, 54, 93)'::text NOT NULL,
+    font_stack text DEFAULT '-apple-system, BlinkMacSystemFont, ''Segoe UI'', Roboto, Helvetica, Arial, sans-serif'::text NOT NULL,
+    org_name text DEFAULT 'The Alliance'::text NOT NULL,
+    program_name text DEFAULT 'Love in Action'::text NOT NULL,
+    signature_name text DEFAULT 'The Alliance Love in Action Team'::text NOT NULL,
+    director_name text DEFAULT 'Christina Moe'::text NOT NULL,
+    director_email text DEFAULT 'christina@defendingthecause.org'::text NOT NULL,
+    director_title text DEFAULT 'Love in Action Program Director'::text NOT NULL,
+    header_image_url text,
+    updated_at timestamp with time zone,
+    updated_by uuid,
+    CONSTRAINT email_brand_settings_singleton CHECK ((id = 1))
+);
+
+ALTER TABLE ONLY public.email_brand_settings FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: email_log; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -836,42 +1008,17 @@ CREATE TABLE public.email_template_overrides (
     subject text,
     heading text,
     paragraphs jsonb,
-    body_blocks jsonb,
     recipients text,
     enabled boolean DEFAULT true NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
+    body_blocks jsonb,
+    CONSTRAINT email_template_overrides_body_blocks_array CHECK (((body_blocks IS NULL) OR (jsonb_typeof(body_blocks) = 'array'::text))),
     CONSTRAINT email_template_overrides_copy_all_or_nothing CHECK ((((subject IS NULL) AND (heading IS NULL) AND (paragraphs IS NULL)) OR ((subject IS NOT NULL) AND (heading IS NOT NULL) AND (paragraphs IS NOT NULL)))),
-    CONSTRAINT email_template_overrides_paragraphs_array CHECK (((paragraphs IS NULL) OR (jsonb_typeof(paragraphs) = 'array'::text))),
-    CONSTRAINT email_template_overrides_body_blocks_array CHECK (((body_blocks IS NULL) OR (jsonb_typeof(body_blocks) = 'array'::text)))
+    CONSTRAINT email_template_overrides_paragraphs_array CHECK (((paragraphs IS NULL) OR (jsonb_typeof(paragraphs) = 'array'::text)))
 );
 
 ALTER TABLE ONLY public.email_template_overrides FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: email_brand_settings; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.email_brand_settings (
-    id integer NOT NULL,
-    primary_color text DEFAULT 'rgb(6, 54, 93)'::text NOT NULL,
-    font_stack text DEFAULT '-apple-system, BlinkMacSystemFont, ''Segoe UI'', Roboto, Helvetica, Arial, sans-serif'::text NOT NULL,
-    org_name text DEFAULT 'The Alliance'::text NOT NULL,
-    program_name text DEFAULT 'Love in Action'::text NOT NULL,
-    signature_name text DEFAULT 'The Alliance Love in Action Team'::text NOT NULL,
-    director_name text DEFAULT 'Christina Moe'::text NOT NULL,
-    director_email text DEFAULT 'christina@defendingthecause.org'::text NOT NULL,
-    director_title text DEFAULT 'Love in Action Program Director'::text NOT NULL,
-    header_image_url text,
-    updated_at timestamp with time zone,
-    updated_by uuid,
-    CONSTRAINT email_brand_settings_pkey PRIMARY KEY (id),
-    CONSTRAINT email_brand_settings_singleton CHECK ((id = 1)),
-    CONSTRAINT email_brand_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL
-);
-
-ALTER TABLE ONLY public.email_brand_settings FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -951,6 +1098,24 @@ CREATE TABLE public.org_memberships (
 );
 
 ALTER TABLE ONLY public.org_memberships FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: organization_context_actions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.organization_context_actions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_context_id uuid NOT NULL,
+    organization_id uuid NOT NULL,
+    actor_user_id uuid NOT NULL,
+    action text NOT NULL,
+    entity_type text,
+    entity_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.organization_context_actions FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1087,6 +1252,25 @@ COMMENT ON COLUMN public.request_engagement_events.client_event_id IS 'Fresh UUI
 
 
 --
+-- Name: request_revisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.request_revisions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_type text NOT NULL,
+    entity_id uuid NOT NULL,
+    actor_user_id uuid NOT NULL,
+    summary text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    organization_context_id uuid,
+    context_organization_id uuid,
+    CONSTRAINT request_revisions_entity_type_check CHECK ((entity_type = ANY (ARRAY['item_request'::text, 'volunteer_request'::text])))
+);
+
+ALTER TABLE ONLY public.request_revisions FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1111,6 +1295,58 @@ CREATE TABLE public.session (
     "userAgent" text,
     "userId" text NOT NULL
 );
+
+
+--
+-- Name: site_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.site_settings (
+    id integer NOT NULL,
+    site_name text DEFAULT 'Love in Action Database'::text NOT NULL,
+    contact_email text DEFAULT 'info@defendingthecause.org'::text NOT NULL,
+    response_time_language text DEFAULT '1-3 business days'::text NOT NULL,
+    updated_at timestamp with time zone,
+    updated_by uuid,
+    CONSTRAINT site_settings_singleton CHECK ((id = 1))
+);
+
+ALTER TABLE ONLY public.site_settings FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: supporter_admin_audit; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.supporter_admin_audit (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    actor_user_id uuid,
+    target_user_id uuid,
+    context_id uuid,
+    action text NOT NULL,
+    outcome text NOT NULL,
+    details jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.supporter_admin_audit FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: supporter_impersonation_contexts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.supporter_impersonation_contexts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    admin_user_id uuid NOT NULL,
+    supporter_user_id uuid NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone DEFAULT (now() + '01:00:00'::interval) NOT NULL,
+    ended_at timestamp with time zone,
+    end_reason text
+);
+
+ALTER TABLE ONLY public.supporter_impersonation_contexts FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1308,6 +1544,14 @@ ALTER TABLE ONLY public.account
 
 
 --
+-- Name: admin_organization_contexts admin_organization_contexts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admin_organization_contexts
+    ADD CONSTRAINT admin_organization_contexts_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: approval_events approval_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1353,6 +1597,14 @@ ALTER TABLE ONLY public.digest_runs
 
 ALTER TABLE ONLY public.digest_subscribers
     ADD CONSTRAINT digest_subscribers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: email_brand_settings email_brand_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_brand_settings
+    ADD CONSTRAINT email_brand_settings_pkey PRIMARY KEY (id);
 
 
 --
@@ -1468,6 +1720,14 @@ ALTER TABLE ONLY public.org_memberships
 
 
 --
+-- Name: organization_context_actions organization_context_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_context_actions
+    ADD CONSTRAINT organization_context_actions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: organization_populations organization_populations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1564,6 +1824,14 @@ ALTER TABLE ONLY public.request_engagement_events
 
 
 --
+-- Name: request_revisions request_revisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_revisions
+    ADD CONSTRAINT request_revisions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1585,6 +1853,30 @@ ALTER TABLE ONLY public.session
 
 ALTER TABLE ONLY public.session
     ADD CONSTRAINT session_token_key UNIQUE (token);
+
+
+--
+-- Name: site_settings site_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.site_settings
+    ADD CONSTRAINT site_settings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: supporter_admin_audit supporter_admin_audit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supporter_admin_audit
+    ADD CONSTRAINT supporter_admin_audit_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: supporter_impersonation_contexts supporter_impersonation_contexts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supporter_impersonation_contexts
+    ADD CONSTRAINT supporter_impersonation_contexts_pkey PRIMARY KEY (id);
 
 
 --
@@ -1755,6 +2047,27 @@ CREATE INDEX "account_userId_idx" ON public.account USING btree ("userId");
 
 
 --
+-- Name: admin_organization_contexts_active_expiry; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX admin_organization_contexts_active_expiry ON public.admin_organization_contexts USING btree (expires_at) WHERE (ended_at IS NULL);
+
+
+--
+-- Name: admin_organization_contexts_one_active_per_admin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX admin_organization_contexts_one_active_per_admin ON public.admin_organization_contexts USING btree (admin_user_id) WHERE (ended_at IS NULL);
+
+
+--
+-- Name: admin_organization_contexts_org_started; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX admin_organization_contexts_org_started ON public.admin_organization_contexts USING btree (organization_id, started_at DESC);
+
+
+--
 -- Name: approval_events_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1867,6 +2180,20 @@ CREATE INDEX org_memberships_user_idx ON public.org_memberships USING btree (use
 
 
 --
+-- Name: organization_context_actions_context; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX organization_context_actions_context ON public.organization_context_actions USING btree (organization_context_id, created_at DESC);
+
+
+--
+-- Name: organization_context_actions_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX organization_context_actions_created ON public.organization_context_actions USING btree (created_at DESC);
+
+
+--
 -- Name: organizations_kind_status_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1877,7 +2204,7 @@ CREATE INDEX organizations_kind_status_idx ON public.organizations USING btree (
 -- Name: people_email_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX people_email_key ON public.people USING btree (lower(email));
+CREATE UNIQUE INDEX people_email_key ON public.people USING btree (lower(btrim(email)));
 
 
 --
@@ -1923,10 +2250,45 @@ CREATE INDEX request_engagement_volunteer_reporting_idx ON public.request_engage
 
 
 --
+-- Name: request_revisions_entity_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX request_revisions_entity_idx ON public.request_revisions USING btree (entity_type, entity_id, created_at DESC);
+
+
+--
 -- Name: session_userId_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX "session_userId_idx" ON public.session USING btree ("userId");
+
+
+--
+-- Name: supporter_admin_audit_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX supporter_admin_audit_created_idx ON public.supporter_admin_audit USING btree (created_at DESC);
+
+
+--
+-- Name: supporter_admin_audit_target_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX supporter_admin_audit_target_idx ON public.supporter_admin_audit USING btree (target_user_id, created_at DESC);
+
+
+--
+-- Name: supporter_impersonation_one_active_per_admin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX supporter_impersonation_one_active_per_admin ON public.supporter_impersonation_contexts USING btree (admin_user_id) WHERE (ended_at IS NULL);
+
+
+--
+-- Name: supporter_impersonation_supporter_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX supporter_impersonation_supporter_idx ON public.supporter_impersonation_contexts USING btree (supporter_user_id, started_at DESC);
 
 
 --
@@ -2000,6 +2362,13 @@ CREATE INDEX volunteer_signups_request_idx ON public.volunteer_signups USING btr
 
 
 --
+-- Name: approval_events approval_events_capture_organization_context; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER approval_events_capture_organization_context BEFORE INSERT ON public.approval_events FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_attribution();
+
+
+--
 -- Name: item_pledges item_pledges_reject_expired_request; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2011,6 +2380,13 @@ CREATE TRIGGER item_pledges_reject_expired_request BEFORE INSERT ON public.item_
 --
 
 CREATE TRIGGER item_pledges_set_updated_at BEFORE UPDATE ON public.item_pledges FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: item_requests item_requests_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER item_requests_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.item_requests FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
 
 
 --
@@ -2028,6 +2404,13 @@ CREATE TRIGGER item_requests_set_updated_at BEFORE UPDATE ON public.item_request
 
 
 --
+-- Name: items items_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER items_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.items FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
+
+
+--
 -- Name: items items_guard_counters; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2042,10 +2425,38 @@ CREATE TRIGGER items_set_updated_at BEFORE UPDATE ON public.items FOR EACH ROW E
 
 
 --
+-- Name: org_memberships org_memberships_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER org_memberships_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.org_memberships FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
+
+
+--
 -- Name: org_memberships org_memberships_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER org_memberships_set_updated_at BEFORE UPDATE ON public.org_memberships FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: organization_populations organization_populations_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER organization_populations_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.organization_populations FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
+
+
+--
+-- Name: organizations organizations_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER organizations_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.organizations FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
+
+
+--
+-- Name: organizations organizations_revoke_admin_contexts; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER organizations_revoke_admin_contexts AFTER UPDATE OF kind, status ON public.organizations FOR EACH ROW EXECUTE FUNCTION public.revoke_admin_organization_contexts_for_ineligible_org();
 
 
 --
@@ -2056,10 +2467,31 @@ CREATE TRIGGER organizations_set_updated_at BEFORE UPDATE ON public.organization
 
 
 --
+-- Name: people people_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER people_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.people FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
+
+
+--
+-- Name: people people_protect_account_email_identity; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER people_protect_account_email_identity BEFORE INSERT OR UPDATE ON public.people FOR EACH ROW EXECUTE FUNCTION public.protect_account_email_identity();
+
+
+--
 -- Name: people people_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER people_set_updated_at BEFORE UPDATE ON public.people FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: request_revisions request_revisions_capture_organization_context; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER request_revisions_capture_organization_context BEFORE INSERT ON public.request_revisions FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_attribution();
 
 
 --
@@ -2077,6 +2509,20 @@ CREATE TRIGGER volunteer_alert_preferences_set_updated_at BEFORE UPDATE ON publi
 
 
 --
+-- Name: volunteer_request_categories volunteer_request_categories_capture_organization_context_actio; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER volunteer_request_categories_capture_organization_context_actio AFTER INSERT OR DELETE OR UPDATE ON public.volunteer_request_categories FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
+
+
+--
+-- Name: volunteer_requests volunteer_requests_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER volunteer_requests_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.volunteer_requests FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
+
+
+--
 -- Name: volunteer_requests volunteer_requests_guard_member_transitions; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2088,6 +2534,13 @@ CREATE TRIGGER volunteer_requests_guard_member_transitions BEFORE UPDATE ON publ
 --
 
 CREATE TRIGGER volunteer_requests_set_updated_at BEFORE UPDATE ON public.volunteer_requests FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: volunteer_roles volunteer_roles_capture_organization_context_action; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER volunteer_roles_capture_organization_context_action AFTER INSERT OR DELETE OR UPDATE ON public.volunteer_roles FOR EACH ROW EXECUTE FUNCTION public.capture_organization_context_action();
 
 
 --
@@ -2120,11 +2573,43 @@ ALTER TABLE ONLY public.account
 
 
 --
+-- Name: admin_organization_contexts admin_organization_contexts_admin_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admin_organization_contexts
+    ADD CONSTRAINT admin_organization_contexts_admin_user_id_fkey FOREIGN KEY (admin_user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: admin_organization_contexts admin_organization_contexts_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admin_organization_contexts
+    ADD CONSTRAINT admin_organization_contexts_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
+
+
+--
 -- Name: approval_events approval_events_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.approval_events
     ADD CONSTRAINT approval_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: approval_events approval_events_context_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_events
+    ADD CONSTRAINT approval_events_context_organization_id_fkey FOREIGN KEY (context_organization_id) REFERENCES public.organizations(id);
+
+
+--
+-- Name: approval_events approval_events_organization_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_events
+    ADD CONSTRAINT approval_events_organization_context_id_fkey FOREIGN KEY (organization_context_id) REFERENCES public.admin_organization_contexts(id);
 
 
 --
@@ -2141,6 +2626,14 @@ ALTER TABLE ONLY public.digest_exclusions
 
 ALTER TABLE ONLY public.digest_subscribers
     ADD CONSTRAINT digest_subscribers_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id);
+
+
+--
+-- Name: email_brand_settings email_brand_settings_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_brand_settings
+    ADD CONSTRAINT email_brand_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
 
 
 --
@@ -2280,6 +2773,30 @@ ALTER TABLE ONLY public.org_memberships
 
 
 --
+-- Name: organization_context_actions organization_context_actions_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_context_actions
+    ADD CONSTRAINT organization_context_actions_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: organization_context_actions organization_context_actions_organization_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_context_actions
+    ADD CONSTRAINT organization_context_actions_organization_context_id_fkey FOREIGN KEY (organization_context_id) REFERENCES public.admin_organization_contexts(id);
+
+
+--
+-- Name: organization_context_actions organization_context_actions_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_context_actions
+    ADD CONSTRAINT organization_context_actions_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
+
+
+--
 -- Name: organization_populations organization_populations_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2384,11 +2901,83 @@ ALTER TABLE ONLY public.request_engagement_events
 
 
 --
+-- Name: request_revisions request_revisions_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_revisions
+    ADD CONSTRAINT request_revisions_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: request_revisions request_revisions_context_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_revisions
+    ADD CONSTRAINT request_revisions_context_organization_id_fkey FOREIGN KEY (context_organization_id) REFERENCES public.organizations(id);
+
+
+--
+-- Name: request_revisions request_revisions_organization_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.request_revisions
+    ADD CONSTRAINT request_revisions_organization_context_id_fkey FOREIGN KEY (organization_context_id) REFERENCES public.admin_organization_contexts(id);
+
+
+--
 -- Name: session session_userId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.session
     ADD CONSTRAINT "session_userId_fkey" FOREIGN KEY ("userId") REFERENCES public."user"(id) ON DELETE CASCADE;
+
+
+--
+-- Name: site_settings site_settings_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.site_settings
+    ADD CONSTRAINT site_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: supporter_admin_audit supporter_admin_audit_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supporter_admin_audit
+    ADD CONSTRAINT supporter_admin_audit_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: supporter_admin_audit supporter_admin_audit_context_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supporter_admin_audit
+    ADD CONSTRAINT supporter_admin_audit_context_id_fkey FOREIGN KEY (context_id) REFERENCES public.supporter_impersonation_contexts(id) ON DELETE SET NULL;
+
+
+--
+-- Name: supporter_admin_audit supporter_admin_audit_target_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supporter_admin_audit
+    ADD CONSTRAINT supporter_admin_audit_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: supporter_impersonation_contexts supporter_impersonation_contexts_admin_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supporter_impersonation_contexts
+    ADD CONSTRAINT supporter_impersonation_contexts_admin_user_id_fkey FOREIGN KEY (admin_user_id) REFERENCES public.users(id);
+
+
+--
+-- Name: supporter_impersonation_contexts supporter_impersonation_contexts_supporter_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supporter_impersonation_contexts
+    ADD CONSTRAINT supporter_impersonation_contexts_supporter_user_id_fkey FOREIGN KEY (supporter_user_id) REFERENCES public.users(id);
 
 
 --
@@ -2512,6 +3101,19 @@ ALTER TABLE ONLY public.volunteer_signups
 
 
 --
+-- Name: admin_organization_contexts; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.admin_organization_contexts ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: admin_organization_contexts admin_organization_contexts_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY admin_organization_contexts_system_staff_all ON public.admin_organization_contexts USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: approval_events; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2571,6 +3173,19 @@ CREATE POLICY digest_subscribers_system_staff_all ON public.digest_subscribers U
 
 
 --
+-- Name: email_brand_settings; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.email_brand_settings ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: email_brand_settings email_brand_settings_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY email_brand_settings_system_staff_all ON public.email_brand_settings USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: email_log; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2607,19 +3222,6 @@ ALTER TABLE public.email_template_overrides ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY email_template_overrides_system_staff_all ON public.email_template_overrides USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
-
-
---
--- Name: email_brand_settings; Type: ROW SECURITY; Schema: public; Owner: -
---
-
-ALTER TABLE public.email_brand_settings ENABLE ROW LEVEL SECURITY;
-
---
--- Name: email_brand_settings email_brand_settings_system_staff_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY email_brand_settings_system_staff_all ON public.email_brand_settings USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -2781,6 +3383,19 @@ CREATE POLICY org_memberships_system_staff_all ON public.org_memberships USING (
 
 
 --
+-- Name: organization_context_actions; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.organization_context_actions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: organization_context_actions organization_context_actions_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY organization_context_actions_system_staff_all ON public.organization_context_actions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
 -- Name: organization_populations; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -2792,7 +3407,7 @@ ALTER TABLE public.organization_populations ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY organization_populations_public_member_select ON public.organization_populations FOR SELECT USING (((current_setting('app.context'::text, true) = ANY (ARRAY['public'::text, 'member'::text])) AND (EXISTS ( SELECT 1
    FROM public.organizations o
-  WHERE ((o.id = organization_populations.org_id) AND (o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
+  WHERE ((o.id = organization_populations.org_id) AND (o.status = 'approved'::text))))));
 
 
 --
@@ -2832,7 +3447,7 @@ CREATE POLICY organizations_member_update ON public.organizations FOR UPDATE USI
 -- Name: organizations organizations_public_select; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY organizations_public_select ON public.organizations FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (kind = 'member_org'::text) AND (status = 'approved'::text)));
+CREATE POLICY organizations_public_select ON public.organizations FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (status = 'approved'::text)));
 
 
 --
@@ -2951,6 +3566,58 @@ ALTER TABLE public.request_engagement_events ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY request_engagement_events_system_staff_all ON public.request_engagement_events USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: request_revisions; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.request_revisions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: request_revisions request_revisions_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY request_revisions_system_staff_all ON public.request_revisions USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: site_settings; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: site_settings site_settings_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY site_settings_system_staff_all ON public.site_settings USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: supporter_admin_audit; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.supporter_admin_audit ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: supporter_admin_audit supporter_admin_audit_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY supporter_admin_audit_system_staff_all ON public.supporter_admin_audit USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
+
+
+--
+-- Name: supporter_impersonation_contexts; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.supporter_impersonation_contexts ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: supporter_impersonation_contexts supporter_impersonation_contexts_system_staff_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY supporter_impersonation_contexts_system_staff_all ON public.supporter_impersonation_contexts USING ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text]))) WITH CHECK ((current_setting('app.context'::text, true) = ANY (ARRAY['system'::text, 'staff'::text])));
 
 
 --
@@ -3115,7 +3782,7 @@ CREATE POLICY volunteer_requests_member_update ON public.volunteer_requests FOR 
 
 CREATE POLICY volunteer_requests_public_select ON public.volunteer_requests FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (status = ANY (ARRAY['active'::text, 'archived'::text])) AND (org_id IN ( SELECT o.id
    FROM public.organizations o
-  WHERE ((o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
+  WHERE ((o.status = 'approved'::text) AND (o.kind = ANY (ARRAY['member_org'::text, 'platform_owner'::text])))))));
 
 
 --
@@ -3153,7 +3820,7 @@ CREATE POLICY volunteer_roles_member_all ON public.volunteer_roles USING (((curr
 CREATE POLICY volunteer_roles_public_select ON public.volunteer_roles FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (EXISTS ( SELECT 1
    FROM (public.volunteer_requests r
      JOIN public.organizations o ON ((o.id = r.org_id)))
-  WHERE ((r.id = volunteer_roles.volunteer_request_id) AND (r.status = ANY (ARRAY['active'::text, 'archived'::text])) AND (o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
+  WHERE ((r.id = volunteer_roles.volunteer_request_id) AND (r.status = ANY (ARRAY['active'::text, 'archived'::text])) AND (o.status = 'approved'::text) AND (o.kind = ANY (ARRAY['member_org'::text, 'platform_owner'::text])))))));
 
 
 --
@@ -3216,5 +3883,5 @@ CREATE POLICY volunteer_signups_system_staff_all ON public.volunteer_signups USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict J29AItAUEIV9Mz8OUWsWRKKbb8BLbqZ7qsFdXn3WSEY4LsFMQYy0PqIyA72cmrm
+\unrestrict jDpxSdoCYVtqHGx8YPvx8hSA7e9qaex4Lv98DNyETGOGsxXtW9To7MUxh0VUOFz
 

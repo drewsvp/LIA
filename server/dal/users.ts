@@ -69,6 +69,19 @@ export async function getById(ctx: DbContext, userId: string): Promise<User | nu
   return rows[0] ?? null;
 }
 
+/** Primary-key lookup with the linked person, used by temporary app contexts. */
+export async function getWithPersonById(ctx: DbContext, userId: string): Promise<UserWithPerson | null> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<UserWithPerson>(
+      c,
+      `select ${PERSON_JOIN_COLS} from users u join people p on p.id = u.person_id
+        where u.id = $1`,
+      [userId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
 /** Create a user linked to its person. Defaults to status 'invited'. */
 export async function create(ctx: DbContext, input: CreateUserInput): Promise<User> {
   return withDbContext(ctx, (c) => createInTx(c, input));

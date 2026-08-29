@@ -11,6 +11,7 @@
  * out, an explicit failure sentence otherwise (§13 — an operator who cannot
  * tell whether an email went out will send it again by hand).
  */
+import { createHash, randomBytes } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import multer from "multer";
 import { requireStaff, requireStaffAdmin, staffContext, sendNotFound } from "../auth/guards";
@@ -46,6 +47,9 @@ function slugify(name: string): string {
 }
 import * as dal from "../dal";
 import { withDbContext, type DbContext } from "../db/client";
+import { SYSTEM } from "../db/client";
+import { appBaseUrl, sendProfileEmailChange } from "../auth/auth";
+import { ACTIVE_ORG_COOKIE, SUPPORTER_CONTEXT_COOKIE } from "../auth/session";
 import type { DeadlineType, MembershipRole, MembershipStatus } from "../../shared/types";
 import { dispatchQueuedEmails, headerImageDataUri, unresolvedVariables, leftoverPlaceholders, type PendingDispatch } from "../email/send";
 import { storeImage, deleteImage } from "../storage/object-storage";
@@ -352,6 +356,242 @@ export function registerAdminRoutes(app: Express): void {
   // without reading server logs.
   app.get("/api/admin/db-health", requireStaff, (_req: Request, res: Response) => {
     res.json(getDbRoutineCheckResult());
+  });
+
+  // --------------------------------------------------------------------------
+  // ADMIN-14 — Supporter directory. This is deliberately staff-admin-only:
+  // supporter-only accounts have no organization membership to scope through.
+  // --------------------------------------------------------------------------
+
+  app.get("/api/admin/supporters", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : "active";
+      if (status !== "active" && status !== "disabled") {
+        res.status(400).json({ message: "Status must be active or disabled." });
+        return;
+      }
+      const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+      if (search.length > 100) {
+        res.status(400).json({ message: "Search must be 100 characters or fewer." });
+        return;
+      }
+      const page = Number(req.query.page ?? 1);
+      const pageSize = Number(req.query.pageSize ?? 25);
+      if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+        res.status(400).json({ message: "Choose a valid page and page size." });
+        return;
+      }
+      const result = await dal.adminSupporters.list(staffCtx(req), {
+        status,
+        search,
+        page,
+        pageSize,
+      });
+      res.json({ ...result, pagination: { total: result.total, page: result.page, pageSize: result.pageSize } });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/api/admin/supporters/:id", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    try {
+      const supporterId = req.params.id ?? "";
+      if (!UUID_RE.test(supporterId)) {
+        sendNotFound(res);
+        return;
+      }
+      const supporter = await dal.adminSupporters.getById(staffCtx(req), supporterId);
+      if (!supporter) {
+        sendNotFound(res);
+        return;
+      }
+      const [pledges, signups, recentlyViewed] = await Promise.all([
+        dal.pledges.listByPerson(SYSTEM, supporter.personId),
+        dal.signups.listByPerson(SYSTEM, supporter.personId),
+        dal.requestEngagement.listRecentlyViewedForUser(SYSTEM, supporter.id, supporter.personId),
+      ]);
+      res.json({
+        supporter,
+        preferences: {
+          matchingVolunteerAlertsEnabled: supporter.alertsEnabled,
+          volunteerInterests: supporter.alertInterests,
+        },
+        pledges,
+        signups,
+        recentlyViewed,
+        historySummary: {
+          donationCount: pledges.length,
+          volunteerSignupCount: signups.length,
+          recentlyViewedCount: recentlyViewed.length,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.put("/api/admin/supporters/:id/contact", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const supporterId = req.params.id ?? "";
+    if (!UUID_RE.test(supporterId)) {
+      sendNotFound(res);
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const firstName = typeof body.firstName === "string" ? body.firstName.trim() : "";
+    const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    const fieldErrors: Record<string, string> = {};
+    if (firstName === "") fieldErrors.firstName = "First name is required.";
+    else if (firstName.length > 100) fieldErrors.firstName = "First name must be 100 characters or fewer.";
+    if (lastName === "") fieldErrors.lastName = "Last name is required.";
+    else if (lastName.length > 100) fieldErrors.lastName = "Last name must be 100 characters or fewer.";
+    if (email === "" || email.length > 254 || !EMAIL_RE.test(email)) fieldErrors.email = "Enter a valid email address.";
+    if (phone.length > 50) fieldErrors.phone = "Phone must be 50 characters or fewer.";
+    if (Object.keys(fieldErrors).length > 0) {
+      res.status(400).json({ message: "Check the highlighted fields and try again.", fieldErrors });
+      return;
+    }
+    const actorUserId = staffContext(req).userId;
+    const confirmationToken = randomBytes(32).toString("base64url");
+    const tokenHash = createHash("sha256").update(confirmationToken).digest("hex");
+    try {
+      const result = await dal.adminSupporters.updateContact(staffCtx(req), {
+        actorUserId,
+        targetUserId: supporterId,
+        firstName,
+        lastName,
+        phone: phone === "" ? null : phone,
+        requestedEmail: email,
+        confirmationTokenHash: tokenHash,
+      });
+      if (result.emailChanged && result.pendingEmail) {
+        try {
+          await sendProfileEmailChange({
+            firstName,
+            newEmail: result.pendingEmail,
+            personId: result.supporter.personId,
+            url: `${appBaseUrl()}/api/profile/email/confirm?token=${encodeURIComponent(confirmationToken)}`,
+          });
+        } catch (sendError) {
+          await withDbContext(SYSTEM, async (client) => {
+            await dal.authProvider.deleteProfileEmailChangeByTokenInTx(client, tokenHash);
+            await dal.adminSupporters.recordAuditInTx(client, {
+              actorUserId,
+              targetUserId: supporterId,
+              action: "contact_email_confirmation",
+              outcome: "send_failed",
+            });
+          });
+          console.error(`[admin] supporter email confirmation failed (${supporterId}):`, sendError);
+          res.status(502).json({
+            supporter: result.supporter,
+            pendingEmail: null,
+            message:
+              "Name and phone were saved, but the email confirmation could not be sent. The sign-in email was not changed.",
+          });
+          return;
+        }
+      }
+      res.json({
+        supporter: result.supporter,
+        pendingEmail: result.pendingEmail,
+        message: result.emailChanged
+          ? "Contact details saved. The email address will change only after the supporter confirms it from their new mailbox."
+          : "Supporter contact details saved.",
+      });
+    } catch (err) {
+      if (err instanceof dal.adminSupporters.SupporterNotFoundError) {
+        sendNotFound(res);
+        return;
+      }
+      if (err instanceof dal.adminSupporters.SupporterEmailConflictError) {
+        res.status(409).json({ message: "That email address is already in use by another account." });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  for (const action of ["disable", "reactivate"] as const) {
+    app.post(`/api/admin/supporters/:id/${action}`, requireStaffAdmin, async (req: Request, res: Response, next) => {
+      const supporterId = req.params.id ?? "";
+      if (!UUID_RE.test(supporterId)) {
+        sendNotFound(res);
+        return;
+      }
+      try {
+        const supporter = await dal.adminSupporters.changeStatus(staffCtx(req), {
+          actorUserId: staffContext(req).userId,
+          targetUserId: supporterId,
+          status: action === "disable" ? "disabled" : "active",
+        });
+        res.json({
+          supporter,
+          message: action === "disable" ? "Supporter account disabled." : "Supporter account reactivated.",
+        });
+      } catch (err) {
+        if (err instanceof dal.adminSupporters.SupporterNotFoundError) {
+          sendNotFound(res);
+          return;
+        }
+        next(err);
+      }
+    });
+  }
+
+  app.post("/api/admin/supporters/:id/impersonate", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const supporterId = req.params.id ?? "";
+    if (!UUID_RE.test(supporterId)) {
+      sendNotFound(res);
+      return;
+    }
+    const actorUserId = staffContext(req).userId;
+    try {
+      const target = await dal.adminSupporters.getById(staffCtx(req), supporterId);
+      if (!target) {
+        sendNotFound(res);
+        return;
+      }
+      if (target.status !== "active") {
+        await dal.adminSupporters.recordAudit(staffCtx(req), {
+          actorUserId,
+          targetUserId: supporterId,
+          action: "impersonate",
+          outcome: "rejected_disabled",
+        });
+        res.status(409).json({ message: "A disabled supporter account cannot be opened." });
+        return;
+      }
+      const context = await dal.supporterImpersonation.start(staffCtx(req), {
+        adminUserId: actorUserId,
+        supporterUserId: supporterId,
+      });
+      res.cookie(SUPPORTER_CONTEXT_COOKIE, context.id, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        signed: true,
+        maxAge: 60 * 60 * 1000,
+      });
+      res.clearCookie(ACTIVE_ORG_COOKIE, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        signed: true,
+      });
+      res.json({ ok: true, redirectTo: "/profile", expiresAt: context.expiresAt });
+    } catch (err) {
+      if (err instanceof Error && err.message === "SUPPORTER_NOT_ELIGIBLE") {
+        res.status(409).json({ message: "Only an active supporter account can be opened." });
+        return;
+      }
+      if (err instanceof Error && err.message === "SUPPORTER_CONTEXT_ACTIVE") {
+        res.status(409).json({ message: "Exit the current supporter view before opening another." });
+        return;
+      }
+      next(err);
+    }
   });
 
   // Read-only account/person/provider email integrity report. It never

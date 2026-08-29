@@ -717,6 +717,24 @@ create policy organization_context_actions_system_staff_all on organization_cont
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 
+-- ---------------------------------------------------------------- supporter administration contexts
+
+alter table supporter_impersonation_contexts enable row level security;
+alter table supporter_impersonation_contexts force row level security;
+
+drop policy if exists supporter_impersonation_contexts_system_staff_all on supporter_impersonation_contexts;
+create policy supporter_impersonation_contexts_system_staff_all on supporter_impersonation_contexts
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
+alter table supporter_admin_audit enable row level security;
+alter table supporter_admin_audit force row level security;
+
+drop policy if exists supporter_admin_audit_system_staff_all on supporter_admin_audit;
+create policy supporter_admin_audit_system_staff_all on supporter_admin_audit
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
 -- ---------------------------------------------------------------- request_revisions
 
 alter table request_revisions enable row level security;
