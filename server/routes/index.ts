@@ -906,17 +906,12 @@ export function registerRoutes(app: Express): void {
         if (await dal.authProvider.emailInUseByAnotherUserInTx(client, pending.newEmail, pending.authUserId)) {
           throw new ProfileEmailConflictError();
         }
-        await dal.people.updateContactInTx(client, person.id, {
-          firstName: person.firstName,
-          lastName: person.lastName,
-          email: pending.newEmail,
-          phone: person.phone,
-        });
+        const confirmedPerson = await dal.people.updateEmailInTx(client, person.id, pending.newEmail);
         await dal.authProvider.updateUserContactInTx(
           client,
           pending.authUserId,
-          pending.newEmail,
-          `${person.firstName} ${person.lastName}`,
+          confirmedPerson.email,
+          `${confirmedPerson.firstName} ${confirmedPerson.lastName}`,
           true,
         );
         await dal.authProvider.deleteProfileEmailChangesInTx(client, pending.userId);

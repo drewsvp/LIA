@@ -176,6 +176,33 @@ export async function updateContactInTx(
   return person;
 }
 
+/**
+ * Transfer a linked person's email after the profile confirmation flow has
+ * validated the pending token and all identity collisions. This is separate
+ * from updateContactInTx because ordinary contact edits must never move a
+ * linked account's login identity.
+ */
+export async function updateEmailInTx(c: PoolClient, personId: string, email: string): Promise<Person> {
+  const normalizedEmail = normalizeEmail(email);
+  await c.query(
+    `select set_config('app.account_email_change_person_id', $1, true),
+            set_config('app.account_email_change_email', $2, true)`,
+    [personId, normalizedEmail],
+  );
+  const rows = await q<Person>(
+    c,
+    `update people set email = $2 where id = $1 returning ${COLS}`,
+    [personId, normalizedEmail],
+  );
+  await c.query(
+    `select set_config('app.account_email_change_person_id', '', true),
+            set_config('app.account_email_change_email', '', true)`,
+  );
+  const person = rows[0];
+  if (!person) throw new Error(`people.updateEmailInTx: person not found: ${personId}`);
+  return person;
+}
+
 /** A linked login's email cannot be changed through a contact form. */
 export class AccountEmailChangeError extends Error {
   constructor() {

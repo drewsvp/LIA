@@ -8,3 +8,7 @@ An authenticated profile edit must not immediately move the account's login iden
 **Why:** An authenticated user can mistype an otherwise unused address. Immediate transfer would let whoever owns that mailbox request a magic link and inherit the original account, including staff or organization permissions.
 
 **How to apply:** Save non-identity contact fields immediately. Hold the requested email as pending, rate-limit confirmation dispatches, and make emailed GET links render only; a deliberate POST re-checks collisions and updates both identities in one locked transaction. Expired, superseded, conflicting, replayed, or non-unique tokens must not move the account.
+
+The database immutability trigger must authorize only the exact person and normalized target email for that transaction. Treat missing custom GUCs as empty with `coalesce(current_setting(..., true), '')`; PostgreSQL returns NULL for an absent setting, and three-valued logic can otherwise make a default-deny `IF` silently skip its rejection.
+
+**Why:** The application guard and trigger intentionally block ordinary linked-account email edits. Confirmation needs a narrow trigger exception, but an absent transaction-local setting must still fail closed.

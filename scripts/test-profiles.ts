@@ -7,9 +7,10 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { auth } from "../server/auth/auth";
-import { pool } from "../server/db/client";
+import { pool, SYSTEM, withDbContext } from "../server/db/client";
+import * as authProvider from "../server/dal/auth-provider";
+import * as people from "../server/dal/people";
 import * as users from "../server/dal/users";
-import { SYSTEM } from "../server/db/client";
 import { FixedWindowLimiter } from "../server/auth/rate-limit";
 
 const BASE = "http://localhost:5000";
@@ -436,16 +437,21 @@ async function main(): Promise<void> {
     await pool.query(`delete from volunteer_signups where id = $1`, [signupId]);
     await pool.query(`delete from item_pledge_lines where item_pledge_id = $1`, [pledgeId]);
     await pool.query(`delete from item_pledges where id = $1`, [pledgeId]);
-    await pool.query(
-      `update people
-          set first_name = $2, last_name = $3, email = $4, phone = $5
-        where id = $1`,
-      [supporter.personId, original.firstName, original.lastName, original.email, original.phone],
-    );
-    await pool.query(
-      `update "user" set name = $2, email = $3, "updatedAt" = now() where id = $1`,
-      [supporter.authSubject, originalProvider.name, originalProvider.email],
-    );
+    await withDbContext(SYSTEM, async (client) => {
+      const restoredPerson = await people.updateEmailInTx(client, supporter.personId, original.email);
+      await client.query(
+        `update people
+            set first_name = $2, last_name = $3, phone = $4
+          where id = $1`,
+        [supporter.personId, original.firstName, original.lastName, original.phone],
+      );
+      await authProvider.updateUserContactInTx(
+        client,
+        supporter.authSubject!,
+        restoredPerson.email,
+        originalProvider.name,
+      );
+    });
     await pool.query(`delete from verification where identifier like $1`, [`zz-profile-${runId}-%`]);
     await pool.query(`delete from verification where identifier like 'profile-email-change:%' and value like $1`, [
       `%${runId}%`,
