@@ -331,6 +331,7 @@ async function main(): Promise<void> {
         }),
       );
       const page = await context.newPage();
+      await page.setViewportSize({ width: 1024, height: 500 });
       await page.goto(`${BASE}/admin/roles`, { waitUntil: "networkidle" });
 
       const memberRow = page.locator("tr", { hasText: removable.email });
@@ -356,6 +357,65 @@ async function main(): Promise<void> {
           JSON.stringify(["Pending", "Active", "Removed"]),
         "pending member row shows every valid lifecycle choice",
       );
+
+      const roleChangeRequests: unknown[] = [];
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          request.url().includes(`/api/admin/roles/${removable.membershipId}`)
+        ) {
+          roleChangeRequests.push(request);
+        }
+      });
+      const requestCount = (): number => roleChangeRequests.length;
+      await memberRow.locator("select").first().selectOption("removed");
+      const confirmation = page.locator(".adm-confirm");
+      await confirmation.waitFor({ state: "visible" });
+      await page.waitForFunction(() => {
+        const element = document.querySelector<HTMLElement>(".adm-confirm");
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.top >= 0 && rect.bottom <= window.innerHeight;
+      });
+      assert(
+        requestCount() === 0,
+        "opening a role confirmation does not call the server before approval",
+      );
+      const beforeCancel = await pool.query<{ status: string }>(
+        `select status from org_memberships where id = $1`,
+        [removable.membershipId],
+      );
+      assert(beforeCancel.rows[0]?.status === "pending", "opening a role confirmation changes nothing");
+
+      await confirmation.getByRole("button", { name: "Cancel" }).click();
+      await confirmation.waitFor({ state: "detached" });
+      assert(requestCount() === 0, "cancelling a role confirmation does not call the server");
+      const afterCancel = await pool.query<{ status: string }>(
+        `select status from org_memberships where id = $1`,
+        [removable.membershipId],
+      );
+      assert(afterCancel.rows[0]?.status === "pending", "cancelling a role confirmation changes nothing");
+
+      await memberRow.locator("select").first().selectOption("removed");
+      await confirmation.waitFor({ state: "visible" });
+      await Promise.all([
+        page.waitForRequest(
+          (request) =>
+            request.method() === "POST" &&
+            request.url().includes(`/api/admin/roles/${removable.membershipId}`),
+        ),
+        confirmation.getByRole("button", { name: "Change status" }).click(),
+      ]);
+      await page.waitForFunction(
+        async (membershipId) => {
+          const response = await fetch(`/api/admin/roles`);
+          if (!response.ok) return false;
+          const payload = (await response.json()) as { memberships?: Array<{ id: string; status: string }> };
+          return payload.memberships?.some((membership) => membership.id === membershipId && membership.status === "removed") ?? false;
+        },
+        removable.membershipId,
+      );
+      assert(requestCount() === 1, "the role change calls the server only after approval");
       await context.close();
     } finally {
       await browser.close();

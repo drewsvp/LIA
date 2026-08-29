@@ -12,7 +12,7 @@
  * An "Invite new staff member" panel above the table lets staff admins
  * onboard new staff directly from the UI (closes O4 from ADMIN-03 §11).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
 
@@ -90,6 +90,7 @@ export function RolesPage() {
   const [pending, setPending] = useState<PendingChange | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const confirmRef = useRef<HTMLDivElement | null>(null);
 
   // Invite form state
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -99,6 +100,12 @@ export function RolesPage() {
 
   const currentUserId = session?.user?.id;
   const currentUserEmail = session?.user?.email;
+
+  useEffect(() => {
+    if (pending) {
+      confirmRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [pending]);
 
   const listQuery = useQuery<{ memberships: Row[] }>({ queryKey: ["/api/admin/roles"] });
   const rows = listQuery.data?.memberships ?? [];
@@ -398,7 +405,7 @@ export function RolesPage() {
           pending.row.role === "member" &&
           pending.toRole === "staff_approver";
         return (
-          <div className="adm-confirm">
+          <div ref={confirmRef} className="adm-confirm">
              {(isSelfDemotion || isSelfRemoval) && (
               <p className="adm-alert">
                  {isSelfRemoval
