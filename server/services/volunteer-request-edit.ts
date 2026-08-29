@@ -48,7 +48,7 @@ const MEMBER_EDGES: Record<RequestStatus, readonly RequestStatus[]> = {
 };
 
 export type SaveVolunteerRequestEditsInput = {
-  /** Already ownership-checked by the route (§11). */
+  /** Already checked against the acting user's active organization (§11). */
   request: VolunteerRequest;
   orgId: string;
   userId: string;

@@ -413,6 +413,22 @@ export async function getById(ctx: DbContext, requestId: string): Promise<Volunt
   return rows[0] ?? null;
 }
 
+/** Organization-scoped member lookup. Foreign and missing ids both return null. */
+export async function getByIdForOrganization(
+  ctx: DbContext,
+  orgId: string,
+  requestId: string,
+): Promise<VolunteerRequest | null> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<VolunteerRequest>(
+      c,
+      `select ${COLS} from volunteer_requests r where r.id = $1 and r.org_id = $2`,
+      [requestId, orgId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
 /**
  * Public-read variant: mirrors itemRequests.getActiveAvailableById. Returns
  * null for an expired row even when status is still 'active' (the nightly

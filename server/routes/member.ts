@@ -447,15 +447,15 @@ export function registerMemberRoutes(app: Express): void {
   // ---- MP-11: add volunteer roles + submit. Parallel to MP-08 (§1). The
   // request's own org_id is checked against the session (§11); a foreign or
   // missing id answers byte-identically to an unknown route.
-  const loadOwnedVolunteerRequest = async (req: Request, res: Response) => {
+  const loadOrganizationVolunteerRequest = async (req: Request, res: Response) => {
     const { orgId } = orgContext(req);
     const id = String(req.params.id ?? "");
     if (!UUID_RE.test(id)) {
       sendNotFound(res);
       return null;
     }
-    const request = await dal.volunteerRequests.getById(SYSTEM, id);
-    if (!request || request.orgId !== orgId) {
+    const request = await dal.volunteerRequests.getByIdForOrganization(SYSTEM, orgId, id);
+    if (!request) {
       sendNotFound(res);
       return null;
     }
@@ -467,7 +467,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedVolunteerRequest(req, res);
+        const request = await loadOrganizationVolunteerRequest(req, res);
         if (!request) return;
         const roles = await dal.volunteerRoles.listByRequest(SYSTEM, request.id);
         res.json({
@@ -501,7 +501,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedVolunteerRequest(req, res);
+        const request = await loadOrganizationVolunteerRequest(req, res);
         if (!request) return;
         // §11: non-draft loads read-only — adds are writes, so they are refused.
         if (request.status !== "draft") {
@@ -548,7 +548,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedVolunteerRequest(req, res);
+        const request = await loadOrganizationVolunteerRequest(req, res);
         if (!request) return;
         const { userId, session } = orgContext(req);
         const actorEmail = session.user?.email ?? "";
@@ -589,7 +589,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedVolunteerRequest(req, res);
+        const request = await loadOrganizationVolunteerRequest(req, res);
         if (!request) return;
         const [contact, roles] = await Promise.all([
           request.contactPersonId ? dal.people.getById(SYSTEM, request.contactPersonId) : Promise.resolve(null),
@@ -631,7 +631,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedVolunteerRequest(req, res);
+        const request = await loadOrganizationVolunteerRequest(req, res);
         if (!request) return;
         const body = (req.body ?? {}) as Record<string, unknown>;
         const text = (key: string, max: number): string => {
@@ -740,7 +740,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedVolunteerRequest(req, res);
+        const request = await loadOrganizationVolunteerRequest(req, res);
         if (!request) return;
         const body = (req.body ?? {}) as Record<string, unknown>;
         const list = Array.isArray(body.roles) ? (body.roles as Record<string, unknown>[]) : null;
@@ -870,7 +870,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedVolunteerRequest(req, res);
+        const request = await loadOrganizationVolunteerRequest(req, res);
         if (!request) return;
         const body = (req.body ?? {}) as Record<string, unknown>;
         const text = (key: string, max: number): string => {
@@ -977,15 +977,15 @@ export function registerMemberRoutes(app: Express): void {
   // ---- MP-08: add items + submit. :id identifies the request; the
   // request's own org_id is checked against the session (§11). A foreign or
   // missing id answers byte-identically to an unknown route.
-  const loadOwnedRequest = async (req: Request, res: Response) => {
+  const loadOrganizationItemRequest = async (req: Request, res: Response) => {
     const { orgId } = orgContext(req);
     const id = String(req.params.id ?? "");
     if (!UUID_RE.test(id)) {
       sendNotFound(res);
       return null;
     }
-    const request = await dal.itemRequests.getById(SYSTEM, id);
-    if (!request || request.orgId !== orgId) {
+    const request = await dal.itemRequests.getByIdForOrganization(SYSTEM, orgId, id);
+    if (!request) {
       sendNotFound(res);
       return null;
     }
@@ -994,7 +994,7 @@ export function registerMemberRoutes(app: Express): void {
 
   app.get("/api/dashboard/items/:id", requireOrganization, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const request = await loadOwnedRequest(req, res);
+      const request = await loadOrganizationItemRequest(req, res);
       if (!request) return;
       const requestItems = await dal.items.listByRequest(SYSTEM, request.id);
       res.json({
@@ -1028,7 +1028,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedRequest(req, res);
+        const request = await loadOrganizationItemRequest(req, res);
         if (!request) return;
         // §11: non-draft loads read-only — adds are writes, so they are refused.
         if (request.status !== "draft") {
@@ -1091,7 +1091,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedRequest(req, res);
+        const request = await loadOrganizationItemRequest(req, res);
         if (!request) return;
         const { userId, session } = orgContext(req);
         const actorEmail = session.user?.email ?? "";
@@ -1127,7 +1127,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedRequest(req, res);
+        const request = await loadOrganizationItemRequest(req, res);
         if (!request) return;
         const [contact, requestItems] = await Promise.all([
           request.contactPersonId ? dal.people.getById(SYSTEM, request.contactPersonId) : Promise.resolve(null),
@@ -1171,7 +1171,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedRequest(req, res);
+        const request = await loadOrganizationItemRequest(req, res);
         if (!request) return;
         const { orgId, userId, session } = orgContext(req);
         const actorEmail = session.user?.email ?? "";
@@ -1283,7 +1283,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedRequest(req, res);
+        const request = await loadOrganizationItemRequest(req, res);
         if (!request) return;
         const { orgId } = orgContext(req);
         const body = (req.body ?? {}) as Record<string, unknown>;
@@ -1454,7 +1454,7 @@ export function registerMemberRoutes(app: Express): void {
     requireOrganization,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const request = await loadOwnedRequest(req, res);
+        const request = await loadOrganizationItemRequest(req, res);
         if (!request) return;
         const { orgId } = orgContext(req);
         const body = (req.body ?? {}) as Record<string, unknown>;

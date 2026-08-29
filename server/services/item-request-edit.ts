@@ -40,7 +40,7 @@ const MEMBER_EDGES: Record<RequestStatus, readonly RequestStatus[]> = {
 };
 
 export type SaveRequestEditsInput = {
-  /** Already ownership-checked by the route (§11). */
+  /** Already checked against the acting user's active organization (§11). */
   request: ItemRequest;
   orgId: string;
   userId: string;

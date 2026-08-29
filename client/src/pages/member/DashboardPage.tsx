@@ -208,7 +208,7 @@ export function DashboardPage() {
           <RequestSelector
             label="Item Requests"
             placeholder="Select Item Request..."
-            emptyCopy="You haven't created any item requests yet."
+            emptyCopy="Your organization doesn't have any item requests yet."
             buttonLabel="Edit Item Request"
             requests={overview?.itemRequests}
             failed={overviewQuery.isError}
@@ -218,7 +218,7 @@ export function DashboardPage() {
           <RequestSelector
             label="Volunteer Requests"
             placeholder="Select Volunteer Request..."
-            emptyCopy="You haven't created any volunteer requests yet."
+            emptyCopy="Your organization doesn't have any volunteer requests yet."
             buttonLabel="Edit Volunteer Request"
             requests={overview?.volunteerRequests}
             failed={overviewQuery.isError}

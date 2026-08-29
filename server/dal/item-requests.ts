@@ -338,6 +338,22 @@ export async function getById(ctx: DbContext, requestId: string): Promise<ItemRe
   return rows[0] ?? null;
 }
 
+/** Organization-scoped member lookup. Foreign and missing ids both return null. */
+export async function getByIdForOrganization(
+  ctx: DbContext,
+  orgId: string,
+  requestId: string,
+): Promise<ItemRequest | null> {
+  const rows = await withDbContext(ctx, (c) =>
+    q<ItemRequest>(
+      c,
+      `select ${COLS} from item_requests r where r.id = $1 and r.org_id = $2`,
+      [requestId, orgId],
+    ),
+  );
+  return rows[0] ?? null;
+}
+
 /** Lookup for legacy Wix 301 redirects. Never used as a foreign key. */
 export async function getByLegacyWixId(ctx: DbContext, legacyWixId: string): Promise<ItemRequest | null> {
   const rows = await withDbContext(ctx, (c) =>
