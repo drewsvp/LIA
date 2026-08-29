@@ -51,6 +51,7 @@
     "test:admin-organization-context": "tsx scripts/test-admin-organization-context.ts",
     "test:admin-organization-edit": "tsx scripts/test-admin-organization-edit.ts",
     "test:admin-supporters": "tsx scripts/test-admin-supporters.ts",
+    "test:admin-participation": "tsx scripts/test-admin-participation.ts",
     "test:member-request-sharing": "tsx scripts/test-member-request-sharing.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",
     "db:seed": "tsx server/db/seed.ts",

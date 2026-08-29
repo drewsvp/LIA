@@ -217,7 +217,10 @@ function AttachedRecords({ attached, personName }: { attached: Attached; personN
 
 export function PeopleReviewPage() {
   const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const personId = new URLSearchParams(window.location.search).get("personId");
+    return personId && /^[0-9a-f-]{36}$/i.test(personId) ? personId : null;
+  });
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [namesLoadedFor, setNamesLoadedFor] = useState<string | null>(null);

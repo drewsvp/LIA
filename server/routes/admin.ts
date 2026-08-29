@@ -127,6 +127,78 @@ const REQUEST_STATUSES = new Set(["pending", "returned", "active", "archived"]);
 /** ADMIN-01/ADMIN-02 §8 failure copy, verbatim. */
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
 
+const PARTICIPATION_PAGE_SIZE_DEFAULT = 25;
+const PARTICIPATION_PAGE_SIZE_MAX = 100;
+const PARTICIPATION_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseParticipationDate(value: unknown): string | undefined | null {
+  if (value === undefined || value === "") return undefined;
+  if (typeof value !== "string" || !PARTICIPATION_DATE_RE.test(value)) return null;
+  const [year, month, day] = value.split("-").map(Number) as [number, number, number];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? value
+    : null;
+}
+
+function parseParticipationFilters(req: Request): dal.adminParticipation.ParticipationFilters | null {
+  const query = req.query;
+  const positiveInt = (value: unknown, fallback: number, max: number): number | null => {
+    if (value === undefined || value === "") return fallback;
+    if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return parsed >= 1 && parsed <= max ? parsed : null;
+  };
+  const page = positiveInt(query.page, 1, 100000);
+  const pageSize = positiveInt(query.pageSize, PARTICIPATION_PAGE_SIZE_DEFAULT, PARTICIPATION_PAGE_SIZE_MAX);
+  if (page === null || pageSize === null) return null;
+  const from = parseParticipationDate(query.from ?? query.dateFrom);
+  const to = parseParticipationDate(query.to ?? query.dateTo);
+  if (from === null || to === null || (from && to && from > to)) return null;
+  const text = (value: unknown): string | undefined | null => {
+    if (value === undefined || value === "") return undefined;
+    if (typeof value !== "string" || value.length > 200) return null;
+    return value.trim() || undefined;
+  };
+  const search = text(query.search ?? query.q);
+  const supporter = text(query.supporter);
+  const organization = text(query.organization);
+  const request = text(query.request);
+  const organizationId = query.organizationId;
+  const requestId = query.requestId;
+  const snapshotRaw = query.snapshotAt ?? query.snapshot;
+  const snapshotAt =
+    snapshotRaw === undefined || snapshotRaw === ""
+      ? undefined
+      : typeof snapshotRaw === "string" && snapshotRaw.length <= 40 && !Number.isNaN(Date.parse(snapshotRaw))
+        ? new Date(snapshotRaw).toISOString()
+        : null;
+  if (
+    search === null ||
+    supporter === null ||
+    organization === null ||
+    request === null ||
+    snapshotAt === null ||
+    (organizationId !== undefined && (typeof organizationId !== "string" || !UUID_RE.test(organizationId))) ||
+    (requestId !== undefined && (typeof requestId !== "string" || !UUID_RE.test(requestId)))
+  ) {
+    return null;
+  }
+  return {
+    page,
+    pageSize,
+    ...(search ? { search } : {}),
+    ...(supporter ? { supporter } : {}),
+    ...(organization ? { organization } : {}),
+    ...(request ? { request } : {}),
+    ...(typeof organizationId === "string" ? { organizationId } : {}),
+    ...(typeof requestId === "string" ? { requestId } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(snapshotAt ? { snapshotAt } : {}),
+  };
+}
+
 /** ADMIN-09: the full membership-role enum and its display names. */
 const ROLE_VALUES: ReadonlySet<string> = new Set(["owner", "member", "staff_admin", "staff_approver"]);
 const MEMBERSHIP_STATUS_VALUES: ReadonlySet<string> = new Set(["pending", "active", "removed"]);
@@ -369,6 +441,29 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/db-health", requireStaff, (_req: Request, res: Response) => {
     res.json(getDbRoutineCheckResult());
   });
+
+  // ---- ADMIN-15 — staff-wide, read-only participation directory.
+  // Deliberately require staff_admin: approvers should neither discover nor
+  // call this cross-organization supporter-data surface.
+  const participationList = (kind: "donations" | "volunteers") =>
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      try {
+        const filters = parseParticipationFilters(req);
+        if (!filters) {
+          res.status(400).json({ message: "Invalid participation filters." });
+          return;
+        }
+        const result =
+          kind === "donations"
+            ? await dal.adminParticipation.listDonations(staffCtx(req), filters)
+            : await dal.adminParticipation.listVolunteers(staffCtx(req), filters);
+        res.json(result);
+      } catch (err) {
+        next(err);
+      }
+    };
+  app.get("/api/admin/participation/donations", requireStaffAdmin, participationList("donations"));
+  app.get("/api/admin/participation/volunteers", requireStaffAdmin, participationList("volunteers"));
 
   // --------------------------------------------------------------------------
   // ADMIN-14 — Supporter directory. This is deliberately staff-admin-only:

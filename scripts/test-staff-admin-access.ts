@@ -136,6 +136,8 @@ const SURFACE_ASSERTIONS: Record<
   "ADMIN-10": { authSelector: ".adm-row-clickable" },
   "ADMIN-11": { authSelector: "h1.adm-heading", authText: "Volunteer categories" },
   "ADMIN-12": { authSelector: "h1.adm-heading", authText: "Analytics" },
+  "ADMIN-14": { authSelector: "h1.adm-heading", authText: "Supporters" },
+  "ADMIN-15": { authSelector: "h1.adm-heading", authText: "Donations & Volunteers" },
 };
 
 async function main(): Promise<void> {

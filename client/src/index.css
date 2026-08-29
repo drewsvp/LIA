@@ -3922,6 +3922,99 @@ a.site-nav-btn {
 .adm-sub-person { color: #555; }
 .adm-action-msg { font-weight: 600; margin: 0.5rem 0; }
 
+/* ---- ADMIN-14 participation directory ---- */
+.adm-participation-page > .adm-note {
+  max-width: 62rem;
+  margin: -6px 0 18px;
+}
+.adm-participation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+  background: #f4f8f9;
+  border: 1px solid #d7e2e6;
+  border-radius: 6px;
+}
+.adm-participation-filters .adm-filter {
+  min-width: 150px;
+  flex: 1 1 150px;
+}
+.adm-participation-filters .adm-filter:first-child {
+  flex-basis: 230px;
+}
+.adm-participation-filters input {
+  min-width: 0;
+  width: 100%;
+}
+.adm-participation-clear {
+  white-space: nowrap;
+}
+.adm-participation-section-heading {
+  margin-top: 20px;
+  text-transform: none;
+  font-size: 1.25rem;
+}
+.adm-participation-table {
+  min-width: 1050px;
+}
+.adm-participation-table td {
+  vertical-align: top;
+}
+.adm-participation-supporter {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 170px;
+}
+.adm-participation-supporter a {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.adm-participation-supporter span {
+  font-weight: 700;
+}
+.adm-participation-supporter .adm-muted {
+  font-weight: 400;
+}
+.adm-participation-request {
+  display: block;
+  min-width: 170px;
+  max-width: 250px;
+}
+.adm-participation-notes {
+  max-width: 230px;
+  min-width: 150px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.adm-participation-date {
+  white-space: nowrap;
+}
+.adm-participation-list {
+  margin: 0;
+  padding-left: 18px;
+  min-width: 180px;
+}
+.adm-participation-list li {
+  margin: 2px 0;
+}
+.adm-participation-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+.adm-participation-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+
 /* ---- Visually hidden (screen-reader only) ---- */
 .sr-only {
   position: absolute;

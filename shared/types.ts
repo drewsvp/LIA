@@ -300,8 +300,12 @@ export type SignupWithSupporter = VolunteerSignup & {
   roles: { roleId: string; roleName: string }[];
 };
 
-// ---------------------------------------------------------------- governance
-
+/** Staff-wide participation directory rows. These are read-only operational records. */
+export type AdminParticipationRequest = {
+  id: string;
+  type: "item" | "volunteer";
+  title: string;
+};
 export type ApprovalEvent = {
   id: string;
   entityType: ApprovalEntityType;
@@ -398,4 +402,49 @@ export type SessionInfo = {
   /** True when the account is a supporter profile (donor/volunteer, no org portal). */
   isSupporter: boolean;
   staffRole: Extract<MembershipRole, "staff_admin" | "staff_approver"> | null;
+};
+
+export type AdminParticipationBase = {
+  id: string;
+  personId: string;
+  personNeedsReview: boolean;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  notes: string | null;
+  organization: { id: string; name: string };
+  request: AdminParticipationRequest;
+  createdAt: string;
+};
+
+export type AdminParticipationLine = {
+  id: string;
+  name: string;
+  quantity: number;
+};
+
+export type AdminDonationRow = AdminParticipationBase & {
+  request: AdminParticipationRequest & { type: "item" };
+  lines: AdminParticipationLine[];
+};
+
+export type AdminParticipationRole = {
+  id: string;
+  name: string;
+};
+
+export type AdminVolunteerRow = AdminParticipationBase & {
+  request: AdminParticipationRequest & { type: "volunteer" };
+  roles: AdminParticipationRole[];
+};
+
+export type AdminParticipationPage<T> = {
+  rows: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  /** Append-only paging boundary; pass this back when moving between pages. */
+  snapshotAt: string;
 };

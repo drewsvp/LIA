@@ -64,6 +64,7 @@ export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   { id: "ADMIN-12", path: "/admin/analytics", title: "Analytics", area: "admin" },
   { id: "ADMIN-13", path: "/admin/settings", title: "Settings", area: "admin" },
   { id: "ADMIN-14", path: "/admin/supporters", title: "Supporters", area: "admin" },
+  { id: "ADMIN-15", path: "/admin/participation", title: "Donations & Volunteers", area: "admin" },
 ] as const;
 
 /**
@@ -92,4 +93,5 @@ export const STAFF_ADMIN_ONLY_SURFACES: ReadonlySet<string> = new Set([
   "ADMIN-12",
   "ADMIN-13",
   "ADMIN-14",
+  "ADMIN-15",
 ]);

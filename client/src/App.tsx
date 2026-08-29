@@ -44,6 +44,7 @@ import { VolunteerCategoriesPage as AdminVolunteerCategoriesPage } from "./pages
 import { AnalyticsPage as AdminAnalyticsPage } from "./pages/admin/AnalyticsPage";
 import { SettingsPage as AdminSettingsPage } from "./pages/admin/SettingsPage";
 import { SupportersPage as AdminSupportersPage } from "./pages/admin/SupportersPage";
+import { ParticipationPage as AdminParticipationPage } from "./pages/admin/ParticipationPage";
 import { VolunteerAlertOptOutPage } from "./pages/public/VolunteerAlertOptOutPage";
 import { OrganizationProfilePage } from "./pages/public/OrganizationProfilePage";
 
@@ -90,6 +91,7 @@ const ADMIN_PAGES: Partial<Record<string, () => ReactElement>> = {
   "ADMIN-12": () => <AdminAnalyticsPage />,
   "ADMIN-13": () => <AdminSettingsPage />,
   "ADMIN-14": () => <AdminSupportersPage />,
+  "ADMIN-15": () => <AdminParticipationPage />,
 };
 
 /**
