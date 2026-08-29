@@ -225,6 +225,10 @@ export function registerMemberRoutes(app: Express): void {
         res.json({ ok: true });
       } catch (err) {
         // Name or contact-email collision: §8 has one failure voice here.
+        if (err instanceof dal.people.AccountEmailChangeError || err instanceof dal.people.ContactEmailConflictError) {
+          res.status(409).json({ message: err.message });
+          return;
+        }
         if (isUniqueViolation(err, "organizations_name_key") || isUniqueViolation(err, "people_email_key")) {
           res.status(400).json({ message: SAVE_FAILURE });
           return;

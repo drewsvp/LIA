@@ -43,6 +43,7 @@
     "test:staff-admin-access": "tsx scripts/test-staff-admin-access.ts",
     "test:alliance-staff-conversion": "tsx scripts/test-alliance-staff-conversion.ts",
     "test:role-status-management": "tsx scripts/test-role-status-management.ts",
+    "test:account-email-identity": "tsx scripts/test-account-email-identity.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",
     "db:seed": "tsx server/db/seed.ts",
     "db:apply-auth-schema": "tsx server/auth/apply-auth-schema.ts",

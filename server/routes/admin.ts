@@ -17,6 +17,7 @@ import { requireStaff, requireStaffAdmin, staffContext, sendNotFound } from "../
 import {
   mergePeople as mergePeopleService,
   MergeBothHaveUsersError,
+  MergeAccountEmailChangeError,
   MergePersonNotFoundError,
 } from "../services/person-merge";
 import {
@@ -351,6 +352,25 @@ export function registerAdminRoutes(app: Express): void {
   // without reading server logs.
   app.get("/api/admin/db-health", requireStaff, (_req: Request, res: Response) => {
     res.json(getDbRoutineCheckResult());
+  });
+
+  // Read-only account/person/provider email integrity report. It never
+  // chooses an address or repairs records; mismatches require explicit review.
+  app.get("/api/admin/account-email-integrity", requireStaff, async (req: Request, res: Response, next) => {
+    try {
+      const ctx = staffCtx(req);
+      const [accountIssues, normalizedEmailCollisions] = await Promise.all([
+        dal.users.listEmailIdentityIssues(ctx),
+        dal.people.listEmailNormalizationCollisions(ctx),
+      ]);
+      res.json({
+        accountIssues,
+        normalizedEmailCollisions,
+        count: accountIssues.length + normalizedEmailCollisions.length,
+      });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // ---- ADMIN-01 queue tabs.
@@ -1514,6 +1534,10 @@ export function registerAdminRoutes(app: Express): void {
       if (err instanceof MergeBothHaveUsersError) {
         // §8 verbatim blocked line, §12: readable reason before the tx.
         res.status(409).json({ message: "Both records have login accounts. Remove or reassign one before merging." });
+        return;
+      }
+      if (err instanceof MergeAccountEmailChangeError) {
+        res.status(409).json({ message: err.message });
         return;
       }
       if (err instanceof MergePersonNotFoundError) {

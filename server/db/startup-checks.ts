@@ -22,7 +22,8 @@ import { pool } from "./client";
  * Each entry names the function and the migration that (re-)creates it so
  * the error message points staff to the right repair step.
  *
- * Nine functions — the full set restored by migration 0045.
+ * The full set restored by migration 0045 plus later security-critical
+ * routines that publish must preserve.
  */
 const REQUIRED_FUNCTIONS: ReadonlyArray<{
   /** pg_proc.proname — unqualified function name */
@@ -39,6 +40,7 @@ const REQUIRED_FUNCTIONS: ReadonlyArray<{
   { name: "record_volunteer_signup",          migration: "0045_restore_routine_parity.sql" },
   { name: "reject_expired_item_pledge",       migration: "0045_restore_routine_parity.sql" },
   { name: "set_updated_at",                   migration: "0045_restore_routine_parity.sql" },
+  { name: "protect_account_email_identity",   migration: "0051_enforce_normalized_people_email.sql" },
 ];
 
 /**
@@ -46,7 +48,8 @@ const REQUIRED_FUNCTIONS: ReadonlyArray<{
  * Each entry names the trigger, the table it fires on, and the migration that
  * (re-)creates it so the error message points staff to the right repair step.
  *
- * Sixteen triggers — the full set restored by migration 0045.
+ * The full set restored by migration 0045 plus later security-critical
+ * triggers that publish must preserve.
  */
 const REQUIRED_TRIGGERS: ReadonlyArray<{
   /** pg_trigger.tgname — unqualified trigger name */
@@ -65,6 +68,7 @@ const REQUIRED_TRIGGERS: ReadonlyArray<{
   { name: "org_memberships_set_updated_at",                 table: "org_memberships",                 migration: "0045_restore_routine_parity.sql" },
   { name: "organizations_set_updated_at",                   table: "organizations",                   migration: "0045_restore_routine_parity.sql" },
   { name: "people_set_updated_at",                          table: "people",                          migration: "0045_restore_routine_parity.sql" },
+  { name: "people_protect_account_email_identity",          table: "people",                          migration: "0051_enforce_normalized_people_email.sql" },
   { name: "users_set_updated_at",                           table: "users",                           migration: "0045_restore_routine_parity.sql" },
   { name: "volunteer_alert_preferences_set_updated_at",     table: "volunteer_alert_preferences",     migration: "0045_restore_routine_parity.sql" },
   { name: "volunteer_requests_guard_member_transitions",    table: "volunteer_requests",              migration: "0045_restore_routine_parity.sql" },

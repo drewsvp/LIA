@@ -6,6 +6,7 @@
 import type { PoolClient } from "pg";
 import { q, withDbContext, type DbContext } from "../db/client";
 import type { User, UserWithPerson, UserStatus, UserKind } from "../../shared/types";
+import { normalizeEmail } from "./people";
 
 const COLS = `u.id, u.person_id as "personId", u.auth_subject as "authSubject", u.status, u.kind,
   u.last_login_at as "lastLoginAt", u.created_at as "createdAt", u.updated_at as "updatedAt"`;
@@ -17,6 +18,15 @@ export type CreateUserInput = {
   status?: UserStatus;
   /** 'member' (default) or 'supporter' — supporter accounts have no org membership. */
   kind?: UserKind;
+};
+
+export type AccountEmailIdentityIssue = {
+  userId: string;
+  personId: string;
+  authSubject: string;
+  personEmail: string;
+  authEmail: string | null;
+  issue: "email_mismatch" | "missing_auth_user";
 };
 
 /** Find by the auth provider's stable subject identifier. */
@@ -34,12 +44,13 @@ export async function findByAuthSubject(ctx: DbContext, authSubject: string): Pr
 
 /** Find the user whose person has this email (case-insensitive). */
 export async function findByEmail(ctx: DbContext, email: string): Promise<UserWithPerson | null> {
+  const normalized = normalizeEmail(email);
   const rows = await withDbContext(ctx, (c) =>
     q<UserWithPerson>(
       c,
       `select ${PERSON_JOIN_COLS} from users u join people p on p.id = u.person_id
-        where lower(p.email) = lower($1)`,
-      [email],
+        where lower(btrim(p.email)) = $1`,
+      [normalized],
     ),
   );
   return rows[0] ?? null;
@@ -65,6 +76,11 @@ export async function create(ctx: DbContext, input: CreateUserInput): Promise<Us
 
 /** Transaction-composable variant (MP-03 one-tx signup). */
 export async function createInTx(c: PoolClient, input: CreateUserInput): Promise<User> {
+  // Serialize user creation with people.email maintenance. Provisioning flows
+  // have already locked the person through findByEmailInTx; this repeats the
+  // protocol for callers creating a user from a known person id.
+  const personRows = await q<{ id: string }>(c, `select id from people where id = $1 for update`, [input.personId]);
+  if (!personRows[0]) throw new Error(`users.create: person not found: ${input.personId}`);
   const rows = await q<User>(
     c,
     `insert into users (person_id, status, kind) values ($1, $2, $3)
@@ -81,6 +97,34 @@ export async function createInTx(c: PoolClient, input: CreateUserInput): Promise
 export async function findByPersonIdInTx(c: PoolClient, personId: string): Promise<User | null> {
   const rows = await q<User>(c, `select ${COLS} from users u where u.person_id = $1`, [personId]);
   return rows[0] ?? null;
+}
+
+/**
+ * Read-only integrity report for account/person/provider email relationships.
+ * It deliberately reports inconsistencies instead of selecting an address or
+ * repairing either system's record.
+ */
+export async function listEmailIdentityIssues(ctx: DbContext): Promise<AccountEmailIdentityIssue[]> {
+  return withDbContext(ctx, (c) =>
+    q<AccountEmailIdentityIssue>(
+      c,
+      `select u.id as "userId",
+              u.person_id as "personId",
+              u.auth_subject as "authSubject",
+              p.email as "personEmail",
+              au.email as "authEmail",
+              case when au.id is null then 'missing_auth_user' else 'email_mismatch' end as issue
+         from users u
+         join people p on p.id = u.person_id
+         left join "user" au on au.id = u.auth_subject
+        where u.auth_subject is not null
+          and (
+            au.id is null
+            or lower(btrim(p.email)) is distinct from lower(btrim(au.email))
+          )
+        order by p.email asc, u.id asc`,
+    ),
+  );
 }
 
 /** Record the auth provider's subject id on first successful login. */

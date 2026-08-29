@@ -13,6 +13,7 @@ import { betterAuth } from "better-auth";
 import { magicLink } from "better-auth/plugins";
 import { pool, SYSTEM } from "../db/client";
 import * as usersDal from "../dal/users";
+import { normalizeEmail } from "../dal/people";
 import * as authProvider from "../dal/auth-provider";
 import * as emailLog from "../dal/email-log";
 import { sendEmail, EMAIL_HEADER_CID_URL, getEmailHeaderAttachment } from "../email/send";
@@ -205,11 +206,34 @@ export const auth = betterAuth({
           try {
             const email = await authProvider.getAuthUserEmail(session.userId);
             if (!email) return;
+
+            // Once a provider subject is linked, that relationship is the
+            // account identity. Never switch it to whichever application row
+            // currently happens to match the provider email.
+            const linkedUser = await usersDal.findByAuthSubject(SYSTEM, session.userId);
+            if (linkedUser) {
+              if (normalizeEmail(linkedUser.email) !== normalizeEmail(email)) {
+                console.error(
+                  `auth: provider email does not match linked account; refusing to relink ${session.userId}`,
+                );
+                return;
+              }
+              if (linkedUser.status === "disabled") return;
+              await usersDal.setLastLoginAt(SYSTEM, linkedUser.id);
+              return;
+            }
+
             const appUser = await usersDal.findByEmail(SYSTEM, email);
             if (!appUser || appUser.status === "disabled") return;
-            if (appUser.authSubject !== session.userId) {
-              await usersDal.linkAuthSubject(SYSTEM, appUser.id, session.userId);
+            // A different provider subject is already established for this
+            // application account. Refuse to rebind it silently.
+            if (appUser.authSubject && appUser.authSubject !== session.userId) {
+              console.error(
+                `auth: application account already linked to another provider subject; refusing to relink ${appUser.id}`,
+              );
+              return;
             }
+            await usersDal.linkAuthSubject(SYSTEM, appUser.id, session.userId);
             await usersDal.setLastLoginAt(SYSTEM, appUser.id);
           } catch (err) {
             // Linking must never break login; it is retried on next session.

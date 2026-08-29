@@ -18,10 +18,22 @@ export type CreatePersonInput = {
   sourceNote?: string | null;
 };
 
+export type PersonEmailNormalizationCollision = {
+  normalizedEmail: string;
+  personIds: string[];
+  storedEmails: string[];
+};
+
+/** Canonical form used for all account/person identity comparisons and writes. */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /** Find by case-insensitive email. */
 export async function findByEmail(ctx: DbContext, email: string): Promise<Person | null> {
+  const normalized = normalizeEmail(email);
   const rows = await withDbContext(ctx, (c) =>
-    q<Person>(c, `select ${COLS} from people where lower(email) = lower($1)`, [email]),
+    q<Person>(c, `select ${COLS} from people where lower(btrim(email)) = $1`, [normalized]),
   );
   return rows[0] ?? null;
 }
@@ -37,6 +49,27 @@ export async function getByIdInTx(c: PoolClient, personId: string): Promise<Pers
   return rows[0] ?? null;
 }
 
+/**
+ * Read-only report of legacy rows that collapse to the same normalized email.
+ * No row is changed or selected as canonical; staff must resolve each group.
+ */
+export async function listEmailNormalizationCollisions(
+  ctx: DbContext,
+): Promise<PersonEmailNormalizationCollision[]> {
+  return withDbContext(ctx, (c) =>
+    q<PersonEmailNormalizationCollision>(
+      c,
+      `select lower(btrim(email)) as "normalizedEmail",
+              array_agg(id::text order by created_at, id) as "personIds",
+              array_agg(email order by created_at, id) as "storedEmails"
+         from people
+        group by lower(btrim(email))
+       having count(*) > 1
+        order by lower(btrim(email))`,
+    ),
+  );
+}
+
 /** Create a person. Two name inputs, two columns, stored as entered. */
 export async function create(ctx: DbContext, input: CreatePersonInput): Promise<Person> {
   return withDbContext(ctx, (c) => createInTx(c, input));
@@ -44,11 +77,12 @@ export async function create(ctx: DbContext, input: CreatePersonInput): Promise<
 
 /** Transaction-composable variant (MP-03 one-tx signup). */
 export async function createInTx(c: PoolClient, input: CreatePersonInput): Promise<Person> {
+  const email = normalizeEmail(input.email);
   const rows = await q<Person>(
     c,
     `insert into people (first_name, last_name, email, phone, source_note)
      values ($1, $2, $3, $4, $5) returning ${COLS}`,
-    [input.firstName, input.lastName, input.email, input.phone ?? null, input.sourceNote ?? null],
+    [input.firstName, input.lastName, email, input.phone ?? null, input.sourceNote ?? null],
   );
   const person = rows[0];
   if (!person) throw new Error("people.create returned no row");
@@ -57,7 +91,15 @@ export async function createInTx(c: PoolClient, input: CreatePersonInput): Promi
 
 /** Transaction-composable find by email (MP-03 one-tx signup). */
 export async function findByEmailInTx(c: PoolClient, email: string): Promise<Person | null> {
-  const rows = await q<Person>(c, `select ${COLS} from people where lower(email) = lower($1)`, [email]);
+  const normalized = normalizeEmail(email);
+  // Account-provisioning transactions keep this lock through user creation.
+  // A concurrent contact edit must therefore wait, then see the new user and
+  // refuse an email change instead of moving an in-flight invitation.
+  const rows = await q<Person>(
+    c,
+    `select ${COLS} from people where lower(btrim(email)) = $1 for update`,
+    [normalized],
+  );
   return rows[0] ?? null;
 }
 
@@ -90,14 +132,64 @@ export async function updateContactInTx(
   personId: string,
   input: { firstName: string; lastName: string; email: string; phone: string | null },
 ): Promise<Person> {
+  const normalizedEmail = normalizeEmail(input.email);
+  const currentRows = await q<{ email: string; hasUser: boolean }>(
+    c,
+    `select p.email,
+            exists (select 1 from users u where u.person_id = p.id) as "hasUser"
+       from people p
+      where p.id = $1
+      for update`,
+    [personId],
+  );
+  const current = currentRows[0];
+  if (!current) throw new Error(`people.updateContactInTx: person not found: ${personId}`);
+
+  // A login account is permanently identified by its email. Name and phone
+  // remain editable, but changing the email would silently move the account
+  // to another identity and invalidate its existing login.
+  if (current.hasUser && normalizeEmail(current.email) !== normalizedEmail) {
+    throw new AccountEmailChangeError();
+  }
+
+  // Do not let a contact edit rebind this organization to another person's
+  // row. The unique index is the final race-safe backstop, but this typed
+  // result gives the route a clear, non-generic blocked response.
+  const collision = await q<{ id: string }>(
+    c,
+    `select id
+       from people
+      where id <> $1
+        and lower(btrim(email)) = $2
+      limit 1`,
+    [personId, normalizedEmail],
+  );
+  if (collision.length > 0) throw new ContactEmailConflictError();
+
   const rows = await q<Person>(
     c,
     `update people set first_name = $2, last_name = $3, email = $4, phone = $5 where id = $1 returning ${COLS}`,
-    [personId, input.firstName, input.lastName, input.email, input.phone],
+    [personId, input.firstName, input.lastName, normalizedEmail, input.phone],
   );
   const person = rows[0];
   if (!person) throw new Error(`people.updateContactInTx: person not found: ${personId}`);
   return person;
+}
+
+/** A linked login's email cannot be changed through a contact form. */
+export class AccountEmailChangeError extends Error {
+  constructor() {
+    super("This account's email cannot be changed here. Nothing was changed.");
+    this.name = "AccountEmailChangeError";
+  }
+}
+
+/** A contact edit may not attach an organization to another person's row. */
+export class ContactEmailConflictError extends Error {
+  constructor() {
+    super("That email already belongs to another account. Nothing was changed.");
+    this.name = "ContactEmailConflictError";
+  }
 }
 
 /** Flag a person for staff review (ADMIN-04) with a note explaining why. */

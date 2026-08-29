@@ -19,6 +19,7 @@ import * as dal from "../dal";
 import type { Person } from "../../shared/types";
 import type { DbContext } from "../db/client";
 import { q, withDbContext } from "../db/client";
+import { normalizeEmail } from "../dal/people";
 
 export class MergePersonNotFoundError extends Error {
   constructor(personId: string) {
@@ -31,6 +32,13 @@ export class MergeBothHaveUsersError extends Error {
   constructor() {
     super("both records have login accounts");
     this.name = "MergeBothHaveUsersError";
+  }
+}
+
+export class MergeAccountEmailChangeError extends Error {
+  constructor() {
+    super("A login account cannot be merged into a record with a different email. Nothing was changed.");
+    this.name = "MergeAccountEmailChangeError";
   }
 }
 
@@ -106,6 +114,9 @@ export async function mergePeople(
     const dupHasUser = userCounts.some((r) => r.personId === duplicateId);
     const surHasUser = userCounts.some((r) => r.personId === survivorId);
     if (dupHasUser && surHasUser) throw new MergeBothHaveUsersError();
+    if (dupHasUser && normalizeEmail(duplicate.email) !== normalizeEmail(survivorBefore.email)) {
+      throw new MergeAccountEmailChangeError();
+    }
 
     const mergedRows = await q<{ moved: MergeMovedCounts }>(
       client,

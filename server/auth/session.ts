@@ -10,6 +10,7 @@ import { auth } from "./auth";
 import { SYSTEM } from "../db/client";
 import * as usersDal from "../dal/users";
 import * as membershipsDal from "../dal/memberships";
+import { normalizeEmail } from "../dal/people";
 import type { SessionInfo } from "../../shared/types";
 
 /** Cookie holding the chosen org id for users with multiple memberships (signed). */
@@ -32,6 +33,14 @@ export async function resolveSessionInfo(req: Request): Promise<SessionInfo> {
 
   const user = await usersDal.findByAuthSubject(SYSTEM, baSession.user.id);
   if (!user || user.status === "disabled") return ANONYMOUS;
+  // Better Auth may still hold a valid provider session after its email has
+  // drifted from the application account. The subject link alone is not
+  // enough: deny application authorization until staff explicitly resolve
+  // the mismatch rather than silently granting the old account's access.
+  if (normalizeEmail(user.email) !== normalizeEmail(baSession.user.email)) {
+    console.error(`auth: denying mismatched provider/account email for subject ${baSession.user.id}`);
+    return ANONYMOUS;
+  }
 
   const memberships = await membershipsDal.listActiveByUser(SYSTEM, user.id);
 

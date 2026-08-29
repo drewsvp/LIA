@@ -36,6 +36,17 @@ interface TriggerCase {
 
 const TRIGGER_CASES: TriggerCase[] = [
   {
+    name: "people_protect_account_email_identity",
+    table: "people",
+    migration: "0051_enforce_normalized_people_email.sql",
+    restoreSql: `
+      drop trigger if exists people_protect_account_email_identity on people;
+      create trigger people_protect_account_email_identity
+        before insert or update on people
+        for each row execute function protect_account_email_identity()
+    `,
+  },
+  {
     name: "item_pledges_reject_expired_request",
     table: "item_pledges",
     migration: "0045_restore_routine_parity.sql",
