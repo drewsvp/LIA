@@ -227,6 +227,58 @@ async function checkOrganizationsPage(page: Page): Promise<void> {
       );
     });
   }
+
+  // The editor is a data-dependent surface. When a seeded row is available,
+  // open it so layout regressions in the actual form are covered as well as
+  // the read-only detail panel.
+  const firstRow = page.locator("tr.adm-row").first();
+  if (await firstRow.count() > 0) {
+    await firstRow.click();
+    await page.getByRole("button", { name: "Edit organization", exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "Edit organization", exact: true }).click();
+    await page.locator("form.adm-org-edit").waitFor({ state: "visible" });
+
+    const editorStyles = await getComputedStyles(page, ".adm-org-edit");
+    check("organization editor is present", () => {
+      assert(editorStyles.exists, "Expected the organization editor after opening a seeded organization.");
+    });
+
+    const editGridLayout = await page.locator(".adm-edit-grid").first().evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return { display: style.display, gridTemplateColumns: style.gridTemplateColumns };
+    });
+    check("organization editor fields use a grid layout", () => {
+      assert(editGridLayout.display === "grid", "Organization editor fields should remain a CSS grid.", editGridLayout);
+    });
+
+    const populationStyles = await getComputedStyles(page, ".adm-edit-populations");
+    check("population editor has rounded fieldset styling", () => {
+      assert(populationStyles.exists, "Expected the populations fieldset inside the organization editor.");
+      assert(parseBorderRadius(populationStyles.borderRadius) >= 4, "Population fieldset should retain rounded corners.", {
+        borderRadius: populationStyles.borderRadius,
+      });
+    });
+
+    await page.setViewportSize({ width: 375, height: 800 });
+    const mobileEditor = await page.evaluate(() => {
+      const form = document.querySelector<HTMLElement>("form.adm-org-edit");
+      const grid = document.querySelector<HTMLElement>(".adm-edit-grid");
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        formRight: form?.getBoundingClientRect().right ?? null,
+        gridColumns: grid ? window.getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length : 0,
+      };
+    });
+    check("organization editor collapses to one column without mobile overflow", () => {
+      assert(mobileEditor.documentWidth <= mobileEditor.viewportWidth, "Organization editor must not overflow at mobile width.", mobileEditor);
+      assert(mobileEditor.formRight !== null && mobileEditor.formRight <= mobileEditor.viewportWidth + 1, "Organization editor must stay inside the mobile viewport.", mobileEditor);
+      assert(mobileEditor.gridColumns === 1, "Organization editor fields must use one column at mobile width.", mobileEditor);
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+  } else {
+    console.log("  – organization editor not present (no seeded rows visible); skipping editor checks.");
+  }
 }
 
 async function checkRequestsPage(page: Page): Promise<void> {
