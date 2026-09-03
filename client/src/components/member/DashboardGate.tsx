@@ -118,13 +118,6 @@ export function DashboardGate({ children }: { children: ReactNode }): ReactEleme
     const error = new URLSearchParams(search).get("error");
     return <Redirect to={error ? `/login?error=${encodeURIComponent(error)}` : "/login"} replace />;
   }
-  // Staff may use member routes only while a durable organization view is
-  // active. If that context expires or is revoked, return them to the existing
-  // organization-selection surface instead of mounting the dashboard and
-  // misreporting the resulting 403 as two request-list failures.
-  if (session.isStaff && session.organizationContext === null) {
-    return <Redirect to="/admin/organizations" replace />;
-  }
   // Staff organization view is deliberately valid without a membership in the
   // target organization; the server scopes dashboard APIs to this context.
   if (session.organizationContext !== null && session.organizationContext !== undefined) return <>{children}</>;

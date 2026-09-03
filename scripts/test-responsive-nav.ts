@@ -31,6 +31,7 @@ const BASE_URL =
   process.env.TEST_BASE_URL ??
   (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://127.0.0.1:5000");
 const STAFF_EMAIL = "tiffany@defendingthecause.org";
+const APPROVER_EMAIL = "approver@thealliance.example.org";
 // A seeded organization owner: authenticated, one membership, no staff role —
 // the ordinary member header (DASHBOARD and the user menu, no ADMIN, no
 // switcher) that the staff-admin case cannot exercise.
@@ -54,6 +55,12 @@ type SessionExpectation =
   // Validation runs can overlap, so staff may temporarily see another run's
   // isolated switcher fixture in addition to the membership this run creates.
   | { authenticated: true; staffRole: string | null; memberships: number; allowExtraMemberships?: boolean };
+type ResolvedSession = {
+  authenticated?: boolean;
+  memberships?: Array<{ orgId?: string; orgName?: string }>;
+  activeOrgId?: string | null;
+  staffRole?: string | null;
+};
 /** What the header must offer a given session. */
 type NavExpectation = {
   /** Staff sessions get the ADMIN link; ordinary members must not. */
@@ -186,7 +193,7 @@ async function createSwitcherFixture(): Promise<Fixture> {
   });
 }
 
-async function waitForSession(page: Page, expected: SessionExpectation): Promise<void> {
+async function waitForSession(page: Page, expected: SessionExpectation): Promise<ResolvedSession> {
   const sessionResponsePromise = page.waitForResponse((response) => {
     try {
       return new URL(response.url()).pathname === "/api/session";
@@ -200,11 +207,7 @@ async function waitForSession(page: Page, expected: SessionExpectation): Promise
 
   const sessionResponse = await sessionResponsePromise;
   assertThat(sessionResponse.ok(), `/api/session returned ${sessionResponse.status()}.`);
-  const session = (await sessionResponse.json()) as {
-    authenticated?: boolean;
-    memberships?: unknown[];
-    staffRole?: string | null;
-  };
+  const session = (await sessionResponse.json()) as ResolvedSession;
 
   assertThat(
     session.authenticated === expected.authenticated,
@@ -229,6 +232,7 @@ async function waitForSession(page: Page, expected: SessionExpectation): Promise
   } else {
     await page.waitForSelector('.site-nav a[href="/login"]', { state: "attached" });
   }
+  return session;
 }
 
 async function assertNoHorizontalOverflow(page: Page, label: string): Promise<void> {
@@ -646,10 +650,10 @@ async function mintSessionState(browser: Browser, email: string): Promise<AuthSt
 
 async function runCase(
   browser: Browser,
-  state: "signed out" | "staff admin" | "member" | "supporter",
+  state: "signed out" | "staff admin" | "staff approver" | "member" | "supporter",
   width: number,
   authState: AuthState | null,
-  fixtureName: string,
+  fixture: Fixture,
 ): Promise<void> {
   const label = `${state} at ${width}px`;
   // The staff admin holds the seeded membership plus the switcher fixture; the
@@ -659,6 +663,8 @@ async function runCase(
       ? { authenticated: false }
       : state === "staff admin"
         ? { authenticated: true, staffRole: "staff_admin", memberships: 2, allowExtraMemberships: true }
+        : state === "staff approver"
+          ? { authenticated: true, staffRole: "staff_approver", memberships: 1 }
         : state === "member"
           ? { authenticated: true, staffRole: null, memberships: 1 }
           : { authenticated: true, staffRole: null, memberships: 0 };
@@ -669,7 +675,19 @@ async function runCase(
       storageState: authState ?? undefined,
     });
     const page = await context.newPage();
-    await waitForSession(page, session);
+    let resolvedSession = await waitForSession(page, session);
+
+    if (state === "staff admin") {
+      const selection = await page.request.post(`${BASE_URL}/api/session/active-org`, {
+        data: { orgId: fixture.organizationId },
+      });
+      assertThat(selection.ok(), `Staff admin could not select ${fixture.name} for the dashboard check.`);
+      resolvedSession = await waitForSession(page, session);
+      assertThat(
+        resolvedSession.activeOrgId === fixture.organizationId,
+        "Staff admin session did not retain the selected active membership.",
+      );
+    }
 
     if (state === "signed out") {
       const sessionCookies = (await context.cookies()).filter((cookie) =>
@@ -678,7 +696,9 @@ async function runCase(
       assertThat(sessionCookies.length === 0, "Signed-out context inherited an authenticated session cookie.");
       await assertSignedOutNavigation(page, width);
     } else if (state === "staff admin") {
-      await assertAuthenticatedNavigation(page, width, { admin: true, dashboard: true, switcherName: fixtureName });
+      await assertAuthenticatedNavigation(page, width, { admin: true, dashboard: true, switcherName: fixture.name });
+    } else if (state === "staff approver") {
+      await assertAuthenticatedNavigation(page, width, { admin: true, dashboard: true, switcherName: null });
     } else {
       await assertAuthenticatedNavigation(page, width, {
         admin: false,
@@ -689,6 +709,37 @@ async function runCase(
 
     await assertNoHorizontalOverflow(page, label);
     await assertLogoDoesNotOverlapControls(page, label);
+
+    if (state === "staff admin" || state === "staff approver") {
+      const activeMembership = resolvedSession.memberships?.find(
+        (membership) => membership.orgId === resolvedSession.activeOrgId,
+      );
+      assertThat(
+        typeof activeMembership?.orgName === "string" && activeMembership.orgName.length > 0,
+        `${label} has no resolved active membership name.`,
+      );
+      await page
+        .locator('.site-nav a:visible[href="/dashboard"]')
+        .filter({ hasText: exactText("DASHBOARD") })
+        .click();
+      await page.getByRole("heading", { name: "MY ORGANIZATION DASHBOARD" }).waitFor();
+      assertThat(new URL(page.url()).pathname === "/dashboard", `${label} did not remain on /dashboard.`);
+      assertThat(
+        (await page.locator(".mp4-strip-name").textContent())?.trim() === activeMembership.orgName,
+        `${label} dashboard is not scoped to the selected active membership.`,
+      );
+
+      await page
+        .locator('.site-nav a:visible[href="/admin/organizations"]')
+        .filter({ hasText: exactText("ADMIN") })
+        .click();
+      await page.waitForURL(`${BASE_URL}/admin/organizations`);
+      assertThat(
+        new URL(page.url()).pathname === "/admin/organizations",
+        `${label} ADMIN control did not remain a separate destination.`,
+      );
+    }
+
     console.log(`  ✓ ${label}`);
     passed += 1;
   } catch (error) {
@@ -869,20 +920,24 @@ async function main(): Promise<void> {
 
     browser = await chromium.launch({ headless: true, executablePath: chromiumExecutable() });
     const staffState = await mintSessionState(browser, STAFF_EMAIL);
+    const approverState = await mintSessionState(browser, APPROVER_EMAIL);
     const memberState = await mintSessionState(browser, MEMBER_EMAIL);
     const supporterState = await mintSessionState(browser, SUPPORTER_EMAIL);
 
     for (const width of WIDTHS) {
-      await runCase(browser, "signed out", width, null, fixture.name);
+      await runCase(browser, "signed out", width, null, fixture);
     }
     for (const width of WIDTHS) {
-      await runCase(browser, "staff admin", width, staffState, fixture.name);
+      await runCase(browser, "staff admin", width, staffState, fixture);
     }
     for (const width of WIDTHS) {
-      await runCase(browser, "member", width, memberState, fixture.name);
+      await runCase(browser, "staff approver", width, approverState, fixture);
     }
     for (const width of WIDTHS) {
-      await runCase(browser, "supporter", width, supporterState, fixture.name);
+      await runCase(browser, "member", width, memberState, fixture);
+    }
+    for (const width of WIDTHS) {
+      await runCase(browser, "supporter", width, supporterState, fixture);
     }
 
     // Nav-flash regression: verify that no session-dependent slot flashes

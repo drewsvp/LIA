@@ -1,10 +1,12 @@
 /**
  * The two server-side guards (foundation contract — final).
  *
- * requireOrganization — wraps every member-portal API route. Verifies an
- * active membership BEFORE any data access and attaches the resolved org id
- * to the request. Handlers MUST use req.lia.orgId and never an org id from
- * the request. Responses: 401 not signed in, 403 no active membership,
+ * requireOrganization — wraps every member-portal API route. Verifies a
+ * session-resolved active organization BEFORE any data access and attaches
+ * that org id to the request. The organization comes from either an active
+ * membership (including staff memberships) or a staff-admin organization
+ * context. Handlers MUST use req.lia.orgId and never an org id from the
+ * request. Responses: 401 not signed in, 403 no active membership,
  * 409 { code: "ORG_SELECTION_REQUIRED" } when a multi-org user has not chosen.
  *
  * requireStaff — wraps every /api/admin route. Verifies an active
@@ -60,10 +62,6 @@ export async function requireOrganization(req: Request, res: Response, next: Nex
     const session = await resolveSessionInfo(req);
     if (!session.authenticated || session.user === null) {
       res.status(401).json({ message: "Authentication required" });
-      return;
-    }
-    if (session.isStaff && session.organizationContext === null) {
-      res.status(403).json({ message: "Enter an organization view from the admin area." });
       return;
     }
     if (session.organizationContext === null && session.memberships.length === 0) {

@@ -29,6 +29,7 @@ let adminUserId: string | null = null;
 type Session = {
   authenticated?: boolean;
   user?: { id?: string; email?: string; authSubject?: string };
+  memberships?: Array<{ orgId: string; orgName: string; orgKind: string }>;
   staffRole?: string | null;
   activeOrgId?: string | null;
   organizationContext?: { id: string; organizationId: string; organizationName: string } | null;
@@ -285,6 +286,11 @@ async function main(): Promise<void> {
   const before = await session(adminCookie);
   adminUserId = before.user?.id ?? null;
   assert(before.authenticated && adminUserId !== null && before.staffRole === "staff_admin", "admin session has staff-admin identity");
+  const staffMembership = before.memberships?.find((membership) => membership.orgKind === "platform_owner");
+  assert(staffMembership !== undefined, "admin session has an active platform-owner membership");
+  const staffSelection = await chooseOrganization(adminCookie, staffMembership.orgId);
+  assert(staffSelection.ok, "staff admin can select the membership used outside organization view");
+  adminCookie = mergeCookieHeader(adminCookie, staffSelection);
 
   const [first, second, pending, disabled] = await Promise.all([
     fixture("approved", "approved-one"),
@@ -520,8 +526,13 @@ async function main(): Promise<void> {
     assert(finalSession.organizationContext === null, "exit clears organization context from session");
     const noContextLists = await supporterLists(adminCookie);
     assert(
-      noContextLists.donorsResponse.status === 403 && noContextLists.volunteersResponse.status === 403,
-      "staff admin without an organization view cannot read member-organization supporters",
+      noContextLists.donorsResponse.ok &&
+        noContextLists.volunteersResponse.ok &&
+        noContextLists.donors.orgName === staffMembership.orgName &&
+        noContextLists.volunteers.orgName === staffMembership.orgName &&
+        !noContextLists.donors.donors?.some((row) => row.email === firstSupporters.donorEmail) &&
+        !noContextLists.volunteers.volunteers?.some((row) => row.email === firstSupporters.volunteerEmail),
+      "staff admin without an organization view uses the selected membership without leaking context data",
     );
     const exitAudit = await pool.query<{ action: string }>(
       `select action from organization_context_actions
@@ -588,11 +599,13 @@ async function main(): Promise<void> {
       const expiredContext = await expiredBrowser.newContext();
       await expiredContext.addCookies(browserCookies(adminCookie));
       const expiredPage = await expiredContext.newPage();
-       await expiredPage.goto(`${BASE}/dashboard/supporters`, { waitUntil: "networkidle" });
+      await expiredPage.goto(`${BASE}/dashboard/supporters`, { waitUntil: "networkidle" });
       assert(
-        new URL(expiredPage.url()).pathname === "/admin/organizations" &&
-           (await expiredPage.locator(".mp13-error").count()) === 0,
-         "expired Preview organization context returns staff to organization selection without supporter table errors",
+        new URL(expiredPage.url()).pathname === "/dashboard/supporters" &&
+          (await expiredPage.getByRole("heading", { name: "YOUR DONORS/VOLUNTEERS" }).count()) === 1 &&
+          (await expiredPage.locator(".mp13-org").textContent())?.trim() === staffMembership.orgName &&
+          (await expiredPage.locator(".mp13-error").count()) === 0,
+        "expired Preview organization context falls back to the selected staff membership without supporter table errors",
       );
       await expiredContext.close();
     } finally {
