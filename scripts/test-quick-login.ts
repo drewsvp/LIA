@@ -15,7 +15,9 @@
 import { randomBytes } from "node:crypto";
 import { pool } from "../server/db/client";
 
-const BASE = "http://localhost:5000";
+const BASE =
+  process.env.TEST_BASE_URL ??
+  (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://127.0.0.1:5000");
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 

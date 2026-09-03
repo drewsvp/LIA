@@ -12,7 +12,9 @@ import { auth } from "../server/auth/auth";
 import { pool } from "../server/db/client";
 import { chromium } from "playwright";
 
-const BASE = process.env.TEST_BASE_URL ?? "http://127.0.0.1:5000";
+const BASE =
+  process.env.TEST_BASE_URL ??
+  (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://127.0.0.1:5000");
 const runId = `${process.pid}-${Date.now()}`;
 const marker = `zz_fixture_org_share_${runId}`;
 const fixtureEmails = [

@@ -7,7 +7,9 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "../server/db/client";
 
-const BASE = "http://127.0.0.1:5000";
+const BASE =
+  process.env.TEST_BASE_URL ??
+  (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://127.0.0.1:5000");
 const marker = `zz_fixture_engagement_${process.pid}`;
 const eventIds: string[] = [];
 let fixturePledgeId: string | null = null;
