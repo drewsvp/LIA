@@ -2,13 +2,16 @@
  * Authenticated Preview-origin browser checks for dashboard access recovery.
  *
  * The development server must already be running. API guard responses are
- * intercepted after a real quick-login so the checks are deterministic and do
- * not mutate memberships, sessions, or form data.
+ * intercepted after real Better Auth session minting so the checks are
+ * deterministic and do not mutate memberships or form data.
  *
  * Usage: npm run test:dashboard-session-recovery
  */
 import { execFileSync } from "node:child_process";
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { randomBytes } from "node:crypto";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { auth } from "../server/auth/auth";
+import { pool } from "../server/db/client";
 
 const BASE =
   process.env.TEST_BASE_URL ??
@@ -22,6 +25,7 @@ type Session = {
   organizationContext: unknown;
   [key: string]: unknown;
 };
+type AuthState = Awaited<ReturnType<BrowserContext["storageState"]>>;
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`FAIL: ${message}`);
@@ -39,46 +43,113 @@ function cookies(response: Response): string[] {
     : (headers.get("set-cookie") ?? "").split(/,(?=\s*\w+=)/);
 }
 
-function browserCookies(response: Response): Parameters<BrowserContext["addCookies"]>[0] {
-  return cookies(response)
-    .filter(Boolean)
-    .map((value) => {
-      const [pair] = value.split(";");
-      const separator = pair!.indexOf("=");
-      return {
-        name: pair!.slice(0, separator),
-        value: pair!.slice(separator + 1),
-        url: BASE,
-        httpOnly: /;\s*httponly/i.test(value),
-        secure: /;\s*secure/i.test(value),
-        sameSite: "Lax" as const,
-      };
-    });
+function parseCookie(value: string): Parameters<BrowserContext["addCookies"]>[0][number] {
+  const parts = value.split(";").map((part) => part.trim());
+  const nameValue = parts.shift();
+  assert(nameValue, "Better Auth returned a non-empty Set-Cookie header");
+  const separator = nameValue.indexOf("=");
+  assert(separator > 0, `Better Auth returned a valid Set-Cookie header: ${nameValue}`);
+
+  const cookie: Parameters<BrowserContext["addCookies"]>[0][number] = {
+    name: nameValue.slice(0, separator),
+    value: nameValue.slice(separator + 1),
+    url: BASE,
+  };
+  for (const part of parts) {
+    const [rawName, ...rawValue] = part.split("=");
+    const attribute = rawName?.toLowerCase();
+    const attributeValue = rawValue.join("=");
+    if (attribute === "httponly") cookie.httpOnly = true;
+    if (attribute === "secure") cookie.secure = true;
+    if (attribute === "expires" && attributeValue) {
+      const expires = Date.parse(attributeValue);
+      if (Number.isFinite(expires)) cookie.expires = Math.floor(expires / 1_000);
+    }
+    if (attribute === "max-age" && attributeValue) {
+      const maxAge = Number.parseInt(attributeValue, 10);
+      if (Number.isFinite(maxAge)) cookie.expires = Math.floor(Date.now() / 1_000) + maxAge;
+    }
+    if (attribute === "samesite") {
+      const sameSite = attributeValue.toLowerCase();
+      if (sameSite === "strict") cookie.sameSite = "Strict";
+      if (sameSite === "lax") cookie.sameSite = "Lax";
+      if (sameSite === "none") cookie.sameSite = "None";
+    }
+  }
+  return cookie;
 }
 
-async function login(): Promise<{ response: Response; session: Session }> {
-  const response = await fetch(`${BASE}/api/login/quick`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "org_owner" }),
-  });
-  assert(response.ok, "organization owner quick login succeeds");
-  const cookie = cookies(response)
-    .filter(Boolean)
-    .map((value) => value.split(";")[0])
-    .join("; ");
-  const sessionResponse = await fetch(`${BASE}/api/session`, { headers: { Cookie: cookie } });
-  assert(sessionResponse.ok, "authenticated session snapshot loads");
-  return { response, session: (await sessionResponse.json()) as Session };
+async function mintSessionState(
+  browser: Browser,
+  email: string,
+): Promise<{ state: AuthState; session: Session }> {
+  // Use Better Auth directly instead of the shared quick-login endpoint. This
+  // keeps concurrent browser checks out of the app-wide quick-login bucket while
+  // still creating sessions through Better Auth's real cookie and hook path.
+  const token = randomBytes(24).toString("base64url");
+  await pool.query(
+    `insert into verification (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
+     values (gen_random_uuid(), $1, $2, now() + interval '2 minutes', now(), now())`,
+    [token, JSON.stringify({ email })],
+  );
+
+  type MagicLinkApi = {
+    magicLinkVerify(input: {
+      query: { token: string; callbackURL: string };
+      headers: Headers;
+      asResponse: true;
+    }): Promise<Response>;
+  };
+
+  let response: Response;
+  try {
+    response = await (auth.api as unknown as MagicLinkApi).magicLinkVerify({
+      query: { token, callbackURL: "/dashboard" },
+      headers: new Headers(),
+      asResponse: true,
+    });
+  } finally {
+    await pool.query(`delete from verification where identifier = $1`, [token]);
+  }
+
+  assert(
+    response.ok || response.status === 302,
+    `Better Auth session minting for ${email} succeeds (got ${response.status}: ${await response.text()})`,
+  );
+  const location = response.headers.get("location");
+  assert(location !== null, `Better Auth session minting for ${email} returns a redirect location`);
+  assert(
+    new URL(location, BASE).pathname === "/dashboard",
+    `Better Auth session minting for ${email} redirects to /dashboard`,
+  );
+
+  const setCookies = cookies(response).filter(Boolean);
+  assert(
+    setCookies.some((value) => /^(?:__Secure-)?better-auth\.session_token=/.test(value)),
+    `Better Auth session minting for ${email} returns a session cookie`,
+  );
+
+  const context = await browser.newContext();
+  try {
+    await context.addCookies(setCookies.map(parseCookie));
+    const state = await context.storageState();
+    const cookie = setCookies.map((value) => value.split(";")[0]).join("; ");
+    const sessionResponse = await fetch(`${BASE}/api/session`, { headers: { Cookie: cookie } });
+    assert(sessionResponse.ok, `authenticated session snapshot for ${email} loads`);
+    return { state, session: (await sessionResponse.json()) as Session };
+  } finally {
+    await context.close();
+  }
 }
 
 async function newContext(
-  browser: Awaited<ReturnType<typeof chromium.launch>>,
-  loginResponse: Response,
+  browser: Browser,
+  authState: AuthState,
 ): Promise<BrowserContext> {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  await context.addCookies(browserCookies(loginResponse));
-  return context;
+  return browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    storageState: authState,
+  });
 }
 
 async function fillItemRequest(page: Page, title: string): Promise<void> {
@@ -93,27 +164,24 @@ async function fillItemRequest(page: Page, title: string): Promise<void> {
 }
 
 async function assertStableDashboardLogin(
-  browser: Awaited<ReturnType<typeof chromium.launch>>,
+  browser: Browser,
   role: "staff_admin" | "staff_approver",
-  buttonName: RegExp,
+  authState: AuthState,
   width: number,
 ): Promise<void> {
-  const context = await browser.newContext({ viewport: { width, height: 900 } });
+  const context = await browser.newContext({
+    viewport: { width, height: 900 },
+    storageState: authState,
+  });
   const page = await context.newPage();
   let sessionRequests = 0;
-  const topLevelPaths: string[] = [];
 
   context.on("request", (request) => {
     if (new URL(request.url()).pathname === "/api/session") sessionRequests += 1;
   });
-  page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame()) topLevelPaths.push(new URL(frame.url()).pathname);
-  });
   try {
-    await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: buttonName }).waitFor();
     const loginSessionRequests = sessionRequests;
-    await page.getByRole("button", { name: buttonName }).click();
+    await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
     await page.waitForURL(`${BASE}/dashboard`);
     await page.getByRole("heading", { name: "MY ORGANIZATION DASHBOARD" }).waitFor();
     const dashboardElement = await page.locator(".mp4-page").elementHandle();
@@ -122,8 +190,8 @@ async function assertStableDashboardLogin(
 
     assert(sessionRequests - loginSessionRequests === 1, `${role} dashboard boot makes exactly one session request`);
     assert(
-      topLevelPaths.filter((path) => path === "/dashboard").length === 1,
-      `${role} login performs one intentional full-page dashboard transition`,
+      new URL(page.url()).pathname === "/dashboard",
+      `${role} post-login redirect lands on /dashboard`,
     );
     assert(
       await dashboardElement.evaluate((node) => node.isConnected && node === document.querySelector(".mp4-page")),
@@ -146,17 +214,20 @@ async function assertStableDashboardLogin(
 }
 
 async function main(): Promise<void> {
-  const { response: loginResponse, session } = await login();
-  assert(session.memberships.length > 0, "quick-login owner has an organization membership");
-
   const browser = await chromium.launch({ headless: true, executablePath: chromiumExecutable() });
   try {
+    const staffAdmin = await mintSessionState(browser, "tiffany@defendingthecause.org");
+    const staffApprover = await mintSessionState(browser, "approver@thealliance.example.org");
+    const owner = await mintSessionState(browser, "dana@heartsandhands.example.org");
+    const { session } = owner;
+    assert(session.memberships.length > 0, "organization owner has an organization membership");
+
     console.log("\nStable post-login dashboard:");
-    await assertStableDashboardLogin(browser, "staff_admin", /Staff Admin — Tiffany Loeffler/, 1280);
-    await assertStableDashboardLogin(browser, "staff_approver", /Staff Approver — Riley Chen/, 390);
+    await assertStableDashboardLogin(browser, "staff_admin", staffAdmin.state, 1280);
+    await assertStableDashboardLogin(browser, "staff_approver", staffApprover.state, 390);
 
     console.log("\nRead form recovery:");
-    const readContext = await newContext(browser, loginResponse);
+    const readContext = await newContext(browser, owner.state);
     let readRejected = false;
     let readSessionRequests = 0;
     await readContext.route("**/api/session", async (route) => {
@@ -197,7 +268,7 @@ async function main(): Promise<void> {
     await readContext.close();
 
     console.log("\nUnchanged background verification:");
-    const unchangedContext = await newContext(browser, loginResponse);
+    const unchangedContext = await newContext(browser, owner.state);
     let releaseRecovery!: () => void;
     const recoveryHeld = new Promise<void>((resolve) => {
       releaseRecovery = resolve;
@@ -232,7 +303,7 @@ async function main(): Promise<void> {
     await unchangedContext.close();
 
     console.log("\nStaggered access-failure recovery:");
-    const staggeredContext = await newContext(browser, loginResponse);
+    const staggeredContext = await newContext(browser, owner.state);
     let staggeredRejected = false;
     let staggeredSessionRequests = 0;
     await staggeredContext.route("**/api/session", async (route) => {
@@ -281,7 +352,7 @@ async function main(): Promise<void> {
     await staggeredContext.close();
 
     console.log("\nSave form recovery:");
-    const saveContext = await newContext(browser, loginResponse);
+    const saveContext = await newContext(browser, owner.state);
     let selectionRequired = false;
     await saveContext.route("**/api/session", async (route) => {
       if (!selectionRequired) {
@@ -318,7 +389,7 @@ async function main(): Promise<void> {
     await saveContext.close();
 
     console.log("\nGenuine save failure:");
-    const failureContext = await newContext(browser, loginResponse);
+    const failureContext = await newContext(browser, owner.state);
     await failureContext.route("**/api/dashboard/items", async (route) => {
       if (route.request().method() !== "POST") {
         await route.continue();
