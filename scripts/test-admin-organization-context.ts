@@ -16,6 +16,7 @@ const BASE =
   process.env.TEST_BASE_URL ??
   (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://127.0.0.1:5000");
 const marker = `zz.admin-org-context.${process.pid}`;
+const ADMIN_ORG_CONTEXT_COOKIE = "lia_admin_org_context";
 const organizationIds: string[] = [];
 const requestIds: string[] = [];
 const membershipIds: string[] = [];
@@ -61,6 +62,13 @@ function mergeCookieHeader(existing: string, response: Response): string {
     jar.set(pair.slice(0, separator), pair);
   }
   return [...jar.values()].join("; ");
+}
+
+function removeCookie(cookie: string, name: string): string {
+  return cookie
+    .split("; ")
+    .filter((pair) => !pair.startsWith(`${name}=`))
+    .join("; ");
 }
 
 async function login(role: "staff_admin" | "staff_approver" | "org_owner"): Promise<string> {
@@ -592,6 +600,53 @@ async function main(): Promise<void> {
     }
     const afterExpiry = await enter(adminCookie, first.id);
     assert(afterExpiry.ok, "an expired context does not block entering another organization");
+    adminCookie = mergeCookieHeader(adminCookie, afterExpiry);
+    const activeBeforeCookieLoss = await session(adminCookie);
+    const orphanedContextId = activeBeforeCookieLoss.organizationContext?.id;
+    assert(typeof orphanedContextId === "string", "replacement fixture has an active context before cookie loss");
+
+    const parallelEntry = await enter(adminCookie, second.id);
+    assert(
+      parallelEntry.status === 404,
+      "a valid active context still blocks parallel organization-view entry",
+    );
+
+    const cookieLost = removeCookie(adminCookie, ADMIN_ORG_CONTEXT_COOKIE);
+    const recoveredEntry = await enter(cookieLost, second.id);
+    assert(recoveredEntry.ok, "staff can enter an organization after losing the context cookie");
+    adminCookie = mergeCookieHeader(cookieLost, recoveredEntry);
+    const recoveredSession = await session(adminCookie);
+    assert(
+      recoveredSession.organizationContext?.organizationId === second.id &&
+        recoveredSession.organizationContext?.id !== orphanedContextId,
+      "cookie-loss recovery starts a replacement organization context",
+    );
+    const recoveredContext = await pool.query<{ endedAt: string | null }>(
+      `select ended_at as "endedAt"
+         from admin_organization_contexts
+        where id = $1`,
+      [orphanedContextId],
+    );
+    const recoveryAudit = await pool.query<{
+      action: string;
+      actorUserId: string;
+      organizationId: string;
+    }>(
+      `select action, actor_user_id as "actorUserId", organization_id as "organizationId"
+         from organization_context_actions
+        where organization_context_id = $1`,
+      [orphanedContextId],
+    );
+    assert(
+      recoveredContext.rows[0]?.endedAt !== null &&
+        recoveryAudit.rows.some(
+          (row) =>
+            row.action === "recovered" &&
+            row.actorUserId === adminUserId &&
+            row.organizationId === first.id,
+        ),
+      "cookie-loss recovery closes and audits the orphaned context with the staff actor",
+    );
 
     const controls = readFileSync("client/src/components/OrganizationContext.tsx", "utf8");
     assert(

@@ -569,10 +569,22 @@ export function registerRoutes(app: Express): void {
         return;
       }
       const adminUserId = staffContext(req).userId;
+      const signedCookies = (req as Request & { signedCookies?: Record<string, string | false> }).signedCookies;
+      const contextCookie = signedCookies?.[ADMIN_ORG_CONTEXT_COOKIE];
+      // A missing cookie can strand a still-valid durable context. An
+      // unusable cookie is treated conservatively like a present cookie so
+      // tampering cannot turn an active view into a replacement request.
+      const currentContextId =
+        contextCookie === undefined
+          ? null
+          : typeof contextCookie === "string" && UUID_RE.test(contextCookie)
+            ? contextCookie
+            : "";
       const context = await dal.adminOrganizationContexts.start(
         { kind: "staff", userId: adminUserId },
         adminUserId,
         organizationId,
+        currentContextId,
       );
       res.cookie(ADMIN_ORG_CONTEXT_COOKIE, context.id, {
         httpOnly: true,

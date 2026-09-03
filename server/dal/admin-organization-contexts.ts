@@ -68,6 +68,7 @@ export async function start(
   ctx: DbContext,
   adminUserId: string,
   organizationId: string,
+  currentContextId: string | null = null,
 ): Promise<AdminOrganizationContext> {
   return withDbContext(ctx, async (c) => {
     const organizations = await q<{ id: string; name: string }>(
@@ -99,7 +100,21 @@ export async function start(
         existing.organizationKind === "member_org" &&
         existing.organizationStatus === "approved"
       ) {
-        throw new Error("ORGANIZATION_CONTEXT_ACTIVE");
+        if (currentContextId !== null) {
+          throw new Error("ORGANIZATION_CONTEXT_ACTIVE");
+        }
+        await c.query(
+          `update admin_organization_contexts set ended_at = now() where id = $1 and ended_at is null`,
+          [existing.id],
+        );
+        await insertAuditInTx(
+          c,
+          existing.id,
+          existing.organizationId,
+          adminUserId,
+          "recovered",
+        );
+        continue;
       }
       await c.query(
         `update admin_organization_contexts set ended_at = now() where id = $1 and ended_at is null`,
