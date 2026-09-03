@@ -1353,7 +1353,7 @@ export function RequestsPage() {
                     />
                   </p>
                   {(request.imageUrl === null || request.imageGenerated) && (
-                    <p className="adm-upload">
+                    <div className="adm-upload adm-image-actions">
                       <button
                         type="button"
                         className="adm-btn"
@@ -1363,7 +1363,7 @@ export function RequestsPage() {
                         }
                       >
                         {request.imageUrl ? "Regenerate auto image" : "Find an image automatically"}
-                      </button>{" "}
+                      </button>
                       {request.imageUrl !== null && request.imageGenerated && (
                         <button
                           type="button"
@@ -1376,7 +1376,7 @@ export function RequestsPage() {
                           Remove auto image
                         </button>
                       )}
-                    </p>
+                    </div>
                   )}
                 </div>
               )}
@@ -1737,14 +1737,14 @@ export function RequestsPage() {
 
               {/* Auto-sourced image controls — both kinds, never over an uploaded photo. */}
               {isEditable && (request.imageUrl === null || request.imageGenerated) && (
-                <p className="adm-upload">
+                <div className="adm-upload adm-image-actions">
                   <button
                     className="adm-btn"
                     disabled={busy}
                     onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/generate-image`)}
                   >
                     {request.imageUrl ? "Regenerate auto image" : "Find an image automatically"}
-                  </button>{" "}
+                  </button>
                   {request.imageUrl !== null && request.imageGenerated && (
                     <button
                       className="adm-btn"
@@ -1756,7 +1756,7 @@ export function RequestsPage() {
                       Remove auto image
                     </button>
                   )}
-                </p>
+                </div>
               )}
 
               {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}
@@ -1844,22 +1844,24 @@ export function RequestsPage() {
                     Unapprove {request.title}? It will leave public view immediately, return to Pending, and become
                     editable. No email is sent.
                   </p>
-                  <button
-                    className="adm-btn adm-btn-primary"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(
-                        `/api/admin/requests/${detail.type}/${request.id}/unapprove`,
-                        undefined,
-                        () => setTab("pending"),
-                      )
-                    }
-                  >
-                    Unapprove
-                  </button>
-                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
-                    Cancel
-                  </button>
+                  <div className="adm-btn-row">
+                    <button
+                      className="adm-btn adm-btn-primary"
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          `/api/admin/requests/${detail.type}/${request.id}/unapprove`,
+                          undefined,
+                          () => setTab("pending"),
+                        )
+                      }
+                    >
+                      Unapprove
+                    </button>
+                    <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1870,16 +1872,18 @@ export function RequestsPage() {
                     Approve {request.title}? This publishes the request and sends any approval email not already
                     delivered to {recipientsText}.
                   </p>
-                  <button
-                    className="adm-btn adm-btn-primary"
-                    disabled={busy}
-                    onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/approve`)}
-                  >
-                    Approve
-                  </button>
-                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
-                    Cancel
-                  </button>
+                  <div className="adm-btn-row">
+                    <button
+                      className="adm-btn adm-btn-primary"
+                      disabled={busy}
+                      onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/approve`)}
+                    >
+                      Approve
+                    </button>
+                    <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1887,16 +1891,18 @@ export function RequestsPage() {
                 <div className="adm-confirm">
                   {/* §8 verbatim. */}
                   <p>Archive {request.title}? It will stop appearing publicly. No email is sent.</p>
-                  <button
-                    className="adm-btn adm-btn-danger"
-                    disabled={busy}
-                    onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/archive`)}
-                  >
-                    Archive
-                  </button>
-                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
-                    Cancel
-                  </button>
+                  <div className="adm-btn-row">
+                    <button
+                      className="adm-btn adm-btn-danger"
+                      disabled={busy}
+                      onClick={() => void act(`/api/admin/requests/${detail.type}/${request.id}/archive`)}
+                    >
+                      Archive
+                    </button>
+                    <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1911,7 +1917,7 @@ export function RequestsPage() {
                     rows={4}
                     aria-label="Return-to-draft note"
                   />
-                  <div>
+                  <div className="adm-btn-row">
                     <button
                       className="adm-btn adm-btn-primary"
                       disabled={busy || note.trim() === ""}

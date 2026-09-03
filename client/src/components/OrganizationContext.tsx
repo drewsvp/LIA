@@ -82,12 +82,14 @@ export function OrganizationLoginAsControls({
           <p>
             Enter organization view for {pending.name}? You will leave staff administration until you exit this view.
           </p>
-          <button type="button" className="adm-btn adm-btn-primary" disabled={busy} onClick={() => void enter()}>
-            {busy ? "Entering…" : "Enter organization view"}
-          </button>
-          <button type="button" className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setPending(null)}>
-            Cancel
-          </button>
+          <div className="adm-btn-row">
+            <button type="button" className="adm-btn adm-btn-primary" disabled={busy} onClick={() => void enter()}>
+              {busy ? "Entering…" : "Enter organization view"}
+            </button>
+            <button type="button" className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setPending(null)}>
+              Cancel
+            </button>
+          </div>
         </div>
       ) : null}
     </section>

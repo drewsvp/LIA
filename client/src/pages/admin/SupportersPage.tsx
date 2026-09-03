@@ -351,10 +351,12 @@ export function SupportersPage(): ReactElement {
                         ? "Disable this supporter account? They will be signed out and unable to request new sign-in links."
                         : "Reactivate this supporter account? They will be able to sign in again."}
                   </p>
-                  <button className="adm-btn adm-btn-primary" disabled={busy} onClick={() => void runAction()}>
-                    {busy ? "Saving…" : "Confirm"}
-                  </button>
-                  <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
+                  <div className="adm-btn-row">
+                    <button className="adm-btn adm-btn-primary" disabled={busy} onClick={() => void runAction()}>
+                      {busy ? "Saving…" : "Confirm"}
+                    </button>
+                    <button className="adm-btn adm-btn-outline" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
+                  </div>
                 </div>
               ) : null}
 

@@ -184,7 +184,7 @@ export function PopulationsPage() {
                             <span className="adm-muted" style={{ fontSize: 12 }}>
                               {RENAME_NOTE}
                             </span>
-                            <div style={{ display: "flex", gap: 6 }}>
+                            <div className="adm-btn-row">
                               <button
                                 className="adm-btn adm-btn-primary"
                                 disabled={busy || renameValue.trim() === "" || renameValue.trim() === p.name}
@@ -260,7 +260,7 @@ export function PopulationsPage() {
                             Deactivate {p.name}? {p.orgCount} organizations already using it keep it. New organizations
                             will not see it as an option.
                           </p>
-                          <div style={{ display: "flex", gap: 6 }}>
+                          <div className="adm-btn-row">
                             <button
                               className="adm-btn adm-btn-primary"
                               disabled={busy}

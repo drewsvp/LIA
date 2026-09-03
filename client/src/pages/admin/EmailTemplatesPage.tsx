@@ -536,7 +536,7 @@ export function EmailTemplatesPage(): ReactElement {
                     {row.authInfrastructure ? (
                       <span className="adm-status-always-on">Always on</span>
                     ) : confirmToggleKey === row.key ? (
-                      <span className="adm-status-confirm" onClick={(e) => e.stopPropagation()}>
+                      <span className="adm-status-confirm adm-btn-row" onClick={(e) => e.stopPropagation()}>
                         <span className="adm-status-confirm-text">
                           {row.enabled ? "Turn off this email?" : "Turn on this email?"}
                         </span>
@@ -1012,7 +1012,7 @@ function BrandingPanel(): ReactElement {
             </span>
             {headerInputMode === "upload" ? (
               <div style={{ marginTop: 4 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div className="adm-btn-row">
                   <button
                     type="button"
                     className="adm-btn adm-btn-outline"

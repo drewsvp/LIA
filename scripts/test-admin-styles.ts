@@ -124,6 +124,57 @@ async function assertCenteredAction(page: Page, selector: string, label: string)
   });
 }
 
+async function actionGroupLayout(page: Page, selector: string): Promise<{
+  display: string;
+  flexWrap: string;
+  gap: number;
+  buttonCount: number;
+  labels: string[];
+  separated: boolean;
+  contained: boolean;
+}> {
+  await page.locator(selector).first().waitFor({ state: "visible", timeout: 15_000 });
+  return page.locator(selector).first().evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    const groupRect = element.getBoundingClientRect();
+    const buttons = Array.from(element.children).filter(
+      (child): child is HTMLElement => child instanceof HTMLElement && child.matches("button, a"),
+    );
+    const rects = buttons.map((button) => button.getBoundingClientRect());
+    return {
+      display: style.display,
+      flexWrap: style.flexWrap,
+      gap: parseFloat(style.columnGap || style.gap),
+      buttonCount: buttons.length,
+      labels: buttons.map((button) => button.textContent?.trim() ?? ""),
+      separated: rects.every((current, index) => {
+        if (index === 0) return true;
+        const previous = rects[index - 1]!;
+        return current.left - previous.right >= 8 || current.top - previous.bottom >= 8;
+      }),
+      contained:
+        groupRect.left >= -1 &&
+        groupRect.right <= window.innerWidth + 1 &&
+        rects.every((rect) => rect.left >= groupRect.left - 1 && rect.right <= groupRect.right + 1),
+    };
+  });
+}
+
+function checkActionGroup(
+  label: string,
+  layout: Awaited<ReturnType<typeof actionGroupLayout>>,
+  minimumButtons = 2,
+): void {
+  check(label, () => {
+    assert(layout.display === "flex" || layout.display === "inline-flex", "Action group must use flex layout.", layout);
+    assert(layout.flexWrap === "wrap", "Action group must wrap.", layout);
+    assert(layout.gap >= 8, "Action group must keep a visible gap.", layout);
+    assert(layout.buttonCount >= minimumButtons, "Action group must contain representative adjacent actions.", layout);
+    assert(layout.separated, "Adjacent actions must not touch.", layout);
+    assert(layout.contained, "Action group and its buttons must stay inside the viewport.", layout);
+  });
+}
+
 async function checkCenteredMemberActions(browser: Awaited<ReturnType<typeof chromium.launch>>): Promise<void> {
   console.log("\nCentered member form actions");
 
@@ -140,6 +191,19 @@ async function checkCenteredMemberActions(browser: Awaited<ReturnType<typeof chr
   const memberPage = await owner.newPage();
   await memberPage.goto(`${BASE}/dashboard/organization`, { waitUntil: "domcontentloaded" });
   await assertCenteredAction(memberPage, ".mp5-submit", "member settings submit remains centered with shared geometry");
+  const removableOption = memberPage.locator(".mp5-team-select option").filter({ hasNotText: "Click to see" }).first();
+  if (await removableOption.count() > 0) {
+    await memberPage.locator(".mp5-team-select").selectOption(await removableOption.getAttribute("value") ?? "");
+    const removeButton = memberPage.getByRole("button", { name: "Remove User", exact: true });
+    if (await removeButton.isEnabled()) {
+      await removeButton.click();
+      const memberConfirm = await actionGroupLayout(memberPage, ".mp5-confirm-actions");
+      checkActionGroup("member removal confirmation keeps shared spacing", memberConfirm);
+      await memberPage.getByRole("button", { name: "Cancel", exact: true }).click();
+    } else {
+      console.log("  – no removable seeded member; skipping member confirmation layout check.");
+    }
+  }
   await owner.close();
 }
 
@@ -421,36 +485,40 @@ async function checkRequestsPage(page: Page): Promise<void> {
     });
   }
 
-  const firstRow = page.locator("tr.adm-row").first();
-  if (await firstRow.count() > 0) {
-    await firstRow.click();
+  const requestRows = page.locator("tr.adm-row");
+  assert(await requestRows.count() > 0, "Seeded pending requests are required for the action-spacing regression check.");
+  let fourButtonRowFound = false;
+  for (let index = 0; index < await requestRows.count(); index += 1) {
+    await requestRows.nth(index).click();
     const actionRow = page.locator(".adm-detail .adm-actions").first();
-    await actionRow.waitFor({ state: "visible", timeout: 10_000 }).catch(() => undefined);
-    if (await actionRow.count() > 0) {
-      const desktopActions = await actionRow.evaluate((element) => {
-        const style = window.getComputedStyle(element);
-        const buttons = Array.from(element.querySelectorAll<HTMLElement>(".adm-btn"));
-        return {
-          gap: parseFloat(style.columnGap || style.gap),
-          flexWrap: style.flexWrap,
-          buttonCount: buttons.length,
-          separated: buttons.every((button, index) => {
-            if (index === 0) return true;
-            const previous = buttons[index - 1]!.getBoundingClientRect();
-            const current = button.getBoundingClientRect();
-            return current.left - previous.right >= 8 || current.top - previous.bottom >= 8;
-          }),
-        };
-      });
-      check("request action buttons have deliberate spacing and wrapping", () => {
-        assert(desktopActions.flexWrap === "wrap", "Request actions must wrap.", desktopActions);
-        assert(desktopActions.gap >= 8, "Request actions must have a visible gap.", desktopActions);
-        assert(desktopActions.buttonCount > 0 && desktopActions.separated, "Request actions must not appear fused.", desktopActions);
-      });
+    await actionRow.waitFor({ state: "visible", timeout: 10_000 });
+    const labels = await actionRow.locator(":scope > .adm-btn").allTextContents();
+    if (["Edit Request", "Approve", "Return to draft", "Archive"].every((label) => labels.some((text) => text.trim() === label))) {
+      fourButtonRowFound = true;
+      break;
     }
   }
+  assert(fourButtonRowFound, "Expected a seeded pending request with Edit Request, Approve, Return to draft, and Archive.");
+
+  const desktopActions = await actionGroupLayout(page, ".adm-detail .adm-actions");
+  checkActionGroup("reported four-button request row has deliberate spacing and wrapping", desktopActions, 4);
+  check("reported request row contains all four lifecycle actions", () => {
+    assert(
+      ["Edit Request", "Approve", "Return to draft", "Archive"].every((label) => desktopActions.labels.includes(label)),
+      "The representative request row must exercise all four reported actions.",
+      desktopActions,
+    );
+  });
+
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  const desktopConfirm = await actionGroupLayout(page, ".adm-confirm .adm-btn-row");
+  checkActionGroup("request destructive confirmation uses the shared action row", desktopConfirm);
 
   await page.setViewportSize({ width: 375, height: 800 });
+  const mobileActions = await actionGroupLayout(page, ".adm-detail .adm-actions");
+  checkActionGroup("request action row wraps and remains contained on mobile", mobileActions, 4);
+  const mobileConfirm = await actionGroupLayout(page, ".adm-confirm .adm-btn-row");
+  checkActionGroup("request confirmation wraps and remains contained on mobile", mobileConfirm);
   const mobileLayout = await page.evaluate(() => {
     const group = document.querySelector<HTMLElement>('.adm-filter[role="group"]');
     const actions = document.querySelector<HTMLElement>(".adm-detail .adm-actions");
@@ -473,7 +541,11 @@ async function checkRequestsPage(page: Page): Promise<void> {
     );
   });
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
+  // Restore keyboard modality after the pointer-driven request checks so
+  // Chromium applies :focus-visible when the synthetic pager receives focus.
+  await page.keyboard.press("Tab");
   const compactPager = await page.evaluate(() => {
     const button = document.createElement("button");
     button.type = "button";

@@ -315,16 +315,18 @@ export function MembersPage() {
                     Approve {personName} at {detail.organization.name}? They will receive login information at{" "}
                     {person.email}.
                   </p>
-                  <button
-                    className="adm-btn adm-btn-primary"
-                    disabled={busy}
-                    onClick={() => void act(`/api/admin/members/${detail.membership.id}/approve`)}
-                  >
-                    Approve
-                  </button>
-                  <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
-                    Cancel
-                  </button>
+                  <div className="adm-btn-row">
+                    <button
+                      className="adm-btn adm-btn-primary"
+                      disabled={busy}
+                      onClick={() => void act(`/api/admin/members/${detail.membership.id}/approve`)}
+                    >
+                      Approve
+                    </button>
+                    <button className="adm-btn" disabled={busy} onClick={() => setConfirm(null)}>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -342,7 +344,7 @@ export function MembersPage() {
                     placeholder="Optional note for the audit trail"
                     aria-label="Optional rejection note"
                   />
-                  <div>
+                  <div className="adm-btn-row">
                     <button
                       className="adm-btn adm-btn-primary"
                       disabled={busy}

@@ -209,5 +209,63 @@ for REQUIRED_SELECTOR in ".ui-btn" ".ui-btn-secondary" ".ui-btn-selected" ".ui-b
 done
 echo "  PASS: shared base, secondary, selected, and destructive selectors are present."
 
+if ! python - "$CSS_FILE" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+css = Path(sys.argv[1]).read_text()
+required = {
+    ".adm-actions",
+    ".adm-btn-row",
+    ".adm-child-actions",
+    ".adm-image-actions",
+    ".adm-report-actions",
+    ".mp5-confirm-actions",
+    ".mp8-buttons",
+}
+matching = []
+for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+    selector_text = re.sub(r"/\*.*?\*/", "", match.group(1), flags=re.S)
+    selectors = {part.strip() for part in selector_text.split(",")}
+    if required <= selectors:
+        matching.append((match.start(), match.group(2)))
+
+if not matching:
+    print("  FAIL: conventional action wrappers no longer share one authoritative layout rule.")
+    raise SystemExit(1)
+
+layout_rules = [
+    (position, declarations)
+    for position, declarations in matching
+    if re.search(r"(?:^|;)\s*display\s*:\s*flex\s*(?:;|$)", declarations)
+]
+if not layout_rules:
+    print("  FAIL: shared action wrappers must use display: flex.")
+    raise SystemExit(1)
+
+position, declarations = layout_rules[-1]
+if re.search(r"(?:^|;)\s*flex-wrap\s*:\s*wrap\s*(?:;|$)", declarations) is None:
+    print("  FAIL: shared action wrappers must use flex-wrap: wrap.")
+    raise SystemExit(1)
+gap_match = re.search(r"(?:^|;)\s*gap\s*:\s*([\d.]+)px\s*(?:;|$)", declarations)
+gap = re.fullmatch(r"([\d.]+)px", f"{gap_match.group(1)}px") if gap_match else None
+if gap is None or float(gap.group(1)) < 8:
+    print("  FAIL: shared action wrappers must keep a visible gap of at least 8px.")
+    raise SystemExit(1)
+
+# The contract must occur after the legacy admin declarations; otherwise a
+# later page rule can silently replace it in the runtime cascade.
+legacy_position = css.rfind(".adm-actions {", 0, position)
+if legacy_position < 0:
+    print("  FAIL: shared action contract must follow the legacy .adm-actions rule.")
+    raise SystemExit(1)
+
+print("  PASS: shared action wrappers keep an authoritative gap and wrapping rule.")
+PY
+then
+  exit 1
+fi
+
 echo ""
 echo "lint-adm-btn: OK — CSS combined-selector check passed."

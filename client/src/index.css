@@ -1337,27 +1337,6 @@ a.site-nav-btn {
   transition-property: border-color, color, box-shadow;
 }
 
-/* Every action row has a deliberate gap and can wrap instead of fusing or
-   pushing the detail panel wider than the viewport. */
-.adm-actions,
-.adm-btn-row,
-.adm-child-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.adm-confirm > .adm-btn,
-.org-context-confirm > .adm-btn {
-  margin: 5px 0 0;
-}
-
-.adm-confirm .adm-btn-outline,
-.org-context-confirm .adm-btn-outline {
-  margin-left: 0;
-}
-
 .mp1-quick-btn {
   width: 100%;
   justify-content: flex-start;
@@ -1367,17 +1346,6 @@ a.site-nav-btn {
 }
 
 @media (max-width: 600px) {
-  .adm-actions,
-  .adm-btn-row,
-  .adm-child-actions {
-    align-items: stretch;
-  }
-
-  .adm-actions > .adm-btn,
-  .adm-btn-row > .adm-btn {
-    flex: 1 1 auto;
-  }
-
   .adm-filter[role="group"] .adm-filterbtn {
     flex: 1 1 auto;
   }
@@ -3556,7 +3524,6 @@ a.site-nav-btn {
 }
 .org-context-row:last-child { border-bottom: 0; }
 .org-context-confirm { margin-top: 14px; max-width: 680px; }
-.org-context-confirm .adm-btn-outline { margin-left: 8px; }
 @media (max-width: 600px) {
   .org-context-row { align-items: flex-start; flex-direction: column; }
 }
@@ -4747,6 +4714,65 @@ a.site-nav-btn {
 .mp5-confirm-actions .mp5-remove-btn {
   display: inline-flex;
   margin: 0;
+}
+
+/* Keep conventional adjacent actions on one authoritative layout contract.
+   This final rule intentionally follows legacy page styles so later aliases
+   cannot erase the visible separation or responsive wrapping. Purpose-built
+   tabs, menus, pagination controls, and editor toolbars are not included. */
+.adm-actions,
+.adm-btn-row,
+.adm-child-actions,
+.adm-image-actions,
+.adm-report-actions,
+.mp5-confirm-actions,
+.mp8-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.adm-actions > .adm-btn,
+.adm-btn-row > .adm-btn,
+.adm-child-actions > .adm-btn,
+.adm-image-actions > .adm-btn,
+.mp5-confirm-actions > button,
+.mp8-buttons > button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.adm-confirm > .adm-btn-row {
+  margin-top: 5px;
+}
+
+.adm-status-confirm.adm-btn-row {
+  display: inline-flex;
+}
+
+@media (max-width: 600px) {
+  .adm-actions,
+  .adm-btn-row,
+  .adm-child-actions,
+  .adm-image-actions,
+  .adm-report-actions,
+  .mp5-confirm-actions,
+  .mp8-buttons {
+    align-items: stretch;
+  }
+
+  .adm-actions > .adm-btn,
+  .adm-btn-row > .adm-btn,
+  .adm-child-actions > .adm-btn,
+  .adm-image-actions > .adm-btn,
+  .mp5-confirm-actions > button,
+  .mp8-buttons > button {
+    flex: 1 1 auto;
+    white-space: normal;
+  }
 }
 
 /* MP-11 keeps both form actions as compact, centered flex items. The shared

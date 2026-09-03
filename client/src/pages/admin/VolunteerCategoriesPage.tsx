@@ -373,14 +373,14 @@ export function VolunteerCategoriesPage() {
                   <tr key={category.id} className="adm-row">
                     <td>
                       {renameId === category.id ? (
-                        <span>
+                        <span className="adm-btn-row">
                           <input
                             aria-label={`New name for ${category.name}`}
                             value={renameName}
                             maxLength={120}
                             disabled={busy}
                             onChange={(event) => setRenameName(event.target.value)}
-                          />{" "}
+                          />
                           <button
                             className="adm-btn adm-btn-primary"
                             disabled={busy || renameName.trim() === "" || renameName.trim() === category.name}
@@ -397,7 +397,7 @@ export function VolunteerCategoriesPage() {
                             }}
                           >
                             Save
-                          </button>{" "}
+                          </button>
                           <button className="adm-btn" disabled={busy} onClick={() => setRenameId(null)}>
                             Cancel
                           </button>
@@ -412,7 +412,7 @@ export function VolunteerCategoriesPage() {
                     <td>{category.isActive ? "Active" : <strong>Inactive</strong>}</td>
                     <td>
                       {renameId !== category.id && (
-                        <>
+                        <div className="adm-btn-row">
                           <button
                             className="adm-btn"
                             disabled={busy}
@@ -423,7 +423,7 @@ export function VolunteerCategoriesPage() {
                             }}
                           >
                             Rename
-                          </button>{" "}
+                          </button>
                           <button
                             className="adm-btn"
                             disabled={busy}
@@ -437,7 +437,7 @@ export function VolunteerCategoriesPage() {
                           >
                             {category.isActive ? "Deactivate" : "Reactivate"}
                           </button>
-                        </>
+                        </div>
                       )}
                     </td>
                   </tr>

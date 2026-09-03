@@ -392,24 +392,26 @@ export function PeopleReviewPage() {
                 <div className="adm-confirm">
                   {/* §8 verbatim. */}
                   <p>Clear the review flag on {fullName(person)}?</p>
-                  <button
-                    className="adm-btn adm-btn-primary"
-                    disabled={busy}
-                    onClick={() => {
-                      void (async () => {
-                        const ok = await act(`/api/admin/people/review/${person.id}/clear-flag`);
-                        if (ok) {
-                          setConfirmClear(false);
-                          setSelectedId(null);
-                        }
-                      })();
-                    }}
-                  >
-                    Clear flag
-                  </button>
-                  <button className="adm-btn" disabled={busy} onClick={() => setConfirmClear(false)}>
-                    Cancel
-                  </button>
+                  <div className="adm-btn-row">
+                    <button
+                      className="adm-btn adm-btn-primary"
+                      disabled={busy}
+                      onClick={() => {
+                        void (async () => {
+                          const ok = await act(`/api/admin/people/review/${person.id}/clear-flag`);
+                          if (ok) {
+                            setConfirmClear(false);
+                            setSelectedId(null);
+                          }
+                        })();
+                      }}
+                    >
+                      Clear flag
+                    </button>
+                    <button className="adm-btn" disabled={busy} onClick={() => setConfirmClear(false)}>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
 

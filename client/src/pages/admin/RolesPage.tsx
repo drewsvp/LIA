@@ -449,20 +449,22 @@ export function RolesPage() {
                      : " They will lose access through this membership."}
                </p>
             )}
-             <button
-               className="adm-btn adm-btn-primary"
-               disabled={busy || isSelfDemotion || isSelfRemoval}
-               onClick={() => void confirmChange()}
-             >
-               {isAllianceInviteConversion
-                 ? "Convert to Staff approver"
-                 : pending.kind === "role"
-                   ? "Change role"
-                   : "Change status"}
-            </button>
-            <button className="adm-btn" disabled={busy} onClick={() => setPending(null)}>
-              Cancel
-            </button>
+            <div className="adm-btn-row">
+              <button
+                className="adm-btn adm-btn-primary"
+                disabled={busy || isSelfDemotion || isSelfRemoval}
+                onClick={() => void confirmChange()}
+              >
+                {isAllianceInviteConversion
+                  ? "Convert to Staff approver"
+                  : pending.kind === "role"
+                    ? "Change role"
+                    : "Change status"}
+              </button>
+              <button className="adm-btn" disabled={busy} onClick={() => setPending(null)}>
+                Cancel
+              </button>
+            </div>
           </div>
         );
       })()}
