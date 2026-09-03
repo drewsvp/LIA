@@ -22,8 +22,11 @@ export type SessionWithOrganizationContext = SessionInfo & {
 export function useSession(): {
   session: SessionWithOrganizationContext | undefined;
   isLoading: boolean;
+  isFetching: boolean;
   isError: boolean;
 } {
-  const { data, isLoading, isError } = useQuery<SessionWithOrganizationContext>({ queryKey: ["/api/session"] });
-  return { session: data, isLoading, isError };
+  const { data, isLoading, isFetching, isError } = useQuery<SessionWithOrganizationContext>({
+    queryKey: ["/api/session"],
+  });
+  return { session: data, isLoading, isFetching, isError };
 }

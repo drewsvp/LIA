@@ -91,22 +91,39 @@ function OrgChooser({
 }
 
 export function DashboardGate({ children }: { children: ReactNode }): ReactElement | null {
-  const { session, isLoading, isError } = useSession();
+  const { session, isLoading, isFetching, isError } = useSession();
   const queryClient = useQueryClient();
   const [location] = useLocation();
   const search = useSearch();
+  const [verifiedLocation, setVerifiedLocation] = useState<string | null>(null);
 
   // Fresh membership check on every dashboard navigation (§12: removal takes
   // effect on the next request). Server guards enforce the same per API call.
   useEffect(() => {
-    void queryClient.invalidateQueries({ queryKey: ["/api/session"] });
+    let current = true;
+    setVerifiedLocation(null);
+    void queryClient
+      .invalidateQueries({ queryKey: ["/api/session"] })
+      .then(() => {
+        if (current) setVerifiedLocation(location);
+      });
+    return () => {
+      current = false;
+    };
   }, [location, queryClient]);
 
-  if (isLoading) return null;
+  if (isLoading || isFetching || verifiedLocation !== location) return null;
   if (isError) return <StatedError />;
   if (!session?.authenticated) {
     const error = new URLSearchParams(search).get("error");
     return <Redirect to={error ? `/login?error=${encodeURIComponent(error)}` : "/login"} replace />;
+  }
+  // Staff may use member routes only while a durable organization view is
+  // active. If that context expires or is revoked, return them to the existing
+  // organization-selection surface instead of mounting the dashboard and
+  // misreporting the resulting 403 as two request-list failures.
+  if (session.isStaff && session.organizationContext === null) {
+    return <Redirect to="/admin/organizations" replace />;
   }
   // Staff organization view is deliberately valid without a membership in the
   // target organization; the server scopes dashboard APIs to this context.

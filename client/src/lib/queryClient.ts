@@ -4,13 +4,23 @@
  */
 import { QueryClient } from "@tanstack/react-query";
 
+export class ApiResponseError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`${status}: ${body}`);
+    this.name = "ApiResponseError";
+  }
+}
+
 async function defaultQueryFn({ queryKey }: { queryKey: readonly unknown[] }): Promise<unknown> {
   const url = queryKey[0];
   if (typeof url !== "string") throw new Error("Query key must start with a URL string");
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+    throw new ApiResponseError(res.status, body);
   }
   return res.json();
 }

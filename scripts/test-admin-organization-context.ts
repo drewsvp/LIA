@@ -291,6 +291,16 @@ async function main(): Promise<void> {
       const page = await context.newPage();
       await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
       assert(await page.getByLabel("Organization view").isVisible(), "organization-view banner is rendered");
+      assert(
+        (await page.locator("select").nth(0).locator("option").filter({ hasText: `${marker} request` }).count()) === 1 &&
+          (await page
+            .locator("select")
+            .nth(1)
+            .locator("option")
+            .filter({ hasText: `${marker} volunteer request` })
+            .count()) === 1,
+        "Preview-origin staff organization view loads both populated request selectors",
+      );
       await page.reload({ waitUntil: "networkidle" });
       assert(await page.getByLabel("Organization view").isVisible(), "organization context survives a full reload without client cache");
       assert(
@@ -361,6 +371,24 @@ async function main(): Promise<void> {
     );
     const expired = await session(adminCookie);
     assert(expired.organizationContext === null, "server expiry invalidates a context even if its cookie remains");
+    const expiredBrowser = await chromium.launch({
+      headless: true,
+      executablePath: execFileSync("which", ["chromium"], { encoding: "utf8" }).trim(),
+    });
+    try {
+      const expiredContext = await expiredBrowser.newContext();
+      await expiredContext.addCookies(browserCookies(adminCookie));
+      const expiredPage = await expiredContext.newPage();
+      await expiredPage.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+      assert(
+        new URL(expiredPage.url()).pathname === "/admin/organizations" &&
+          (await expiredPage.getByRole("alert").filter({ hasText: "requests could not be loaded" }).count()) === 0,
+        "expired Preview organization context returns staff to organization selection without list errors",
+      );
+      await expiredContext.close();
+    } finally {
+      await expiredBrowser.close();
+    }
     const afterExpiry = await enter(adminCookie, first.id);
     assert(afterExpiry.ok, "an expired context does not block entering another organization");
 

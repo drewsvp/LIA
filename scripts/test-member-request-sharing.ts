@@ -331,6 +331,20 @@ async function main(): Promise<void> {
   try {
     const context = await browser.newContext();
     await context.addCookies(browserCookies(teammate.cookie));
+    const actualPage = await context.newPage();
+    const overviewResponse = actualPage.waitForResponse(
+      (response) => response.url() === `${BASE}/api/dashboard/overview`,
+    );
+    await actualPage.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+    check(
+      (await overviewResponse).status() === 200 &&
+        (await actualPage.locator("select").nth(0).locator("option").filter({ hasText: marker }).count()) === 4 &&
+        (await actualPage.locator("select").nth(1).locator("option").filter({ hasText: marker }).count()) === 4 &&
+        (await actualPage.getByRole("alert").filter({ hasText: "requests could not be loaded" }).count()) === 0,
+      "Preview-origin member dashboard loads both populated request selectors",
+    );
+    await actualPage.close();
+
     await context.route("**/api/dashboard/overview", async (route) => {
       await route.fulfill({
         status: 200,
@@ -352,7 +366,59 @@ async function main(): Promise<void> {
         (await page.getByRole("alert").filter({ hasText: "Item requests could not be loaded" }).count()) === 0,
       "dashboard keeps a successful list usable and names only the failed request type",
     );
+    await page.close();
+    await context.unroute("**/api/dashboard/overview");
+
+    await context.route("**/api/dashboard/overview", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          org: { name: "Fixture Organization", logoUrl: null },
+          itemRequests: [],
+          itemRequestsError: true,
+          volunteerRequests: [
+            {
+              id: activeVolunteerId,
+              title: `${marker} volunteer active`,
+              createdAt: new Date().toISOString(),
+              status: "active",
+            },
+          ],
+          volunteerRequestsError: false,
+        }),
+      });
+    });
+    const itemFailurePage = await context.newPage();
+    await itemFailurePage.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+    check(
+      (await itemFailurePage
+        .locator("select")
+        .nth(0)
+        .locator("option")
+        .filter({ hasText: `${marker} volunteer active` })
+        .count()) === 1 &&
+        (await itemFailurePage.getByRole("alert").filter({ hasText: "Item requests could not be loaded" }).count()) ===
+          1 &&
+        (await itemFailurePage
+          .getByRole("alert")
+          .filter({ hasText: "Volunteer requests could not be loaded" })
+          .count()) === 0,
+      "dashboard keeps a successful volunteer list usable when only item requests fail",
+    );
+    await itemFailurePage.close();
     await context.close();
+
+    const anonymousContext = await browser.newContext();
+    const anonymousPage = await anonymousContext.newPage();
+    await anonymousPage.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+    check(
+      new URL(anonymousPage.url()).pathname === "/login" &&
+        (await anonymousPage.getByRole("alert").filter({ hasText: "requests could not be loaded" }).count()) === 0,
+      "missing Preview authentication recovers at login without request-list errors",
+      anonymousPage.url(),
+    );
+    await anonymousContext.close();
   } finally {
     await browser.close();
   }
