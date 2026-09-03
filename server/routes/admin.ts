@@ -1401,7 +1401,8 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   // ---- §6 Approve: one-tx bundle (status + stamps + one event + email rows),
-  // dispatch after commit, result message never claims a send that failed.
+  // dispatch after commit but before responding, so the result never claims a
+  // matching alert is queued while its delivery outcome is still unknown.
   app.post("/api/admin/requests/:type/:id/approve", requireStaff, async (req: Request, res: Response) => {
     const kind = parseKind(req.params.type);
     const id = req.params.id ?? "";
@@ -1455,19 +1456,57 @@ export function registerAdminRoutes(app: Express): void {
           message += ` The approval email is disabled under Automated emails, so the copy to ${skippedEmails.join(" and ")} was skipped (logged in the Email log).`;
         }
       }
-      // Matching volunteer alerts (volunteer requests only).
+      // Matching volunteer alerts (volunteer requests only). These are
+      // dispatched before the response so staff and automated callers can
+      // immediately inspect a terminal Email-log outcome.
       const matchingDispatches = (result.matchingVolunteerAlerts ?? [])
         .filter(
           (alert): alert is Extract<MatchingVolunteerAlert, { outcome: "queued" }> =>
             alert.outcome === "queued",
         )
         .map((alert) => alert.dispatch);
+      const matchingSent: string[] = [];
+      const matchingRetryableFailed: string[] = [];
+      const matchingUnknownOutcome: string[] = [];
+      const matchingStillProcessing: string[] = [];
+      if (matchingDispatches.length > 0) {
+        await dispatchQueuedEmails(matchingDispatches);
+        const recordedRows = await Promise.all(
+          matchingDispatches.map((dispatch) => dal.emailLog.getById(SYSTEM, dispatch.emailLogId)),
+        );
+        matchingDispatches.forEach((dispatch, i) => {
+          const row = recordedRows[i];
+          if (row?.status === "sent") {
+            matchingSent.push(dispatch.toEmail);
+          } else if (row?.status === "failed") {
+            if (row.providerMessageId || row.error?.includes(MAY_HAVE_SENT_MARKER)) {
+              matchingUnknownOutcome.push(dispatch.toEmail);
+            } else {
+              matchingRetryableFailed.push(dispatch.toEmail);
+            }
+          } else {
+            matchingStillProcessing.push(dispatch.toEmail);
+          }
+        });
+      }
       const matchingSkipped = (result.matchingVolunteerAlerts ?? []).filter(
         (alert) => alert.outcome === "skipped_disabled",
       ).length;
       const matchingBlocked = (result.matchingVolunteerAlerts ?? []).filter((alert) => alert.outcome === "blocked").length;
-      if (matchingDispatches.length > 0) {
-        message += ` ${matchingDispatches.length} matching volunteer alert${matchingDispatches.length === 1 ? "" : "s"} queued.`;
+      const matchingAlreadyClaimed = (result.matchingVolunteerAlerts ?? []).filter(
+        (alert) => alert.outcome === "already_claimed",
+      ).length;
+      if (matchingSent.length > 0) {
+        message += ` ${matchingSent.length} matching volunteer alert${matchingSent.length === 1 ? "" : "s"} sent.`;
+      }
+      if (matchingRetryableFailed.length > 0) {
+        message += ` ${matchingRetryableFailed.length} matching volunteer alert${matchingRetryableFailed.length === 1 ? "" : "s"} failed to send — ${matchingRetryableFailed.length === 1 ? "the failure is" : "the failures are"} logged in the Email log and can be resent there.`;
+      }
+      if (matchingUnknownOutcome.length > 0) {
+        message += ` ${matchingUnknownOutcome.length} matching volunteer alert${matchingUnknownOutcome.length === 1 ? " has" : "s have"} an unknown provider outcome — review the Email log and provider record. Resend is blocked to prevent a duplicate.`;
+      }
+      if (matchingStillProcessing.length > 0) {
+        message += ` ${matchingStillProcessing.length} matching volunteer alert${matchingStillProcessing.length === 1 ? " is" : "s are"} still being processed by another dispatcher; check the Email log for the final outcome before taking manual action.`;
       }
       if (matchingSkipped > 0) {
         message += ` ${matchingSkipped} matching volunteer alert${matchingSkipped === 1 ? " was" : "s were"} skipped because that automated email is disabled; the skipped ${matchingSkipped === 1 ? "row is" : "rows are"} in the Email log.`;
@@ -1475,11 +1514,23 @@ export function registerAdminRoutes(app: Express): void {
       if (matchingBlocked > 0) {
         message += ` ${matchingBlocked} matching volunteer alert${matchingBlocked === 1 ? "" : "s"} could not be rendered; ${matchingBlocked === 1 ? "the failure is" : "the failures are"} in the Email log.`;
       }
+      if (matchingAlreadyClaimed > 0) {
+        message += ` ${matchingAlreadyClaimed} matching volunteer alert${matchingAlreadyClaimed === 1 ? "" : "s"} was already claimed, so no duplicate was queued.`;
+      }
+      if (
+        kind === "volunteer" &&
+        matchingSent.length === 0 &&
+        matchingRetryableFailed.length === 0 &&
+        matchingUnknownOutcome.length === 0 &&
+        matchingStillProcessing.length === 0 &&
+        matchingSkipped === 0 &&
+        matchingBlocked === 0 &&
+        matchingAlreadyClaimed === 0
+      ) {
+        message += " No opted-in supporter with a matching active interest was found, so no matching volunteer alert was queued.";
+      }
 
       res.json({ request: result.request, message });
-      if (matchingDispatches.length > 0) {
-        void dispatchQueuedEmails(matchingDispatches);
-      }
     } catch (err) {
       if (err instanceof RequestNotFoundError) {
         sendNotFound(res);

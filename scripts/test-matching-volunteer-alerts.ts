@@ -12,6 +12,9 @@ import { pool, q, SYSTEM, withDbContext } from "../server/db/client";
 import { approveRequest } from "../server/services/request-approval";
 import { ResendBlockedError, resendEmail } from "../server/services/email-resend";
 import { unapproveRequestForCorrection } from "../server/services/staff-request-edit";
+import { dispatchQueuedEmails } from "../server/email/send";
+import { PRODUCT_TEMPLATES } from "../server/email/templates";
+import { brandTokenVars } from "../server/email/render";
 
 const BASE = "http://localhost:5000";
 const runId = `${process.pid}-${Date.now()}`;
@@ -395,8 +398,12 @@ async function testMatchingAndEligibility(input: {
       alert.dispatch.text.includes(`zz_fixture Bravo Matching ${runId}`),
     "rendered alert identifies every matching category",
   );
+  await dispatchQueuedEmails([alert.dispatch]);
   const rows = await matchingLogRows(requestId);
-  assert(rows.length === 1 && rows[0]?.status === "queued", "one readable email-log row is queued for the supporter");
+  assert(
+    rows.length === 1 && (rows[0]?.status === "sent" || rows[0]?.status === "failed"),
+    "one readable email-log row records the direct approval's terminal dispatch outcome",
+  );
   const claims = await withDbContext(SYSTEM, (client) =>
     q<{ count: number }>(
       client,
@@ -405,6 +412,58 @@ async function testMatchingAndEligibility(input: {
     ),
   );
   assert(claims[0]?.count === 1, "the once-only claim commits with the queued email row");
+
+  const httpRequestId = await createRequest("http-approval", [input.categoryA, input.categoryB]);
+  const staffCookie = await mintSessionCookie("tiffany@defendingthecause.org", "matching alert HTTP approval");
+  const httpApproval = await request(`/api/admin/requests/volunteer/${httpRequestId}/approve`, {
+    method: "POST",
+    cookie: staffCookie,
+    body: {},
+  });
+  assert(httpApproval.response.status === 200, "categorized approval endpoint succeeds for a staff session");
+  const httpRows = await matchingLogRows(httpRequestId);
+  assert(
+    httpRows.length === 1 && (httpRows[0]?.status === "sent" || httpRows[0]?.status === "failed"),
+    "approval response waits for the matching alert's sent or failed Email-log outcome",
+  );
+  const httpMessage = String(httpApproval.body.message ?? "");
+  assert(
+    httpMessage.includes("matching volunteer alert") &&
+      (httpMessage.includes("sent") || httpMessage.includes("failed to send")),
+    "approval response reports the matching alert's recorded delivery outcome",
+  );
+  const httpVars = httpRows[0]?.payload.vars;
+  if (!httpVars) throw new Error("HTTP approval matching alert payload is missing.");
+  const renderedHttpAlert = PRODUCT_TEMPLATES.supporter_volunteer_match.render({
+    ...brandTokenVars(),
+    ...httpVars,
+  } as import("../server/email/templates/supporter-volunteer-match").SupporterVolunteerMatchVars);
+  assert(
+    renderedHttpAlert.html.includes(`/volunteer/${httpRequestId}`) &&
+      renderedHttpAlert.html.includes("/volunteer-alerts/unsubscribe/") &&
+      renderedHttpAlert.text.includes(`/volunteer/${httpRequestId}`) &&
+      renderedHttpAlert.text.includes("/volunteer-alerts/unsubscribe/"),
+    "HTTP approval alert includes direct opportunity and working unsubscribe links in HTML and text",
+  );
+  assert(
+    renderedHttpAlert.text.includes(`zz_fixture Alpha Matching ${runId}`) &&
+      renderedHttpAlert.text.includes(`zz_fixture Bravo Matching ${runId}`),
+    "HTTP approval alert includes every matching category in plain text",
+  );
+  const httpUnsubscribeUrl = String(httpVars.unsubscribeUrl ?? "");
+  const httpUnsubscribeToken = httpUnsubscribeUrl.split("/").filter(Boolean).at(-1);
+  if (!httpUnsubscribeToken) throw new Error("HTTP approval alert unsubscribe URL has no token.");
+  const httpUnsubscribe = await request("/api/public/volunteer-alerts/unsubscribe", {
+    method: "POST",
+    body: { token: httpUnsubscribeToken },
+  });
+  assert(
+    httpUnsubscribe.response.status === 200 &&
+      httpUnsubscribe.body.ok === true &&
+      !(await dal.volunteerAlerts.getForUser(SYSTEM, matchingSupporter.userId)).enabled,
+    "the exact unsubscribe capability rendered in the HTTP alert disables its recipient",
+  );
+  await setPreferences(matchingSupporter, [input.categoryA, input.categoryB], true);
 
   const expired = await createRequest("expired", [input.categoryA], {
     status: "active",
@@ -565,6 +624,18 @@ async function testOnceOnlyAndFailures(input: {
     optedOutResendBlocked = err instanceof ResendBlockedError && err.message.includes("no longer eligible");
   }
   assert(optedOutResendBlocked, "failed matching alert cannot be resent after the supporter opts out");
+  const afterOptOutRequest = await createRequest("after-opt-out", [input.categoryA]);
+  const afterOptOutApproval = await request(`/api/admin/requests/volunteer/${afterOptOutRequest}/approve`, {
+    method: "POST",
+    cookie: await mintSessionCookie("tiffany@defendingthecause.org", "matching alert opt-out approval"),
+    body: {},
+  });
+  assert(afterOptOutApproval.response.status === 200, "approval still succeeds after a supporter opts out");
+  const afterOptOutRows = await matchingLogRows(afterOptOutRequest);
+  assert(
+    afterOptOutRows.every((row) => row.toEmail !== renderFailureSupporter.email),
+    "an opted-out supporter is excluded from later approval alerts",
+  );
   await dal.emailTemplateOverrides.setEnabled(SYSTEM, "supporter_volunteer_match", {
     enabled: true,
     updatedByUserId: input.staffUserId,
