@@ -18,6 +18,11 @@ const BASE =
 const marker = `zz.admin-org-context.${process.pid}`;
 const organizationIds: string[] = [];
 const requestIds: string[] = [];
+const membershipIds: string[] = [];
+const personIds: string[] = [];
+const pledgeIds: string[] = [];
+const signupIds: string[] = [];
+const supporterRequestIds: string[] = [];
 let adminUserId: string | null = null;
 
 type Session = {
@@ -89,6 +94,115 @@ async function exit(cookie: string): Promise<Response> {
   });
 }
 
+async function chooseOrganization(cookie: string, orgId: string): Promise<Response> {
+  return fetch(`${BASE}/api/session/active-org`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ orgId }),
+  });
+}
+
+async function supporterLists(cookie: string, query = ""): Promise<{
+  donorsResponse: Response;
+  volunteersResponse: Response;
+  donors: { orgName?: string; donors?: Array<{ id: string; email: string }> };
+  volunteers: { orgName?: string; volunteers?: Array<{ id: string; email: string }> };
+}> {
+  const [donorsResponse, volunteersResponse] = await Promise.all([
+    fetch(`${BASE}/api/dashboard/supporters/donors${query}`, { headers: { Cookie: cookie } }),
+    fetch(`${BASE}/api/dashboard/supporters/volunteers${query}`, { headers: { Cookie: cookie } }),
+  ]);
+  return {
+    donorsResponse,
+    volunteersResponse,
+    donors: (await donorsResponse.json()) as { orgName?: string; donors?: Array<{ id: string; email: string }> },
+    volunteers: (await volunteersResponse.json()) as {
+      orgName?: string;
+      volunteers?: Array<{ id: string; email: string }>;
+    },
+  };
+}
+
+async function createSupporterFixtures(
+  orgId: string,
+  suffix: string,
+): Promise<{ donorEmail: string; volunteerEmail: string }> {
+  const donorEmail = `${marker}.${suffix}.donor@example.org`;
+  const volunteerEmail = `${marker}.${suffix}.volunteer@example.org`;
+  const people = await pool.query<{ id: string }>(
+    `insert into people (first_name, last_name, email, phone, source_note)
+     values ('Donor', $1, $2, '555-0101', $3),
+            ('Volunteer', $1, $4, '555-0102', $3)
+     returning id`,
+    [suffix, donorEmail, marker, volunteerEmail],
+  );
+  const donorPersonId = people.rows[0]!.id;
+  const volunteerPersonId = people.rows[1]!.id;
+  personIds.push(donorPersonId, volunteerPersonId);
+
+  const itemRequest = await pool.query<{ id: string }>(
+    `insert into item_requests (org_id, title, deadline_type, status)
+     values ($1, $2, 'ongoing', 'active') returning id`,
+    [orgId, `${marker} ${suffix} item request`],
+  );
+  const volunteerRequest = await pool.query<{ id: string }>(
+    `insert into volunteer_requests (org_id, title, deadline_type, status)
+     values ($1, $2, 'ongoing', 'active') returning id`,
+    [orgId, `${marker} ${suffix} volunteer request`],
+  );
+  const itemRequestId = itemRequest.rows[0]!.id;
+  const volunteerRequestId = volunteerRequest.rows[0]!.id;
+  requestIds.push(itemRequestId, volunteerRequestId);
+  supporterRequestIds.push(itemRequestId, volunteerRequestId);
+
+  const item = await pool.query<{ id: string }>(
+    `insert into items (item_request_id, name, quantity_requested, quantity_claimed, sort_order)
+     values ($1, $2, 5, 1, 0) returning id`,
+    [itemRequestId, `${suffix} blankets`],
+  );
+  const role = await pool.query<{ id: string }>(
+    `insert into volunteer_roles
+       (volunteer_request_id, name, quantity_needed, quantity_interested, sort_order)
+     values ($1, $2, 5, 1, 0) returning id`,
+    [volunteerRequestId, `${suffix} driver`],
+  );
+  const pledge = await pool.query<{ id: string }>(
+    `insert into item_pledges (person_id, item_request_id, notes)
+     values ($1, $2, $3) returning id`,
+    [donorPersonId, itemRequestId, marker],
+  );
+  const signup = await pool.query<{ id: string }>(
+    `insert into volunteer_signups (person_id, volunteer_request_id, notes)
+     values ($1, $2, $3) returning id`,
+    [volunteerPersonId, volunteerRequestId, marker],
+  );
+  pledgeIds.push(pledge.rows[0]!.id);
+  signupIds.push(signup.rows[0]!.id);
+  await pool.query(
+    `insert into item_pledge_lines (item_pledge_id, item_id, quantity) values ($1, $2, 1)`,
+    [pledge.rows[0]!.id, item.rows[0]!.id],
+  );
+  await pool.query(
+    `insert into volunteer_signup_roles (volunteer_signup_id, volunteer_role_id) values ($1, $2)`,
+    [signup.rows[0]!.id, role.rows[0]!.id],
+  );
+  return { donorEmail, volunteerEmail };
+}
+
+async function removeSupporterFixtures(): Promise<void> {
+  if (pledgeIds.length) await pool.query(`delete from item_pledges where id = any($1::uuid[])`, [pledgeIds]);
+  if (signupIds.length) await pool.query(`delete from volunteer_signups where id = any($1::uuid[])`, [signupIds]);
+  if (supporterRequestIds.length) {
+    await pool.query(`delete from items where item_request_id = any($1::uuid[])`, [supporterRequestIds]);
+    await pool.query(`delete from volunteer_roles where volunteer_request_id = any($1::uuid[])`, [supporterRequestIds]);
+    await pool.query(`delete from item_requests where id = any($1::uuid[])`, [supporterRequestIds]);
+    await pool.query(`delete from volunteer_requests where id = any($1::uuid[])`, [supporterRequestIds]);
+  }
+  pledgeIds.length = 0;
+  signupIds.length = 0;
+  supporterRequestIds.length = 0;
+}
+
 async function fixture(status: "approved" | "pending" | "disabled", suffix: string): Promise<{ id: string; name: string }> {
   const name = `${marker} ${suffix}`;
   const result = await pool.query<{ id: string }>(
@@ -124,16 +238,23 @@ async function cleanup(): Promise<void> {
     );
   }
   if (organizationIds.length) {
+    await removeSupporterFixtures();
     if (requestIds.length) {
       await pool.query(`delete from email_log where entity_id = any($1::uuid[])`, [requestIds]);
       await pool.query(`delete from approval_events where entity_id = any($1::uuid[])`, [requestIds]);
+      await pool.query(`delete from items where item_request_id = any($1::uuid[])`, [requestIds]);
+      await pool.query(`delete from volunteer_roles where volunteer_request_id = any($1::uuid[])`, [requestIds]);
       await pool.query(`delete from item_requests where id = any($1::uuid[])`, [requestIds]);
       await pool.query(`delete from volunteer_requests where id = any($1::uuid[])`, [requestIds]);
+    }
+    if (membershipIds.length) {
+      await pool.query(`delete from org_memberships where id = any($1::uuid[])`, [membershipIds]);
     }
     await pool.query(`delete from organizations where id = any($1::uuid[]) and name like $2`, [
       organizationIds,
       `${marker}%`,
     ]);
+    if (personIds.length) await pool.query(`delete from people where id = any($1::uuid[])`, [personIds]);
     await pool.query(`delete from people where email = $1`, [`${marker}@example.org`]);
   }
 }
@@ -146,12 +267,13 @@ function browserCookies(cookie: string): Parameters<BrowserContext["addCookies"]
 }
 
 async function main(): Promise<void> {
-  const [initialAdminCookie, approverCookie, memberCookie] = await Promise.all([
+  const [initialAdminCookie, approverCookie, initialMemberCookie] = await Promise.all([
     login("staff_admin"),
     login("staff_approver"),
     login("org_owner"),
   ]);
   let adminCookie = initialAdminCookie;
+  let memberCookie = initialMemberCookie;
   const before = await session(adminCookie);
   adminUserId = before.user?.id ?? null;
   assert(before.authenticated && adminUserId !== null && before.staffRole === "staff_admin", "admin session has staff-admin identity");
@@ -177,6 +299,35 @@ async function main(): Promise<void> {
     const afterRejected = await session(adminCookie);
     assert(afterRejected.organizationContext === null, "rejected entries do not create context");
 
+    const memberSession = await session(memberCookie);
+    const memberUserId = memberSession.user?.id;
+    assert(typeof memberUserId === "string", "member fixture has an application user");
+    const memberships = await pool.query<{ id: string }>(
+      `insert into org_memberships (org_id, user_id, role, status, approved_at)
+       values ($1, $3, 'member', 'active', now()),
+              ($2, $3, 'member', 'active', now())
+       returning id`,
+      [first.id, second.id, memberUserId],
+    );
+    membershipIds.push(...memberships.rows.map((row) => row.id));
+    const firstSupporters = await createSupporterFixtures(first.id, "selected");
+    const foreignSupporters = await createSupporterFixtures(second.id, "foreign");
+    const selected = await chooseOrganization(memberCookie, first.id);
+    assert(selected.ok, "multi-organization member can select the supporter fixture organization");
+    memberCookie = mergeCookieHeader(memberCookie, selected);
+    const memberLists = await supporterLists(memberCookie, `?orgId=${encodeURIComponent(second.id)}`);
+    assert(
+      memberLists.donorsResponse.ok &&
+        memberLists.volunteersResponse.ok &&
+        memberLists.donors.orgName === first.name &&
+        memberLists.volunteers.orgName === first.name &&
+        memberLists.donors.donors?.some((row) => row.email === firstSupporters.donorEmail) &&
+        memberLists.volunteers.volunteers?.some((row) => row.email === firstSupporters.volunteerEmail) &&
+        !memberLists.donors.donors?.some((row) => row.email === foreignSupporters.donorEmail) &&
+        !memberLists.volunteers.volunteers?.some((row) => row.email === foreignSupporters.volunteerEmail),
+      "member supporter reads ignore manipulated organization input and isolate both contact lists",
+    );
+
     const entered = await enter(adminCookie, first.id);
     assert(entered.ok, "staff admin can enter an approved member organization");
     adminCookie = mergeCookieHeader(adminCookie, entered);
@@ -191,6 +342,18 @@ async function main(): Promise<void> {
         active.user?.authSubject === before.user?.authSubject &&
         active.staffRole === before.staffRole,
       "entering context does not change the signed-in staff identity",
+    );
+    const staffLists = await supporterLists(adminCookie, `?orgId=${encodeURIComponent(second.id)}`);
+    assert(
+      staffLists.donorsResponse.ok &&
+        staffLists.volunteersResponse.ok &&
+        staffLists.donors.orgName === first.name &&
+        staffLists.volunteers.orgName === first.name &&
+        staffLists.donors.donors?.some((row) => row.email === firstSupporters.donorEmail) &&
+        staffLists.volunteers.volunteers?.some((row) => row.email === firstSupporters.volunteerEmail) &&
+        !staffLists.donors.donors?.some((row) => row.email === foreignSupporters.donorEmail) &&
+        !staffLists.volunteers.volunteers?.some((row) => row.email === foreignSupporters.volunteerEmail),
+      "staff organization view returns only the selected organization's donor and volunteer contacts",
     );
 
     const scopedOverview = await fetch(`${BASE}/api/dashboard/overview?orgId=${encodeURIComponent(second.id)}`, {
@@ -308,6 +471,19 @@ async function main(): Promise<void> {
           (await page.locator(".site-nav-switcher:visible").count()) === 0,
         "context UI hides staff navigation and the ordinary organization switcher",
       );
+      await page.route("**/api/dashboard/supporters/volunteers", async (route) => {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ message: "fixture failure" }),
+        });
+      });
+      await page.goto(`${BASE}/dashboard/supporters`, { waitUntil: "networkidle" });
+      assert(
+        (await page.locator(".mp13-table-donors").count()) === 1 &&
+          (await page.locator("#mp13-volunteers-heading + .mp13-error").count()) === 1,
+        "a genuine volunteer failure leaves the healthy donor branch visible",
+      );
       await context.close();
     } finally {
       await browser.close();
@@ -334,6 +510,11 @@ async function main(): Promise<void> {
     assert(exitedBody.redirectTo === "/admin/roles", "exit returns staff-administration destination");
     const finalSession = await session(adminCookie);
     assert(finalSession.organizationContext === null, "exit clears organization context from session");
+    const noContextLists = await supporterLists(adminCookie);
+    assert(
+      noContextLists.donorsResponse.status === 403 && noContextLists.volunteersResponse.status === 403,
+      "staff admin without an organization view cannot read member-organization supporters",
+    );
     const exitAudit = await pool.query<{ action: string }>(
       `select action from organization_context_actions
         where actor_user_id = $1 and organization_id = $2`,
@@ -345,6 +526,18 @@ async function main(): Promise<void> {
     );
 
     adminCookie = mergeCookieHeader(adminCookie, exited);
+    await removeSupporterFixtures();
+    const emptySelection = await chooseOrganization(memberCookie, second.id);
+    assert(emptySelection.ok, "member can switch to the empty fixture organization");
+    memberCookie = mergeCookieHeader(memberCookie, emptySelection);
+    const emptyMemberLists = await supporterLists(memberCookie);
+    assert(
+      emptyMemberLists.donorsResponse.ok &&
+        emptyMemberLists.volunteersResponse.ok &&
+        emptyMemberLists.donors.donors?.length === 0 &&
+        emptyMemberLists.volunteers.volunteers?.length === 0,
+      "member session receives independent empty donor and volunteer results",
+    );
     const secondEntry = await enter(adminCookie, second.id);
     assert(secondEntry.ok, "admin can enter a new organization after invalidation");
     adminCookie = mergeCookieHeader(adminCookie, secondEntry);
@@ -363,6 +556,14 @@ async function main(): Promise<void> {
         emptyOverview.volunteerRequests?.length === 0,
       "staff organization view returns independent empty request lists",
     );
+    const emptyStaffLists = await supporterLists(adminCookie);
+    assert(
+      emptyStaffLists.donorsResponse.ok &&
+        emptyStaffLists.volunteersResponse.ok &&
+        emptyStaffLists.donors.donors?.length === 0 &&
+        emptyStaffLists.volunteers.volunteers?.length === 0,
+      "staff organization view receives independent empty donor and volunteer results",
+    );
     await pool.query(
       `update admin_organization_contexts
           set expires_at = now() - interval '1 minute'
@@ -379,11 +580,11 @@ async function main(): Promise<void> {
       const expiredContext = await expiredBrowser.newContext();
       await expiredContext.addCookies(browserCookies(adminCookie));
       const expiredPage = await expiredContext.newPage();
-      await expiredPage.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+       await expiredPage.goto(`${BASE}/dashboard/supporters`, { waitUntil: "networkidle" });
       assert(
         new URL(expiredPage.url()).pathname === "/admin/organizations" &&
-          (await expiredPage.getByRole("alert").filter({ hasText: "requests could not be loaded" }).count()) === 0,
-        "expired Preview organization context returns staff to organization selection without list errors",
+           (await expiredPage.locator(".mp13-error").count()) === 0,
+         "expired Preview organization context returns staff to organization selection without supporter table errors",
       );
       await expiredContext.close();
     } finally {

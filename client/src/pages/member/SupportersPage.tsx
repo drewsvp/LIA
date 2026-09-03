@@ -19,7 +19,7 @@ import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import supportersImg from "../../assets/dashboard/supporters.png";
 import { useSession } from "../../hooks/useSession";
-import { apiRequest } from "../../lib/queryClient";
+import { apiRequest, isDashboardAccessError } from "../../lib/queryClient";
 
 type DonorRow = {
   id: string;
@@ -72,7 +72,7 @@ export function SupportersPage() {
 
   useEffect(() => {
     let cancelled = false;
-     apiRequest("GET", "/api/dashboard/supporters/donors")
+    apiRequest("GET", "/api/dashboard/supporters/donors")
       .then(async (res) => {
         return (await res.json()) as { orgName: string; donors: DonorRow[] };
       })
@@ -81,10 +81,10 @@ export function SupportersPage() {
         setOrgName((prev) => prev || data.orgName);
         setDonors({ kind: "ready", rows: data.donors });
       })
-      .catch(() => {
-        if (!cancelled) setDonors({ kind: "error" });
+      .catch((error: unknown) => {
+        if (!cancelled && !isDashboardAccessError(error)) setDonors({ kind: "error" });
       });
-     apiRequest("GET", "/api/dashboard/supporters/volunteers")
+    apiRequest("GET", "/api/dashboard/supporters/volunteers")
       .then(async (res) => {
         return (await res.json()) as { orgName: string; volunteers: VolunteerRow[] };
       })
@@ -93,8 +93,8 @@ export function SupportersPage() {
         setOrgName((prev) => prev || data.orgName);
         setVolunteers({ kind: "ready", rows: data.volunteers });
       })
-      .catch(() => {
-        if (!cancelled) setVolunteers({ kind: "error" });
+      .catch((error: unknown) => {
+        if (!cancelled && !isDashboardAccessError(error)) setVolunteers({ kind: "error" });
       });
     return () => {
       cancelled = true;
