@@ -16,6 +16,45 @@ export class ApiResponseError extends Error {
 
 const SESSION_QUERY_KEY = ["/api/session"] as const;
 let sessionRecoveryInFlight: Promise<void> | null = null;
+const recoveredSessionGenerations = new Set<unknown>();
+const recoveredSessionGenerationOrder: unknown[] = [];
+const MISSING_SESSION_GENERATION = Symbol("missing-session-generation");
+
+function rememberRecoveredSessionGeneration(generation: unknown): void {
+  if (recoveredSessionGenerations.has(generation)) return;
+  recoveredSessionGenerations.add(generation);
+  recoveredSessionGenerationOrder.push(generation);
+  if (recoveredSessionGenerationOrder.length > 8) {
+    recoveredSessionGenerations.delete(recoveredSessionGenerationOrder.shift());
+  }
+}
+
+function dashboardScopeKey(session: unknown): string {
+  if (typeof session !== "object" || session === null) return "missing";
+  const value = session as {
+    authenticated?: unknown;
+    user?: { id?: unknown } | null;
+    activeOrgId?: unknown;
+    organizationContext?: { id?: unknown } | null;
+    supporterContext?: { id?: unknown } | null;
+  };
+  return JSON.stringify([
+    value.authenticated === true,
+    value.user?.id ?? null,
+    value.activeOrgId ?? null,
+    value.organizationContext?.id ?? null,
+    value.supporterContext?.id ?? null,
+  ]);
+}
+
+function clearDashboardScopeQueries(): void {
+  queryClient.removeQueries({
+    predicate: (query) => {
+      const url = query.queryKey[0];
+      return typeof url === "string" && url.startsWith("/api/dashboard/");
+    },
+  });
+}
 
 /**
  * Dashboard guards use 401/403 for expired authentication or organization
@@ -36,27 +75,47 @@ export function isDashboardAccessError(error: unknown): error is ApiResponseErro
   }
 }
 
-function recoverDashboardSession(): void {
+function recoverDashboardSession(generation: unknown): void {
+  if (recoveredSessionGenerations.has(generation)) return;
+  rememberRecoveredSessionGeneration(generation);
   if (sessionRecoveryInFlight) return;
-  // queryClient is initialized before any query or request can run.
+  // Refetch the active snapshot directly instead of invalidating it. The
+  // dashboard gate keeps its last valid snapshot mounted during this bounded
+  // recovery, preventing an access failure from remounting the failed query
+  // and recursively requesting another recovery.
   sessionRecoveryInFlight = queryClient
-    .invalidateQueries({ queryKey: SESSION_QUERY_KEY })
+    .refetchQueries({ queryKey: SESSION_QUERY_KEY, type: "active" })
     .then(() => undefined)
     .finally(() => {
       sessionRecoveryInFlight = null;
     });
 }
 
-function reportDashboardAccessFailure(url: string, error: ApiResponseError): void {
+function reportDashboardAccessFailure(
+  url: string,
+  error: ApiResponseError,
+  sessionGeneration: unknown,
+): void {
   if (url.startsWith("/api/dashboard/") && isDashboardAccessError(error)) {
-    recoverDashboardSession();
+    recoverDashboardSession(sessionGeneration);
   }
 }
 
 async function defaultQueryFn({ queryKey }: { queryKey: readonly unknown[] }): Promise<unknown> {
   const url = queryKey[0];
   if (typeof url !== "string") throw new Error("Query key must start with a URL string");
-  return (await apiRequest("GET", url)).json();
+  const data: unknown = await (await apiRequest("GET", url)).json();
+  if (
+    url === SESSION_QUERY_KEY[0] &&
+    dashboardScopeKey(queryClient.getQueryData(SESSION_QUERY_KEY)) !== dashboardScopeKey(data)
+  ) {
+    // Clear old organization/user data before Query publishes the new session
+    // snapshot. This covers ordinary invalidations as well as access-failure
+    // recovery; the keyed dashboard gate separately resets component-local
+    // state for the same scope transition.
+    clearDashboardScopeQueries();
+  }
+  return data;
 }
 
 export const queryClient = new QueryClient({
@@ -89,6 +148,9 @@ export async function apiRequest(
   signal?: AbortSignal,
 ): Promise<Response> {
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  const sessionGeneration = url.startsWith("/api/dashboard/")
+    ? (queryClient.getQueryData(SESSION_QUERY_KEY) ?? MISSING_SESSION_GENERATION)
+    : MISSING_SESSION_GENERATION;
   const res = await fetch(url, {
     method,
     credentials: "include",
@@ -99,7 +161,7 @@ export async function apiRequest(
   if (!res.ok) {
     const text = await res.text();
     const error = new ApiResponseError(res.status, text);
-    reportDashboardAccessFailure(url, error);
+    reportDashboardAccessFailure(url, error, sessionGeneration);
     throw error;
   }
   return res;

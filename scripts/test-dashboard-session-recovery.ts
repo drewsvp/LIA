@@ -92,16 +92,75 @@ async function fillItemRequest(page: Page, title: string): Promise<void> {
   await page.locator("#mp7-description").fill("A request used only for browser recovery verification.");
 }
 
+async function assertStableDashboardLogin(
+  browser: Awaited<ReturnType<typeof chromium.launch>>,
+  role: "staff_admin" | "staff_approver",
+  buttonName: RegExp,
+  width: number,
+): Promise<void> {
+  const context = await browser.newContext({ viewport: { width, height: 900 } });
+  const page = await context.newPage();
+  let sessionRequests = 0;
+  const topLevelPaths: string[] = [];
+
+  context.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/session") sessionRequests += 1;
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) topLevelPaths.push(new URL(frame.url()).pathname);
+  });
+  try {
+    await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: buttonName }).waitFor();
+    const loginSessionRequests = sessionRequests;
+    await page.getByRole("button", { name: buttonName }).click();
+    await page.waitForURL(`${BASE}/dashboard`);
+    await page.getByRole("heading", { name: "MY ORGANIZATION DASHBOARD" }).waitFor();
+    const dashboardElement = await page.locator(".mp4-page").elementHandle();
+    assert(dashboardElement !== null, `${role} dashboard root is mounted`);
+    await page.waitForTimeout(1_000);
+
+    assert(sessionRequests - loginSessionRequests === 1, `${role} dashboard boot makes exactly one session request`);
+    assert(
+      topLevelPaths.filter((path) => path === "/dashboard").length === 1,
+      `${role} login performs one intentional full-page dashboard transition`,
+    );
+    assert(
+      await dashboardElement.evaluate((node) => node.isConnected && node === document.querySelector(".mp4-page")),
+      `${role} dashboard stays mounted after login`,
+    );
+
+    await page.getByRole("button", { name: "Edit My Organization" }).click();
+    await page.waitForURL(`${BASE}/dashboard/organization`);
+    await page.locator(".mp5-back").click();
+    await page.waitForURL(`${BASE}/dashboard`);
+    await page.getByRole("heading", { name: "MY ORGANIZATION DASHBOARD" }).waitFor();
+    await page.waitForTimeout(500);
+    assert(
+      sessionRequests - loginSessionRequests === 1,
+      `${role} dashboard route changes do not refetch the shared session`,
+    );
+  } finally {
+    await context.close();
+  }
+}
+
 async function main(): Promise<void> {
   const { response: loginResponse, session } = await login();
   assert(session.memberships.length > 0, "quick-login owner has an organization membership");
 
   const browser = await chromium.launch({ headless: true, executablePath: chromiumExecutable() });
   try {
+    console.log("\nStable post-login dashboard:");
+    await assertStableDashboardLogin(browser, "staff_admin", /Staff Admin — Tiffany Loeffler/, 1280);
+    await assertStableDashboardLogin(browser, "staff_approver", /Staff Approver — Riley Chen/, 390);
+
     console.log("\nRead form recovery:");
     const readContext = await newContext(browser, loginResponse);
     let readRejected = false;
+    let readSessionRequests = 0;
     await readContext.route("**/api/session", async (route) => {
+      readSessionRequests += 1;
       if (!readRejected) {
         await route.continue();
         return;
@@ -129,11 +188,97 @@ async function main(): Promise<void> {
     const readPage = await readContext.newPage();
     await readPage.goto(`${BASE}/dashboard/organization`, { waitUntil: "networkidle" });
     await readPage.getByText("not yet an active member of an organization").waitFor();
+    await readPage.waitForTimeout(500);
     assert(
       (await readPage.locator(".mp5-load-error").count()) === 0,
       "read access failure returns to pending approval instead of showing a load error",
     );
+    assert(readSessionRequests === 2, "read access failure performs one bounded session recovery");
     await readContext.close();
+
+    console.log("\nUnchanged background verification:");
+    const unchangedContext = await newContext(browser, loginResponse);
+    let releaseRecovery!: () => void;
+    const recoveryHeld = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
+    let unchangedSessionRequests = 0;
+    await unchangedContext.route("**/api/session", async (route) => {
+      unchangedSessionRequests += 1;
+      if (unchangedSessionRequests > 1) await recoveryHeld;
+      await route.continue();
+    });
+    await unchangedContext.route("**/api/dashboard/overview", async (route) => {
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "Verify the unchanged session" }),
+      });
+    });
+    const unchangedPage = await unchangedContext.newPage();
+    await unchangedPage.goto(`${BASE}/dashboard`, { waitUntil: "domcontentloaded" });
+    await unchangedPage.getByRole("heading", { name: "MY ORGANIZATION DASHBOARD" }).waitFor();
+    const unchangedDashboard = await unchangedPage.locator(".mp4-page").elementHandle();
+    assert(unchangedDashboard !== null, "dashboard is mounted while background verification is held");
+    releaseRecovery();
+    await unchangedPage.waitForLoadState("networkidle");
+    assert(
+      await unchangedDashboard.evaluate(
+        (node) => node.isConnected && node === document.querySelector(".mp4-page"),
+      ),
+      "an unchanged background session verification keeps the dashboard mounted",
+    );
+    assert(unchangedSessionRequests === 2, "unchanged access recovery performs one session refetch");
+    await unchangedContext.close();
+
+    console.log("\nStaggered access-failure recovery:");
+    const staggeredContext = await newContext(browser, loginResponse);
+    let staggeredRejected = false;
+    let staggeredSessionRequests = 0;
+    await staggeredContext.route("**/api/session", async (route) => {
+      staggeredSessionRequests += 1;
+      if (!staggeredRejected) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...session,
+          memberships: [],
+          activeOrgId: null,
+          isStaff: false,
+          organizationContext: null,
+        }),
+      });
+    });
+    await staggeredContext.route("**/api/dashboard/supporters/donors", async (route) => {
+      staggeredRejected = true;
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "No active organization membership" }),
+      });
+    });
+    await staggeredContext.route("**/api/dashboard/supporters/volunteers", async (route) => {
+      staggeredRejected = true;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "No active organization membership" }),
+      });
+    });
+    const staggeredPage = await staggeredContext.newPage();
+    await staggeredPage.goto(`${BASE}/dashboard/supporters`, { waitUntil: "networkidle" });
+    await staggeredPage.getByText("not yet an active member of an organization").waitFor();
+    await staggeredPage.waitForTimeout(500);
+    assert(
+      staggeredSessionRequests === 2,
+      "staggered dashboard failures from one session generation share one recovery",
+    );
+    await staggeredContext.close();
 
     console.log("\nSave form recovery:");
     const saveContext = await newContext(browser, loginResponse);

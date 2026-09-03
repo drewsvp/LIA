@@ -7,17 +7,18 @@
  *   1  → straight through, scoped to that organization
  *   2+ → organization chooser until a selection is held in the session
  *
- * Session state is re-verified on every dashboard navigation so a member
- * removed mid-session loses access on their next request, not their next
- * login (§12). A failed membership resolution renders a stated error —
- * never a silent fallback to some default organization (§12).
+ * Every dashboard API request is re-authorized by the server. If one reports
+ * that access changed, the shared request client refreshes this session
+ * snapshot and the gate moves to the matching recovery state. Background
+ * session refreshes deliberately keep already-authorized content mounted so
+ * they cannot create a blank/remount/refetch loop.
  *
  * An unauthenticated arrival is sent to /login; a magic-link failure
  * redirect (?error=…) is forwarded so MP-01 can offer a fresh link.
  */
-import { useEffect, useState } from "react";
+import { Fragment, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { Redirect, useLocation, useSearch } from "wouter";
+import { Redirect, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
 import { useSiteSettings } from "../../hooks/useSiteSettings";
@@ -90,29 +91,24 @@ function OrgChooser({
   );
 }
 
+function dashboardScopeKey(session: ReturnType<typeof useSession>["session"]): string {
+  if (!session?.authenticated || session.user === null) return "anonymous";
+  return [
+    session.user.id,
+    session.activeOrgId ?? "no-active-org",
+    session.organizationContext?.id ?? "no-organization-context",
+    session.supporterContext?.id ?? "no-supporter-context",
+  ].join(":");
+}
+
 export function DashboardGate({ children }: { children: ReactNode }): ReactElement | null {
-  const { session, isLoading, isFetching, isError } = useSession();
-  const queryClient = useQueryClient();
-  const [location] = useLocation();
+  const { session, isLoading, isError } = useSession();
   const search = useSearch();
-  const [verifiedLocation, setVerifiedLocation] = useState<string | null>(null);
 
-  // Fresh membership check on every dashboard navigation (§12: removal takes
-  // effect on the next request). Server guards enforce the same per API call.
-  useEffect(() => {
-    let current = true;
-    setVerifiedLocation(null);
-    void queryClient
-      .invalidateQueries({ queryKey: ["/api/session"] })
-      .then(() => {
-        if (current) setVerifiedLocation(location);
-      });
-    return () => {
-      current = false;
-    };
-  }, [location, queryClient]);
-
-  if (isLoading || isFetching || verifiedLocation !== location) return null;
+  // Only the first session load blocks routing. A recovery refetch retains the
+  // previous snapshot until the fresh response arrives, so valid dashboard
+  // content stays mounted and cannot restart its own failing queries.
+  if (isLoading) return null;
   if (isError) return <StatedError />;
   if (!session?.authenticated) {
     const error = new URLSearchParams(search).get("error");
@@ -120,11 +116,13 @@ export function DashboardGate({ children }: { children: ReactNode }): ReactEleme
   }
   // Staff organization view is deliberately valid without a membership in the
   // target organization; the server scopes dashboard APIs to this context.
-  if (session.organizationContext !== null && session.organizationContext !== undefined) return <>{children}</>;
+  if (session.organizationContext !== null && session.organizationContext !== undefined) {
+    return <Fragment key={dashboardScopeKey(session)}>{children}</Fragment>;
+  }
   // Supporter accounts have no org memberships by design — their home is the
   // profile page, never the pending-approval message or the dashboard.
   if (session.isSupporter && session.memberships.length === 0) return <Redirect to="/profile" replace />;
   if (session.memberships.length === 0) return <PendingApproval />;
   if (session.activeOrgId === null) return <OrgChooser memberships={session.memberships} />;
-  return <>{children}</>;
+  return <Fragment key={dashboardScopeKey(session)}>{children}</Fragment>;
 }
