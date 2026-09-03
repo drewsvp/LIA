@@ -6,12 +6,12 @@
  * any URL here (§11). A failed query renders a stated error in place of
  * the selector, never an empty selector (§12).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
 import { useSiteSettings } from "../../hooks/useSiteSettings";
-import { ApiResponseError } from "../../lib/queryClient";
+import { isDashboardAccessError } from "../../lib/queryClient";
 import heroImg from "../../assets/dashboard/hero.png";
 import tileItem from "../../assets/dashboard/tile-item.png";
 import tileVolunteer from "../../assets/dashboard/tile-volunteer.png";
@@ -128,24 +128,10 @@ function RequestSelector({
 
 export function DashboardPage() {
   const [, navigate] = useLocation();
-  const queryClient = useQueryClient();
   const { session } = useSession();
   const { settings: siteSettings } = useSiteSettings();
   const overviewQuery = useQuery<Overview>({ queryKey: ["/api/dashboard/overview"] });
-  const accessFailure =
-    overviewQuery.error instanceof ApiResponseError &&
-    (overviewQuery.error.status === 401 ||
-      overviewQuery.error.status === 403 ||
-      overviewQuery.error.status === 409);
-
-  // A rejected session/context is an access-state change, not two data-source
-  // failures. Refresh the session so DashboardGate can route to login,
-  // organization selection, pending approval, or staff organization selection.
-  useEffect(() => {
-    if (accessFailure) {
-      void queryClient.invalidateQueries({ queryKey: ["/api/session"] });
-    }
-  }, [accessFailure, queryClient]);
+  const accessFailure = isDashboardAccessError(overviewQuery.error);
 
   const overview = overviewQuery.data;
   // Org name resolves from the session even if the overview query fails.

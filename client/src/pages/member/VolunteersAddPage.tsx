@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "../../lib/queryClient";
 
 const REQUIRED_MSG = "This field is required";
 const ADD_FAILURE_MSG = "That didn't save. Please check the form and try again.";
@@ -104,14 +105,10 @@ export function VolunteersAddPage() {
     if (Object.keys(errs).length > 0) return;
     setAdding(true);
     try {
-      const res = await fetch(`/api/dashboard/volunteers/${id}/roles`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim(),
-          quantityNeeded: Number(qty),
-        }),
+       const res = await apiRequest("POST", `/api/dashboard/volunteers/${id}/roles`, {
+         name: name.trim(),
+         description: description.trim(),
+         quantityNeeded: Number(qty),
       });
       if (res.ok) {
         const body = (await res.json()) as { role: RoleRow };
@@ -120,11 +117,9 @@ export function VolunteersAddPage() {
         setDescription("");
         setQuantity("");
         setMessage({ kind: "success", text: "Role added." });
-      } else {
-        setMessage({ kind: "error", text: ADD_FAILURE_MSG });
-      }
-    } catch {
-      setMessage({ kind: "error", text: ADD_FAILURE_MSG });
+       }
+     } catch {
+       setMessage({ kind: "error", text: ADD_FAILURE_MSG });
     } finally {
       setAdding(false);
     }
@@ -134,7 +129,7 @@ export function VolunteersAddPage() {
     setMessage(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/dashboard/volunteers/${id}/submit`, { method: "POST" });
+       const res = await apiRequest("POST", `/api/dashboard/volunteers/${id}/submit`);
       if (res.ok) {
         navigate("/dashboard");
       } else {

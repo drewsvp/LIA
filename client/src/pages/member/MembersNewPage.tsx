@@ -11,6 +11,7 @@ import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import heroImg from "../../assets/dashboard/hero.png";
 import { useSession } from "../../hooks/useSession";
+import { apiRequest, getApiErrorMessage } from "../../lib/queryClient";
 
 const REQUIRED_MSG = "This field is required";
 const SUCCESS_MSG = "Success! Your new user has been submitted for approval.";
@@ -53,15 +54,11 @@ export function MembersNewPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/dashboard/members", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          email: email.trim(),
-          phone: phone.trim(),
-        }),
+       const res = await apiRequest("POST", "/api/dashboard/members", {
+         firstName: firstName.trim(),
+         lastName: lastName.trim(),
+         email: email.trim(),
+         phone: phone.trim(),
       });
       if (res.ok) {
         setFirstName("");
@@ -70,12 +67,9 @@ export function MembersNewPage() {
         setPhone("");
         setErrors({});
         setMessage({ kind: "success", text: SUCCESS_MSG });
-      } else {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        setMessage({ kind: "error", text: body?.message ?? FAILURE_MSG });
-      }
-    } catch {
-      setMessage({ kind: "error", text: FAILURE_MSG });
+       }
+     } catch (error) {
+       setMessage({ kind: "error", text: getApiErrorMessage(error) ?? FAILURE_MSG });
     } finally {
       setSubmitting(false);
     }

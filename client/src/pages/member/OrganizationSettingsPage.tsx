@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest, getApiErrorMessage } from "../../lib/queryClient";
 
 type PopulationOption = { id: string; name: string; slug: string };
 type Settings = {
@@ -165,19 +166,16 @@ export function OrganizationSettingsPage() {
       fd.append("email", email.trim());
       fd.append("contactPhone", contactPhone.trim());
 
-      const res = await fetch("/api/dashboard/organization", { method: "PUT", body: fd });
+       const res = await apiRequest("PUT", "/api/dashboard/organization", fd);
       if (res.ok) {
         setOrgMessage({ kind: "success", text: SAVE_SUCCESS });
         setLogoFile(null);
         // Refresh server values (logo preview, member list); the form keeps
         // its (identical) values — seeded stays true.
         await queryClient.invalidateQueries({ queryKey: ["/api/dashboard/organization"] });
-      } else {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        setOrgMessage({ kind: "error", text: body?.message ?? SAVE_FAILURE });
-      }
-    } catch {
-      setOrgMessage({ kind: "error", text: SAVE_FAILURE });
+       }
+     } catch (error) {
+       setOrgMessage({ kind: "error", text: getApiErrorMessage(error) ?? SAVE_FAILURE });
     } finally {
       setSaving(false);
     }
@@ -188,21 +186,16 @@ export function OrganizationSettingsPage() {
     setRemoving(true);
     setTeamMessage(null);
     try {
-      const res = await fetch("/api/dashboard/organization/remove-member", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ membershipId: selectedMemberRow.membershipId }),
-      });
+       const res = await apiRequest("POST", "/api/dashboard/organization/remove-member", {
+         membershipId: selectedMemberRow.membershipId,
+       });
       if (res.ok) {
         setTeamMessage({ kind: "success", text: REMOVE_SUCCESS });
         setSelectedMember("");
         await queryClient.invalidateQueries({ queryKey: ["/api/dashboard/organization"] });
-      } else {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        setTeamMessage({ kind: "error", text: body?.message ?? SAVE_FAILURE });
-      }
-    } catch {
-      setTeamMessage({ kind: "error", text: SAVE_FAILURE });
+       }
+     } catch (error) {
+       setTeamMessage({ kind: "error", text: getApiErrorMessage(error) ?? SAVE_FAILURE });
     } finally {
       setRemoving(false);
       setConfirming(false);

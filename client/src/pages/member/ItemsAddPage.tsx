@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { productUrlProblem } from "@shared/item-product-url";
+import { apiRequest, getApiErrorMessage } from "../../lib/queryClient";
 
 const REQUIRED_MSG = "This field is required";
 const ADD_SUCCESS_MSG = "Item added.";
@@ -128,16 +129,12 @@ export function ItemsAddPage() {
 
     setAdding(true);
     try {
-      const res = await fetch(`/api/dashboard/items/${id}/items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim(),
-          quantityRequested: Number(quantity.trim()),
-          condition,
-          productUrl: productUrl.trim() === "" ? null : productUrl.trim(),
-        }),
+       const res = await apiRequest("POST", `/api/dashboard/items/${id}/items`, {
+         name: name.trim(),
+         description: description.trim(),
+         quantityRequested: Number(quantity.trim()),
+         condition,
+         productUrl: productUrl.trim() === "" ? null : productUrl.trim(),
       });
       if (res.ok) {
         const body = (await res.json()) as { item: RequestItem };
@@ -149,12 +146,9 @@ export function ItemsAddPage() {
         setProductUrl("");
         setErrors({});
         setMessage({ kind: "success", text: ADD_SUCCESS_MSG });
-      } else {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        setMessage({ kind: "error", text: body?.message ?? ADD_FAILURE_MSG });
-      }
-    } catch {
-      setMessage({ kind: "error", text: ADD_FAILURE_MSG });
+       }
+     } catch (error) {
+       setMessage({ kind: "error", text: getApiErrorMessage(error) ?? ADD_FAILURE_MSG });
     } finally {
       setAdding(false);
     }
@@ -164,14 +158,14 @@ export function ItemsAddPage() {
     setMessage(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/dashboard/items/${id}/submit`, { method: "POST" });
+       const res = await apiRequest("POST", `/api/dashboard/items/${id}/submit`);
       if (res.ok) {
         navigate("/dashboard");
         return;
       }
-      setMessage({ kind: "error", text: SUBMIT_FAILURE_MSG });
-    } catch {
-      setMessage({ kind: "error", text: SUBMIT_FAILURE_MSG });
+       setMessage({ kind: "error", text: SUBMIT_FAILURE_MSG });
+     } catch {
+       setMessage({ kind: "error", text: SUBMIT_FAILURE_MSG });
     } finally {
       setSubmitting(false);
     }

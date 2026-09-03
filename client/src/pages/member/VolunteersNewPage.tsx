@@ -13,6 +13,7 @@ import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import heroImg from "../../assets/requests/volunteer-hero.png";
 import { DeadlineField, type DeadlineTypeValue } from "../../components/member/DeadlineField";
+import { apiRequest } from "../../lib/queryClient";
 
 const REQUIRED_MSG = "This field is required";
 const FAILURE_MSG = "Something went wrong and your request wasn't saved. Please try again.";
@@ -79,23 +80,19 @@ export function VolunteersNewPage() {
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/dashboard/volunteers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contactFirstName: contactFirstName.trim(),
-          contactLastName: contactLastName.trim(),
-          contactEmail: contactEmail.trim(),
-          contactPhone: contactPhone.trim(),
-          deadlineType,
-          deadlineDate: deadlineType === "date_specific" ? deadlineDate.trim() : "",
-          details: details.trim(),
-          title: title.trim(),
-          description: description.trim(),
-          eventLocation: eventLocation.trim(),
-          peopleHelped: Number(peopleHelped.trim()),
-          categoryIds,
-        }),
+       const res = await apiRequest("POST", "/api/dashboard/volunteers", {
+         contactFirstName: contactFirstName.trim(),
+         contactLastName: contactLastName.trim(),
+         contactEmail: contactEmail.trim(),
+         contactPhone: contactPhone.trim(),
+         deadlineType,
+         deadlineDate: deadlineType === "date_specific" ? deadlineDate.trim() : "",
+         details: details.trim(),
+         title: title.trim(),
+         description: description.trim(),
+         eventLocation: eventLocation.trim(),
+         peopleHelped: Number(peopleHelped.trim()),
+         categoryIds,
       });
       if (res.ok) {
         const body = (await res.json()) as { id: string };

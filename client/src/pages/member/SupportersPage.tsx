@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import supportersImg from "../../assets/dashboard/supporters.png";
 import { useSession } from "../../hooks/useSession";
+import { apiRequest } from "../../lib/queryClient";
 
 type DonorRow = {
   id: string;
@@ -71,9 +72,8 @@ export function SupportersPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/dashboard/supporters/donors", { credentials: "include" })
+     apiRequest("GET", "/api/dashboard/supporters/donors")
       .then(async (res) => {
-        if (!res.ok) throw new Error(String(res.status));
         return (await res.json()) as { orgName: string; donors: DonorRow[] };
       })
       .then((data) => {
@@ -84,9 +84,8 @@ export function SupportersPage() {
       .catch(() => {
         if (!cancelled) setDonors({ kind: "error" });
       });
-    fetch("/api/dashboard/supporters/volunteers", { credentials: "include" })
+     apiRequest("GET", "/api/dashboard/supporters/volunteers")
       .then(async (res) => {
-        if (!res.ok) throw new Error(String(res.status));
         return (await res.json()) as { orgName: string; volunteers: VolunteerRow[] };
       })
       .then((data) => {

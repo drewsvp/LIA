@@ -55,6 +55,7 @@
     "test:admin-participation": "tsx scripts/test-admin-participation.ts",
     "test:participation-management": "tsx scripts/test-admin-participation.ts",
     "test:member-request-sharing": "tsx scripts/test-member-request-sharing.ts",
+    "test:dashboard-session-recovery": "tsx scripts/test-dashboard-session-recovery.ts",
     "lint:fixture-queries": "bash scripts/lint-fixture-queries.sh",
     "db:seed": "tsx server/db/seed.ts",
     "db:apply-auth-schema": "tsx server/auth/apply-auth-schema.ts",

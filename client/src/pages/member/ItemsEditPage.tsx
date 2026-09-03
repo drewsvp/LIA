@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { DeadlineField, type DeadlineTypeValue } from "../../components/member/DeadlineField";
+import { apiRequest, getApiErrorMessage } from "../../lib/queryClient";
 import { productUrlProblem } from "@shared/item-product-url";
 
 const REQUIRED_MSG = "This field is required";
@@ -220,33 +221,27 @@ export function ItemsEditPage() {
     if (Object.keys(errs).length > 0) return;
     setSavingA(true);
     try {
-      const res = await fetch(`/api/dashboard/items/${id}/edit/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contactFirstName: contactFirstName.trim(),
-          contactLastName: contactLastName.trim(),
-          contactEmail: contactEmail.trim(),
-          contactPhone: contactPhone.trim(),
-          deadlineType,
-          deadlineDate: deadlineType === "date_specific" ? deadlineDate.trim() : "",
-          title: title.trim(),
-          description: description.trim(),
-          dropoffLocation: dropoffLocation.trim(),
-          peopleHelped: peopleHelped.trim() === "" ? null : Number(peopleHelped.trim()),
-          statusTo: statusSel !== currentStatus ? statusSel : null,
-        }),
+       const res = await apiRequest("POST", `/api/dashboard/items/${id}/edit/request`, {
+         contactFirstName: contactFirstName.trim(),
+         contactLastName: contactLastName.trim(),
+         contactEmail: contactEmail.trim(),
+         contactPhone: contactPhone.trim(),
+         deadlineType,
+         deadlineDate: deadlineType === "date_specific" ? deadlineDate.trim() : "",
+         title: title.trim(),
+         description: description.trim(),
+         dropoffLocation: dropoffLocation.trim(),
+         peopleHelped: peopleHelped.trim() === "" ? null : Number(peopleHelped.trim()),
+         statusTo: statusSel !== currentStatus ? statusSel : null,
       });
       if (res.ok) {
         const body = (await res.json()) as { request: Payload["request"] };
         setCurrentStatus(body.request.status);
         setStatusSel(body.request.status);
         setMsgA({ kind: "success", text: REQUEST_SAVED_MSG });
-      } else {
-        setMsgA({ kind: "error", text: SAVE_FAILURE_MSG });
-      }
-    } catch {
-      setMsgA({ kind: "error", text: SAVE_FAILURE_MSG });
+       }
+     } catch (error) {
+       setMsgA({ kind: "error", text: getApiErrorMessage(error) ?? SAVE_FAILURE_MSG });
     } finally {
       setSavingA(false);
     }
@@ -263,31 +258,24 @@ export function ItemsEditPage() {
     if (!itemsValid) return;
     setSavingB(true);
     try {
-      const res = await fetch(`/api/dashboard/items/${id}/edit/items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: rows.map((r) => ({
-            id: r.id,
-            name: r.name.trim(),
-            description: r.description.trim(),
-            productUrl: r.productUrl.trim(),
-            condition: r.condition,
-            quantityRequested: Number(r.quantityRequested.trim()),
-            quantityReceived: r.quantityReceived.trim() === "" ? 0 : Number(r.quantityReceived.trim()),
-          })),
-        }),
+       const res = await apiRequest("POST", `/api/dashboard/items/${id}/edit/items`, {
+         items: rows.map((r) => ({
+           id: r.id,
+           name: r.name.trim(),
+           description: r.description.trim(),
+           productUrl: r.productUrl.trim(),
+           condition: r.condition,
+           quantityRequested: Number(r.quantityRequested.trim()),
+           quantityReceived: r.quantityReceived.trim() === "" ? 0 : Number(r.quantityReceived.trim()),
+         })),
       });
       if (res.ok) {
         const body = (await res.json()) as { items: PayloadItem[] };
         setRows(body.items.map(toRow));
         setMsgB({ kind: "success", text: ITEMS_SAVED_MSG });
-      } else {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        setMsgB({ kind: "error", text: body?.message ?? SAVE_FAILURE_MSG });
-      }
-    } catch {
-      setMsgB({ kind: "error", text: SAVE_FAILURE_MSG });
+       }
+     } catch (error) {
+       setMsgB({ kind: "error", text: getApiErrorMessage(error) ?? SAVE_FAILURE_MSG });
     } finally {
       setSavingB(false);
     }
@@ -314,16 +302,12 @@ export function ItemsEditPage() {
     if (Object.keys(errs).length > 0) return;
     setSavingC(true);
     try {
-      const res = await fetch(`/api/dashboard/items/${id}/edit/add-item`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: addName.trim(),
-          description: addDescription.trim(),
-          quantityRequested: Number(addQuantity.trim()),
-          condition: addCondition,
-          productUrl: addUrl.trim() === "" ? null : addUrl.trim(),
-        }),
+       const res = await apiRequest("POST", `/api/dashboard/items/${id}/edit/add-item`, {
+         name: addName.trim(),
+         description: addDescription.trim(),
+         quantityRequested: Number(addQuantity.trim()),
+         condition: addCondition,
+         productUrl: addUrl.trim() === "" ? null : addUrl.trim(),
       });
       if (res.ok) {
         const body = (await res.json()) as { item: PayloadItem };
@@ -335,12 +319,9 @@ export function ItemsEditPage() {
         setAddUrl("");
         setErrorsC({});
         setMsgC({ kind: "success", text: ADD_SUCCESS_MSG });
-      } else {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        setMsgC({ kind: "error", text: body?.message ?? SAVE_FAILURE_MSG });
-      }
-    } catch {
-      setMsgC({ kind: "error", text: SAVE_FAILURE_MSG });
+       }
+     } catch (error) {
+       setMsgC({ kind: "error", text: getApiErrorMessage(error) ?? SAVE_FAILURE_MSG });
     } finally {
       setSavingC(false);
     }

@@ -12,6 +12,7 @@ import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import heroImg from "../../assets/requests/item-hero.png";
 import { DeadlineField, type DeadlineTypeValue } from "../../components/member/DeadlineField";
+import { apiRequest } from "../../lib/queryClient";
 
 const REQUIRED_MSG = "This field is required";
 const FAILURE_MSG = "Something went wrong and your request wasn't saved. Please try again.";
@@ -63,28 +64,23 @@ export function ItemsNewPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/dashboard/items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contactFirstName: contactFirstName.trim(),
-          contactLastName: contactLastName.trim(),
-          contactEmail: contactEmail.trim(),
-          contactPhone: contactPhone.trim(),
-          deadlineType,
-          deadlineDate: deadlineType === "date_specific" ? deadlineDate.trim() : null,
-          peopleHelped: Number(peopleHelped.trim()),
-          title: title.trim(),
-          description: description.trim(),
-        }),
+       const res = await apiRequest("POST", "/api/dashboard/items", {
+         contactFirstName: contactFirstName.trim(),
+         contactLastName: contactLastName.trim(),
+         contactEmail: contactEmail.trim(),
+         contactPhone: contactPhone.trim(),
+         deadlineType,
+         deadlineDate: deadlineType === "date_specific" ? deadlineDate.trim() : null,
+         peopleHelped: Number(peopleHelped.trim()),
+         title: title.trim(),
+         description: description.trim(),
       });
       if (res.ok) {
         const body = (await res.json()) as { id: string };
         navigate(`/dashboard/items/${body.id}/add`);
         return;
       }
-      setFailure(FAILURE_MSG);
-    } catch {
+     } catch {
       setFailure(FAILURE_MSG);
     } finally {
       setSubmitting(false);
