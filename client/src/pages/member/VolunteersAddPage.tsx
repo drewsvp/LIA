@@ -224,12 +224,12 @@ export function VolunteersAddPage() {
               ) : null}
 
               <div className="mp8-buttons">
-                <button type="submit" className="mp5-submit" disabled={adding}>
+                <button type="submit" className="mp5-submit mp11-action-btn" disabled={adding}>
                   {adding ? "Saving…" : "Add Role"}
                 </button>
                 <button
                   type="button"
-                  className="mp8-finish-btn"
+                  className="mp8-finish-btn mp11-action-btn"
                   disabled={roles.length === 0 || submitting}
                   onClick={onSubmitRequest}
                 >

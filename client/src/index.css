@@ -4748,3 +4748,25 @@ a.site-nav-btn {
   display: inline-flex;
   margin: 0;
 }
+
+/* MP-11 keeps both form actions as compact, centered flex items. The shared
+   .mp5-submit block alignment is correct for its other surfaces, but would
+   give the first action an auto margin inside this two-button row. */
+.mp8-buttons .mp11-action-btn {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 40px;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: var(--radius-card);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: normal;
+}
