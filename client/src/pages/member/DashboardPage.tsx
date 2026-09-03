@@ -23,7 +23,9 @@ type OverviewRequest = { id: string; title: string; createdAt: string; status: s
 type Overview = {
   org: { name: string; logoUrl: string | null };
   itemRequests: OverviewRequest[];
+  itemRequestsError?: boolean;
   volunteerRequests: OverviewRequest[];
+  volunteerRequestsError?: boolean;
 };
 
 const DATE_FMT = new Intl.DateTimeFormat("en-US", {
@@ -47,7 +49,8 @@ function optionLabel(r: OverviewRequest): string {
   return `${r.title} - ${DATE_FMT.format(new Date(r.createdAt))} [${statusLabel(r.status)}]`;
 }
 
-const QUERY_ERROR_COPY = "Your requests could not be loaded. Please refresh the page and try again.";
+const ITEM_QUERY_ERROR_COPY = "Item requests could not be loaded. Please refresh the page and try again.";
+const VOLUNTEER_QUERY_ERROR_COPY = "Volunteer requests could not be loaded. Please refresh the page and try again.";
 const ONLINE_COMMUNITY_LOGIN_URL = "https://www.alliancemembercommunity.org/users/sign_in#email";
 
 type DashboardTile =
@@ -62,6 +65,7 @@ function RequestSelector({
   buttonLabel,
   requests,
   failed,
+  errorCopy,
   loading,
   onEdit,
 }: {
@@ -71,6 +75,7 @@ function RequestSelector({
   buttonLabel: string;
   requests: OverviewRequest[] | undefined;
   failed: boolean;
+  errorCopy: string;
   loading: boolean;
   onEdit: (id: string) => void;
 }) {
@@ -82,7 +87,7 @@ function RequestSelector({
       <label className="mp4-select-label">{label}</label>
       {failed ? (
         <p className="mp4-query-error" role="alert">
-          {QUERY_ERROR_COPY}
+          {errorCopy}
         </p>
       ) : empty ? (
         <div className="mp4-select-row">
@@ -211,7 +216,8 @@ export function DashboardPage() {
             emptyCopy="Your organization doesn't have any item requests yet."
             buttonLabel="Edit Item Request"
             requests={overview?.itemRequests}
-            failed={overviewQuery.isError}
+            failed={overviewQuery.isError || overview?.itemRequestsError === true}
+            errorCopy={ITEM_QUERY_ERROR_COPY}
             loading={overviewQuery.isLoading}
             onEdit={(id) => navigate(`/dashboard/items/${id}/edit`)}
           />
@@ -221,7 +227,8 @@ export function DashboardPage() {
             emptyCopy="Your organization doesn't have any volunteer requests yet."
             buttonLabel="Edit Volunteer Request"
             requests={overview?.volunteerRequests}
-            failed={overviewQuery.isError}
+            failed={overviewQuery.isError || overview?.volunteerRequestsError === true}
+            errorCopy={VOLUNTEER_QUERY_ERROR_COPY}
             loading={overviewQuery.isLoading}
             onEdit={(id) => navigate(`/dashboard/volunteer/${id}/edit`)}
           />

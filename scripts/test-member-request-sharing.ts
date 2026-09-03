@@ -7,8 +7,10 @@
  * Usage: NODE_ENV=development npx tsx scripts/test-member-request-sharing.ts
  */
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { auth } from "../server/auth/auth";
 import { pool } from "../server/db/client";
+import { chromium } from "playwright";
 
 const BASE = process.env.TEST_BASE_URL ?? "http://127.0.0.1:5000";
 const runId = `${process.pid}-${Date.now()}`;
@@ -138,6 +140,13 @@ function idsFrom(body: Json, key: "itemRequests" | "volunteerRequests"): string[
     : [];
 }
 
+function browserCookies(cookie: string): Parameters<import("playwright").BrowserContext["addCookies"]>[0] {
+  return cookie.split("; ").map((pair) => {
+    const split = pair.indexOf("=");
+    return { name: pair.slice(0, split), value: pair.slice(split + 1), url: BASE };
+  });
+}
+
 async function cleanup(): Promise<void> {
   if (requestIds.length > 0) {
     await pool.query(`delete from email_log where entity_id = any($1::uuid[])`, [requestIds]);
@@ -263,6 +272,19 @@ async function main(): Promise<void> {
     "creator sees every organization request status",
   );
   check(
+    JSON.stringify(idsFrom(creatorOverview.body, "itemRequests").filter((id) => expectedItemIds.includes(id))) ===
+      JSON.stringify([...expectedItemIds].reverse()) &&
+      JSON.stringify(
+        idsFrom(creatorOverview.body, "volunteerRequests").filter((id) => expectedVolunteerIds.includes(id)),
+      ) === JSON.stringify([...expectedVolunteerIds].reverse()),
+    "dashboard request histories are newest first",
+  );
+  check(
+    creatorOverview.body.itemRequestsError === false && creatorOverview.body.volunteerRequestsError === false,
+    "successful request lists report no per-list errors",
+    creatorOverview.body,
+  );
+  check(
     teammateOverview.response.ok &&
       expectedItemIds.every((id) => idsFrom(teammateOverview.body, "itemRequests").includes(id)) &&
       expectedVolunteerIds.every((id) => idsFrom(teammateOverview.body, "volunteerRequests").includes(id)),
@@ -301,6 +323,37 @@ async function main(): Promise<void> {
     "supporter cannot list or load organization requests",
     `${supporterOverview.response.status}/${supporterItem.response.status}/${supporterVolunteer.response.status}`,
   );
+
+  const executablePath = execFileSync("which", ["chromium"], { encoding: "utf8" }).trim();
+  const browser = await chromium.launch({ headless: true, executablePath });
+  try {
+    const context = await browser.newContext();
+    await context.addCookies(browserCookies(teammate.cookie));
+    await context.route("**/api/dashboard/overview", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          org: { name: "Fixture Organization", logoUrl: null },
+          itemRequests: [{ id: activeItemId, title: `${marker} item active`, createdAt: new Date().toISOString(), status: "active" }],
+          itemRequestsError: false,
+          volunteerRequests: [],
+          volunteerRequestsError: true,
+        }),
+      });
+    });
+    const page = await context.newPage();
+    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+    check(
+      (await page.locator("select").nth(0).locator("option").filter({ hasText: `${marker} item active` }).count()) === 1 &&
+        (await page.getByRole("alert").filter({ hasText: "Volunteer requests could not be loaded" }).count()) === 1 &&
+        (await page.getByRole("alert").filter({ hasText: "Item requests could not be loaded" }).count()) === 0,
+      "dashboard keeps a successful list usable and names only the failed request type",
+    );
+    await context.close();
+  } finally {
+    await browser.close();
+  }
 
   const foreignChecks: ReadonlyArray<readonly [string, unknown?]> = [
     [`/api/dashboard/items/${activeItemId}`],

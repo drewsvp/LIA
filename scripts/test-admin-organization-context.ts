@@ -125,7 +125,10 @@ async function cleanup(): Promise<void> {
   }
   if (organizationIds.length) {
     if (requestIds.length) {
+      await pool.query(`delete from email_log where entity_id = any($1::uuid[])`, [requestIds]);
+      await pool.query(`delete from approval_events where entity_id = any($1::uuid[])`, [requestIds]);
       await pool.query(`delete from item_requests where id = any($1::uuid[])`, [requestIds]);
+      await pool.query(`delete from volunteer_requests where id = any($1::uuid[])`, [requestIds]);
     }
     await pool.query(`delete from organizations where id = any($1::uuid[]) and name like $2`, [
       organizationIds,
@@ -238,6 +241,34 @@ async function main(): Promise<void> {
       "portal write keeps the admin actor and records the selected organization context atomically",
     );
 
+    const volunteer = await pool.query<{ id: string }>(
+      `insert into volunteer_requests
+         (org_id, title, description, details, event_location, people_helped, deadline_type,
+          contact_person_id, status, created_by)
+       select $1, $2, 'Context volunteer fixture.', 'Fixture details.', 'Fixture location.',
+              1, 'ongoing', p.id, 'draft', $3
+         from people p
+        where lower(p.email) = lower($4)
+       returning id`,
+      [first.id, `${marker} volunteer request`, adminUserId, `${marker}@example.org`],
+    );
+    assert(volunteer.rows[0]?.id, "organization-context admin fixture has a volunteer request");
+    requestIds.push(volunteer.rows[0]!.id);
+
+    const requestLists = (await (
+      await fetch(`${BASE}/api/dashboard/overview`, { headers: { Cookie: adminCookie } })
+    ).json()) as {
+      org?: { name?: string };
+      itemRequests?: Array<{ id?: string }>;
+      volunteerRequests?: Array<{ id?: string }>;
+    };
+    assert(
+      requestLists.org?.name === first.name &&
+        requestLists.itemRequests?.some((request) => request.id === createdBody.id) &&
+        requestLists.volunteerRequests?.some((request) => request.id === volunteer.rows[0]!.id),
+      "staff organization view lists both request types from the selected organization",
+    );
+
     const audit = await pool.query<{ action: string; actorUserId: string; organizationId: string }>(
       `select action, actor_user_id as "actorUserId", organization_id as "organizationId"
          from organization_context_actions
@@ -309,6 +340,19 @@ async function main(): Promise<void> {
     adminCookie = mergeCookieHeader(adminCookie, secondEntry);
     const secondSession = await session(adminCookie);
     assert(secondSession.organizationContext?.organizationId === second.id, "new context becomes active");
+    const emptyOverviewResponse = await fetch(`${BASE}/api/dashboard/overview`, {
+      headers: { Cookie: adminCookie },
+    });
+    const emptyOverview = (await emptyOverviewResponse.json()) as {
+      itemRequests?: unknown[];
+      volunteerRequests?: unknown[];
+    };
+    assert(
+      emptyOverviewResponse.ok &&
+        emptyOverview.itemRequests?.length === 0 &&
+        emptyOverview.volunteerRequests?.length === 0,
+      "staff organization view returns independent empty request lists",
+    );
     await pool.query(
       `update admin_organization_contexts
           set expires_at = now() - interval '1 minute'

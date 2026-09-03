@@ -57,24 +57,44 @@ export function registerMemberRoutes(app: Express): void {
   app.get("/api/dashboard/overview", requireOrganization, async (req: Request, res: Response, next) => {
     try {
       const { orgId } = orgContext(req);
-      const [org, itemRequests, volunteerRequests] = await Promise.all([
-        dal.organizations.getById(SYSTEM, orgId),
-        dal.itemRequests.listByOrganization(SYSTEM, orgId),
-        dal.volunteerRequests.listByOrganization(SYSTEM, orgId),
-      ]);
+      // Resolve identity first: without it there is no valid dashboard
+      // response. The two request histories are independent, though. A
+      // problem reading one request table must not turn a healthy list into a
+      // misleading "unavailable" state as well.
+      const org = await dal.organizations.getById(SYSTEM, orgId);
       if (org === null) {
         sendNotFound(res);
         return;
       }
+
+      const [itemResult, volunteerResult] = await Promise.allSettled([
+        dal.itemRequests.listByOrganization(SYSTEM, orgId),
+        dal.volunteerRequests.listByOrganization(SYSTEM, orgId),
+      ]);
+      if (itemResult.status === "rejected") {
+        console.error("[dashboard/overview] item request list failed:", itemResult.reason);
+      }
+      if (volunteerResult.status === "rejected") {
+        console.error("[dashboard/overview] volunteer request list failed:", volunteerResult.reason);
+      }
+
       res.json({
         org: { name: org.name, logoUrl: org.logoUrl },
-        itemRequests: itemRequests.map((r) => ({ id: r.id, title: r.title, createdAt: r.createdAt, status: r.status })),
-        volunteerRequests: volunteerRequests.map((r) => ({
-          id: r.id,
-          title: r.title,
-          createdAt: r.createdAt,
-          status: r.status,
-        })),
+        itemRequests:
+          itemResult.status === "fulfilled"
+            ? itemResult.value.map((r) => ({ id: r.id, title: r.title, createdAt: r.createdAt, status: r.status }))
+            : [],
+        itemRequestsError: itemResult.status === "rejected",
+        volunteerRequests:
+          volunteerResult.status === "fulfilled"
+            ? volunteerResult.value.map((r) => ({
+                id: r.id,
+                title: r.title,
+                createdAt: r.createdAt,
+                status: r.status,
+              }))
+            : [],
+        volunteerRequestsError: volunteerResult.status === "rejected",
       });
     } catch (err) {
       next(err);
