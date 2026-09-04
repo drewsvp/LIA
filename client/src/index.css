@@ -3126,6 +3126,62 @@ a.site-nav-btn {
   text-align: center;
 }
 
+.adm-order-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.adm-order-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #b8c8d6;
+  border-radius: 6px;
+  background: #f7fafc;
+  color: var(--color-navy);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.adm-order-btn:hover:not(:disabled) {
+  border-color: var(--color-navy);
+  background: #eaf1f6;
+}
+
+.adm-order-btn:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-teal) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.adm-order-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.adm-population-rename-field {
+  display: grid;
+  gap: 5px;
+  min-width: 220px;
+}
+
+.adm-population-rename-field input {
+  width: 100%;
+}
+
+.adm-population-note {
+  display: inline-block;
+  max-width: 220px;
+  font-size: 12px;
+  white-space: normal;
+}
+
 .adm-category-add {
   margin-top: 28px;
   padding: 4px 16px 16px;

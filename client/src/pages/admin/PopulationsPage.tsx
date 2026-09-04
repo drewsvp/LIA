@@ -141,7 +141,7 @@ export function PopulationsPage() {
                   <th>Slug</th>
                   <th>Used by</th>
                   <th>State</th>
-                  <th></th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -149,42 +149,51 @@ export function PopulationsPage() {
                   <Fragment key={p.id}>
                     <tr className="adm-row">
                       <td>
-                        {/* Step 1: ↑/↓ buttons stacked vertically. */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <div className="adm-order-controls" aria-label={`Reorder ${p.name}`}>
                           <button
-                            className="adm-btn adm-btn-sm"
+                            className="adm-order-btn"
                             aria-label={`Move ${p.name} up`}
+                            title="Move up"
                             disabled={busy || i === 0}
                             onClick={() => void moveRow(i, -1)}
                           >
-                            ↑
+                            <span aria-hidden="true">↑</span>
                           </button>
                           <button
-                            className="adm-btn adm-btn-sm"
+                            className="adm-order-btn"
                             aria-label={`Move ${p.name} down`}
+                            title="Move down"
                             disabled={busy || i === populations.length - 1}
                             onClick={() => void moveRow(i, 1)}
                           >
-                            ↓
+                            <span aria-hidden="true">↓</span>
                           </button>
                         </div>
                       </td>
                       <td>
                         {renameId === p.id ? (
-                          /* Step 3: rename editing state — vertical stack. */
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div className="adm-population-rename-field">
                             <input
-                              style={{ width: "100%" }}
                               value={renameValue}
                               disabled={busy}
                               onChange={(e) => setRenameValue(e.target.value)}
                               aria-label={`New name for ${p.name}`}
                             />
-                            {/* §8 verbatim rename note. */}
-                            <span className="adm-muted" style={{ fontSize: 12 }}>
+                            <span className="adm-muted adm-population-note">
                               {RENAME_NOTE}
                             </span>
-                            <div className="adm-btn-row">
+                          </div>
+                        ) : (
+                          p.name
+                        )}
+                      </td>
+                      <td>{p.slug}</td>
+                      {/* §7: zero-org rows are deactivation candidates at a glance. */}
+                      <td>{p.orgCount === 0 ? <span className="adm-muted">{ZERO_ORGS}</span> : p.orgCount}</td>
+                      <td>{p.isActive ? "Active" : <strong>Inactive</strong>}</td>
+                      <td>
+                        {renameId === p.id ? (
+                          <div className="adm-btn-row">
                               <button
                                 className="adm-btn adm-btn-primary"
                                 disabled={busy || renameValue.trim() === "" || renameValue.trim() === p.name}
@@ -202,14 +211,11 @@ export function PopulationsPage() {
                               <button className="adm-btn" disabled={busy} onClick={() => setRenameId(null)}>
                                 Cancel
                               </button>
-                            </div>
                           </div>
-                        ) : (
-                          /* Step 2: name on its own line, Rename button below. */
-                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-                            <div>{p.name}</div>
+                        ) : p.slug === "other" ? (
+                          <div className="adm-btn-row">
                             <button
-                              className="adm-btn adm-btn-sm"
+                              className="adm-btn"
                               disabled={busy}
                               onClick={() => {
                                 setRenameId(p.id);
@@ -220,35 +226,37 @@ export function PopulationsPage() {
                             >
                               Rename
                             </button>
+                            <span className="adm-muted adm-population-note">{OTHER_BLOCKED}</span>
+                          </div>
+                        ) : (
+                          <div className="adm-btn-row">
+                            <button
+                              className="adm-btn"
+                              disabled={busy}
+                              onClick={() => {
+                                setRenameId(p.id);
+                                setRenameValue(p.name);
+                                setConfirmDeactivateId(null);
+                                setResult(null);
+                              }}
+                            >
+                              Rename
+                            </button>
+                            {p.isActive && (
+                              <button
+                                className="adm-btn"
+                                disabled={busy}
+                                onClick={() => {
+                                  setConfirmDeactivateId(p.id);
+                                  setRenameId(null);
+                                  setResult(null);
+                                }}
+                              >
+                                Deactivate
+                              </button>
+                            )}
                           </div>
                         )}
-                      </td>
-                      <td>{p.slug}</td>
-                      {/* §7: zero-org rows are deactivation candidates at a glance. */}
-                      <td>{p.orgCount === 0 ? <span className="adm-muted">{ZERO_ORGS}</span> : p.orgCount}</td>
-                      <td>{p.isActive ? "Active" : <strong>Inactive</strong>}</td>
-                      <td>
-                        {p.slug === "other" ? (
-                          /* Step 5: §6/§8: permanent infrastructure — compact muted note. */
-                          <span
-                            className="adm-muted"
-                            style={{ fontSize: 12, maxWidth: 220, whiteSpace: "normal", display: "inline-block" }}
-                          >
-                            {OTHER_BLOCKED}
-                          </span>
-                        ) : p.isActive ? (
-                          <button
-                            className="adm-btn"
-                            disabled={busy}
-                            onClick={() => {
-                              setConfirmDeactivateId(p.id);
-                              setRenameId(null);
-                              setResult(null);
-                            }}
-                          >
-                            Deactivate
-                          </button>
-                        ) : null}
                       </td>
                     </tr>
                     {/* Step 4: Deactivate confirmation as an expansion row. */}
