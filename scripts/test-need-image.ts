@@ -19,6 +19,11 @@ import * as itemRequests from "../server/dal/item-requests";
 import * as volunteerRequests from "../server/dal/volunteer-requests";
 import { sourceNeedImage, NeedImageError, type RequestKind } from "../server/services/need-image";
 import { storeImage, readImage, deleteImage, isAvailable } from "../server/storage/object-storage";
+import {
+  getCachedSiteSettings,
+  refreshSiteSettingsCache,
+  upsertSiteSettings,
+} from "../server/dal/site-settings";
 
 let passed = 0;
 let failed = 0;
@@ -230,13 +235,49 @@ async function runKind(kind: RequestKind, orgId: string): Promise<void> {
 
 async function main(): Promise<void> {
   assert(await isAvailable(), "object storage reachable");
+  const originalSettings = await refreshSiteSettingsCache(SYSTEM);
 
   const orgRows = await withDbContext(SYSTEM, (c) => q<{ id: string }>(c, "select id from organizations limit 1", []));
   const orgId = orgRows[0]?.id;
   if (!orgId) throw new Error("no organization in DB — run the seed first");
 
-  await runKind("item", orgId);
-  await runKind("volunteer", orgId);
+  try {
+    await upsertSiteSettings(SYSTEM, {
+      siteName: originalSettings.siteName,
+      contactEmail: originalSettings.contactEmail,
+      responseTimeLanguage: originalSettings.responseTimeLanguage,
+      imageGenerationEnabled: false,
+      updatedByUserId: originalSettings.updatedBy,
+    });
+    for (const kind of ["item", "volunteer"] as const) {
+      let blocked = false;
+      try {
+        await sourceNeedImage(kind, "00000000-0000-0000-0000-000000000000", { overwriteGenerated: false });
+      } catch (err) {
+        blocked = err instanceof NeedImageError && /disabled/.test(err.message);
+      }
+      assert(blocked, `${kind}: disabled flag rejects direct generation before request/provider work`);
+    }
+    assert(!getCachedSiteSettings().imageGenerationEnabled, "disabled setting is live in cache");
+
+    await upsertSiteSettings(SYSTEM, {
+      siteName: originalSettings.siteName,
+      contactEmail: originalSettings.contactEmail,
+      responseTimeLanguage: originalSettings.responseTimeLanguage,
+      imageGenerationEnabled: true,
+      updatedByUserId: originalSettings.updatedBy,
+    });
+    await runKind("item", orgId);
+    await runKind("volunteer", orgId);
+  } finally {
+    await upsertSiteSettings(SYSTEM, {
+      siteName: originalSettings.siteName,
+      contactEmail: originalSettings.contactEmail,
+      responseTimeLanguage: originalSettings.responseTimeLanguage,
+      imageGenerationEnabled: originalSettings.imageGenerationEnabled,
+      updatedByUserId: originalSettings.updatedBy,
+    });
+  }
 
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${skipped.length} skipped`);
   if (skipped.length > 0) {

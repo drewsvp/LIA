@@ -29,6 +29,7 @@ const DEFAULTS = {
   siteName: "Love in Action Database",
   contactEmail: "info@defendingthecause.org",
   responseTimeLanguage: "1-3 business days",
+  imageGenerationEnabled: false,
 };
 
 let passed = 0;
@@ -154,6 +155,7 @@ async function main(): Promise<void> {
           siteName: "Test Platform Name",
           contactEmail: "test@example.com",
           responseTimeLanguage: "2-4 weeks",
+          imageGenerationEnabled: true,
         };
 
         // Save via the admin endpoint.
@@ -187,6 +189,11 @@ async function main(): Promise<void> {
           getBody.responseTimeLanguage === testValues.responseTimeLanguage,
           "responseTimeLanguage must reflect saved value",
           { got: getBody.responseTimeLanguage, want: testValues.responseTimeLanguage },
+        );
+        assert(
+          getBody.imageGenerationEnabled === true,
+          "imageGenerationEnabled must reflect saved value",
+          getBody.imageGenerationEnabled,
         );
       },
     );
@@ -281,6 +288,70 @@ async function main(): Promise<void> {
           "responseTimeLanguage must be restored to default",
           { got: getBody.responseTimeLanguage, want: DEFAULTS.responseTimeLanguage },
         );
+        assert(
+          getBody.imageGenerationEnabled === false,
+          "reset must disable image generation",
+          getBody.imageGenerationEnabled,
+        );
+      },
+    );
+
+    await runCase(
+      "disabled flag rejects both direct generation endpoints; enabling restores route handling",
+      async () => {
+        const missingId = "00000000-0000-0000-0000-000000000000";
+        for (const kind of ["item", "volunteer"]) {
+          const disabledRes = await fetch(
+            `${BASE}/api/admin/requests/${kind}/${missingId}/generate-image`,
+            { method: "POST", headers: { Cookie: cookieHeader(adminCookie) } },
+          );
+          assert(disabledRes.status === 409, `${kind} generation must be rejected while disabled`, disabledRes.status);
+          const body = await disabledRes.json() as { message?: string };
+          assert(/disabled/i.test(body.message ?? ""), `${kind} disabled response must be clear`, body);
+        }
+
+        const enableRes = await fetch(`${BASE}/api/admin/site-settings`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Cookie: cookieHeader(adminCookie) },
+          body: JSON.stringify({ ...DEFAULTS, imageGenerationEnabled: true }),
+        });
+        assert(enableRes.ok, "enabling image generation must save", enableRes.status);
+
+        for (const kind of ["item", "volunteer"]) {
+          const enabledRes = await fetch(
+            `${BASE}/api/admin/requests/${kind}/${missingId}/generate-image`,
+            { method: "POST", headers: { Cookie: cookieHeader(adminCookie) } },
+          );
+          assert(enabledRes.status === 404, `${kind} enabled route must proceed past the feature guard`, enabledRes.status);
+        }
+
+        await fetch(`${BASE}/api/admin/site-settings/reset`, {
+          method: "POST",
+          headers: { Cookie: cookieHeader(adminCookie) },
+        });
+      },
+    );
+
+    await runCase(
+      "Browser: image generation control saves on and reset restores off",
+      async () => {
+        const ctx = await newCtx(browser, adminCookie);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(`${BASE}/admin/settings`, { waitUntil: "networkidle" });
+          const toggle = page.getByLabel("Enable automatic image generation");
+          await toggle.waitFor({ state: "visible", timeout: 8_000 });
+          assert(!(await toggle.isChecked()), "image generation toggle defaults off");
+          await toggle.check();
+          await page.getByRole("button", { name: "Save settings" }).click();
+          await page.getByText("Settings saved. Changes are live immediately.").waitFor();
+          assert(await toggle.isChecked(), "saved image generation toggle remains on");
+          await page.getByRole("button", { name: "Reset to defaults" }).click();
+          await page.getByText("Settings reset to built-in defaults.").waitFor();
+          assert(!(await toggle.isChecked()), "reset restores image generation toggle off");
+        } finally {
+          await ctx.close();
+        }
       },
     );
 
@@ -360,6 +431,7 @@ async function main(): Promise<void> {
             siteName: "Valid Name",
             contactEmail: "not-an-email",
             responseTimeLanguage: "1-3 business days",
+            imageGenerationEnabled: false,
           }),
         });
         assert(
@@ -426,6 +498,7 @@ async function main(): Promise<void> {
               siteName: NEW_NAME,
               contactEmail: DEFAULTS.contactEmail,
               responseTimeLanguage: DEFAULTS.responseTimeLanguage,
+              imageGenerationEnabled: false,
             }),
           });
           assert(
@@ -565,6 +638,7 @@ async function main(): Promise<void> {
               siteName: DEFAULTS.siteName,
               contactEmail: NEW_EMAIL,
               responseTimeLanguage: DEFAULTS.responseTimeLanguage,
+              imageGenerationEnabled: false,
             }),
           });
           assert(

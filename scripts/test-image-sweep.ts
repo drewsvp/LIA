@@ -16,6 +16,11 @@ import {
   claimImageGenForSweep,
   listFailedOrStrandedImageGen,
 } from "../server/dal/item-requests";
+import { sweepFailedImages } from "../server/jobs/image-sweep";
+import {
+  refreshSiteSettingsCache,
+  upsertSiteSettings,
+} from "../server/dal/site-settings";
 
 const STRANDED_MINUTES = 5;
 const MAX_RETRIES = 3;
@@ -72,6 +77,34 @@ async function insertTestRequest(opts: {
 
 async function main(): Promise<void> {
   console.log("\n[image-sweep tests]\n");
+  const originalSettings = await refreshSiteSettingsCache(SYSTEM);
+
+  await upsertSiteSettings(SYSTEM, {
+    siteName: originalSettings.siteName,
+    contactEmail: originalSettings.contactEmail,
+    responseTimeLanguage: originalSettings.responseTimeLanguage,
+    imageGenerationEnabled: false,
+    updatedByUserId: originalSettings.updatedBy,
+  });
+  const disabledId = await insertTestRequest({ imageGenStatus: "failed" });
+  const disabledSummary = await sweepFailedImages("item");
+  assert(disabledSummary.total === 0, "disabled sweep returns without processing candidates");
+  const disabledRow = await pool.query<{ image_gen_retries: number; image_gen_status: string }>(
+    `select image_gen_retries, image_gen_status from item_requests where id = $1`,
+    [disabledId],
+  );
+  assert(
+    disabledRow.rows[0]?.image_gen_retries === 0 && disabledRow.rows[0]?.image_gen_status === "failed",
+    "disabled sweep does not claim a row or call generation",
+  );
+
+  await upsertSiteSettings(SYSTEM, {
+    siteName: originalSettings.siteName,
+    contactEmail: originalSettings.contactEmail,
+    responseTimeLanguage: originalSettings.responseTimeLanguage,
+    imageGenerationEnabled: true,
+    updatedByUserId: originalSettings.updatedBy,
+  });
 
   // ── 1. Concurrent claims on a 'failed' row ─────────────────────────────
   {
@@ -153,6 +186,13 @@ async function main(): Promise<void> {
       [cleanup],
     );
   }
+  await upsertSiteSettings(SYSTEM, {
+    siteName: originalSettings.siteName,
+    contactEmail: originalSettings.contactEmail,
+    responseTimeLanguage: originalSettings.responseTimeLanguage,
+    imageGenerationEnabled: originalSettings.imageGenerationEnabled,
+    updatedByUserId: originalSettings.updatedBy,
+  });
   await pool.end();
 
   console.log(`\n  ${passed} passed, ${failed} failed\n`);

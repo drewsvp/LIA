@@ -9,6 +9,7 @@ export type SiteSettings = {
   siteName: string;
   contactEmail: string;
   responseTimeLanguage: string;
+  imageGenerationEnabled: boolean;
   directorName: string;
   directorEmail: string;
 };
@@ -17,6 +18,7 @@ const SITE_SETTINGS_DEFAULTS: SiteSettings = {
   siteName: "Love in Action Database",
   contactEmail: "info@defendingthecause.org",
   responseTimeLanguage: "1-3 business days",
+  imageGenerationEnabled: false,
   directorName: "Christina Moe",
   directorEmail: "christina@defendingthecause.org",
 };

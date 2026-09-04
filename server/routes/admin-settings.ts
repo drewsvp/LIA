@@ -21,12 +21,6 @@ function staffCtx(req: Request): DbContext {
 }
 
 export function registerSettingsAdminRoutes(app: Express): void {
-  // Warm up site settings cache when routes are registered (server startup).
-  // Runs in parallel with the brand cache warmup in admin-email-templates.ts.
-  void dal.siteSettings.refreshSiteSettingsCache({ kind: "system" }).catch((err) =>
-    console.warn("[admin] site settings warmup failed:", err),
-  );
-
   // ---- Public endpoint: returns settings needed by client pages.
   // No auth required — reads from in-process cache, no DB hit.
   app.get("/api/site-settings", (_req: Request, res: Response) => {
@@ -36,6 +30,7 @@ export function registerSettingsAdminRoutes(app: Express): void {
       siteName: site.siteName,
       contactEmail: site.contactEmail,
       responseTimeLanguage: site.responseTimeLanguage,
+      imageGenerationEnabled: site.imageGenerationEnabled,
       directorName: brand.directorName,
       directorEmail: brand.directorEmail,
     });
@@ -66,6 +61,9 @@ export function registerSettingsAdminRoutes(app: Express): void {
       if (typeof body.responseTimeLanguage !== "string" || body.responseTimeLanguage.trim() === "") {
         errors.push("Response-time language is required.");
       }
+      if (typeof body.imageGenerationEnabled !== "boolean") {
+        errors.push("Image generation setting must be on or off.");
+      }
 
       if (errors.length > 0) {
         res.status(400).json({ message: "Settings were not saved.", errors });
@@ -76,6 +74,7 @@ export function registerSettingsAdminRoutes(app: Express): void {
         siteName: (body.siteName as string).trim(),
         contactEmail: (body.contactEmail as string).trim(),
         responseTimeLanguage: (body.responseTimeLanguage as string).trim(),
+        imageGenerationEnabled: body.imageGenerationEnabled as boolean,
         updatedByUserId: staffContext(req).userId,
       });
       res.json({ ok: true, settings: saved });

@@ -28,6 +28,7 @@ import * as itemRequests from "../dal/item-requests";
 import * as items from "../dal/items";
 import * as volunteerRequests from "../dal/volunteer-requests";
 import * as volunteerRoles from "../dal/volunteer-roles";
+import { getCachedSiteSettings } from "../dal/site-settings";
 import { storeImage, deleteImage } from "../storage/object-storage";
 
 export class NeedImageError extends Error {
@@ -369,6 +370,9 @@ export async function sourceNeedImage(
   requestId: string,
   opts: { overwriteGenerated: boolean },
 ): Promise<SourceNeedImageResult> {
+  if (!getCachedSiteSettings().imageGenerationEnabled) {
+    throw new NeedImageError("Automatic image generation is disabled in site settings.");
+  }
   const dal = adapters[kind];
   const request = await dal.getById(SYSTEM, requestId);
   if (!request) throw new NeedImageError(`Request not found: ${requestId}`);
@@ -418,7 +422,7 @@ export async function sourceNeedImage(
  * recorded on the row and logged.
  */
 export function sourceNeedImageInBackground(request: ImageableRequest, kind: RequestKind): void {
-  if (request.imageUrl !== null) return; // a photo exists — nothing to fill
+  if (!getCachedSiteSettings().imageGenerationEnabled || request.imageUrl !== null) return;
   void sourceNeedImage(kind, request.id, { overwriteGenerated: false })
     .then(() => {
       console.log(`[need-image] ${kind} ${request.id} "${request.title}": ai image stored`);

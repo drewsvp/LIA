@@ -17,6 +17,7 @@
  */
 import { SYSTEM, withDbContext, q } from "../server/db/client";
 import { sourceNeedImage } from "../server/services/need-image";
+import { refreshSiteSettingsCache } from "../server/dal/site-settings";
 
 const CONCURRENCY = 3; // parallel sourcing requests
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -53,6 +54,9 @@ async function pool<T>(
 }
 
 async function main(): Promise<void> {
+  // This script runs outside the app process, so hydrate persisted feature
+  // flags before sourceNeedImage consults the in-process cache.
+  await refreshSiteSettingsCache(SYSTEM);
   const targets = await fetchTargetIds();
 
   if (targets.length === 0) {

@@ -14,6 +14,7 @@ import { startImageSweep } from "./jobs/image-sweep";
 import { setupVite, serveStatic } from "./vite";
 import { runDbRoutineChecks } from "./db/startup-checks";
 import { applyMigrations } from "./db/apply-migrations";
+import { refreshSiteSettingsCache } from "./dal/site-settings";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -86,6 +87,10 @@ async function start(): Promise<void> {
   // Check both routine presence and code/schema version before accepting
   // traffic. These checks are diagnostic and never block startup themselves.
   await runDbRoutineChecks();
+  // Feature flags must reflect their persisted values before jobs start or
+  // requests are accepted. The cache's default-off fallback is only a
+  // pre-initialization safety net, not a substitute for startup hydration.
+  await refreshSiteSettingsCache({ kind: "system" });
 
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);

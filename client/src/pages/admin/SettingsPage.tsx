@@ -18,6 +18,7 @@ type SiteSettingsRow = {
   siteName: string;
   contactEmail: string;
   responseTimeLanguage: string;
+  imageGenerationEnabled: boolean;
   updatedAt: string | null;
   updatedByName: string | null;
 };
@@ -71,6 +72,7 @@ export function SettingsPage(): ReactElement {
           siteName: draft.siteName,
           contactEmail: draft.contactEmail,
           responseTimeLanguage: draft.responseTimeLanguage,
+          imageGenerationEnabled: draft.imageGenerationEnabled,
         },
         "PUT",
       );
@@ -133,7 +135,7 @@ export function SettingsPage(): ReactElement {
       <h1 className="adm-heading">Settings</h1>
 
       <p className="adm-muted">
-        These three values appear across the member signup page, the member dashboard, and outbound emails.
+        These settings control site-wide copy and optional features.
         Changes take effect immediately — no redeploy required.
         Email branding (colours, fonts, org name, director details) is managed on the{" "}
         <a href="/admin/emails" className="adm-link">Automated Emails</a> page.
@@ -163,6 +165,18 @@ export function SettingsPage(): ReactElement {
             value={draft.siteName}
             onChange={(e) => setDraft({ ...draft, siteName: e.target.value })}
           />
+        </label>
+
+        <label className="adm-filter">
+          <input
+            type="checkbox"
+            checked={draft.imageGenerationEnabled}
+            onChange={(e) => setDraft({ ...draft, imageGenerationEnabled: e.target.checked })}
+          />{" "}
+          Enable automatic image generation
+          <span className="adm-muted">
+            {" "}— allows OpenAI to create request images after submission and lets staff generate or regenerate them
+          </span>
         </label>
 
         <label className="adm-filter">

@@ -21,6 +21,7 @@ import * as volunteerRequests from "../dal/volunteer-requests";
 import { SYSTEM } from "../db/client";
 import { sourceNeedImage, type RequestKind } from "../services/need-image";
 import { sweepStorageCleanup } from "../services/storage-cleanup";
+import { getCachedSiteSettings } from "../dal/site-settings";
 
 /** A stranded 'pending' row must be at least this old before the sweep
  *  touches it — a freshly-submitted request is normally resolved within
@@ -67,6 +68,7 @@ export type ImageSweepSummary = { retried: number; failed: number; skipped: numb
  *  succeeded or failed, never silently dropped. */
 export async function sweepFailedImages(kind: RequestKind): Promise<ImageSweepSummary> {
   const summary: ImageSweepSummary = { retried: 0, failed: 0, skipped: 0, total: 0 };
+  if (!getCachedSiteSettings().imageGenerationEnabled) return summary;
   const dal = SWEEP_DALS[kind];
 
   let rows;

@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { productUrlProblem } from "@shared/item-product-url";
 import { useNavigationGuard } from "../../hooks/useNavigationGuard";
 import { ParticipationManager } from "../../components/admin/ParticipationManager";
+import { useSiteSettings } from "../../hooks/useSiteSettings";
 
 type RequestKind = "item" | "volunteer";
 type Tab = "pending" | "active" | "archived" | "returned";
@@ -595,6 +596,7 @@ function RoleChildEditor({
 
 export function RequestsPage() {
   const queryClient = useQueryClient();
+  const { settings: siteSettings } = useSiteSettings();
   const [tab, setTab] = useState<Tab>("pending");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [selected, setSelected] = useState<{ type: RequestKind; id: string } | null>(null);
@@ -1333,7 +1335,7 @@ export function RequestsPage() {
                   {request.imageUrl && (
                     <>
                       <img className="adm-img" src={request.imageUrl} alt={request.title} />
-                      {request.imageGenerated && (
+                      {siteSettings.imageGenerationEnabled && request.imageGenerated && (
                         <p className="adm-ai-label">AI-generated image.</p>
                       )}
                     </>
@@ -1352,7 +1354,7 @@ export function RequestsPage() {
                       }}
                     />
                   </p>
-                  {(request.imageUrl === null || request.imageGenerated) && (
+                  {siteSettings.imageGenerationEnabled && (request.imageUrl === null || request.imageGenerated) && (
                     <div className="adm-upload adm-image-actions">
                       <button
                         type="button"
@@ -1418,17 +1420,17 @@ export function RequestsPage() {
               {request.imageUrl ? (
                 <>
                   <img className="adm-img" src={request.imageUrl} alt={request.title} />
-                  {request.imageGenerated && <p className="adm-ai-label">AI-generated image.</p>}
+                  {siteSettings.imageGenerationEnabled && request.imageGenerated && <p className="adm-ai-label">AI-generated image.</p>}
                 </>
               ) : (
                 <p className="adm-muted">Image: {NOT_PROVIDED}</p>
               )}
-              {request.imageGenStatus === "failed" && (
+              {siteSettings.imageGenerationEnabled && request.imageGenStatus === "failed" && (
                 <p className="adm-alert">
                   Automatic image sourcing failed{request.imageGenError ? `: ${request.imageGenError}` : "."}
                 </p>
               )}
-              {request.imageGenStatus === "pending" && !request.imageUrl && (
+              {siteSettings.imageGenerationEnabled && request.imageGenStatus === "pending" && !request.imageUrl && (
                 <p className="adm-muted">An image is being sourced automatically…</p>
               )}
               {request.description ? <p>{request.description}</p> : <p className="adm-muted">Description: {NOT_PROVIDED}</p>}
@@ -1736,7 +1738,7 @@ export function RequestsPage() {
               )}
 
               {/* Auto-sourced image controls — both kinds, never over an uploaded photo. */}
-              {isEditable && (request.imageUrl === null || request.imageGenerated) && (
+              {siteSettings.imageGenerationEnabled && isEditable && (request.imageUrl === null || request.imageGenerated) && (
                 <div className="adm-upload adm-image-actions">
                   <button
                     className="adm-btn"

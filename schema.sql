@@ -1731,6 +1731,7 @@ CREATE TABLE public.site_settings (
     site_name text DEFAULT 'Love in Action Database'::text NOT NULL,
     contact_email text DEFAULT 'info@defendingthecause.org'::text NOT NULL,
     response_time_language text DEFAULT '1-3 business days'::text NOT NULL,
+    image_generation_enabled boolean DEFAULT false NOT NULL,
     updated_at timestamp with time zone,
     updated_by uuid,
     CONSTRAINT site_settings_singleton CHECK ((id = 1))

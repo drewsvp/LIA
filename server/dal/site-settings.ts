@@ -12,6 +12,7 @@ export type SiteSettingsRow = {
   siteName: string;
   contactEmail: string;
   responseTimeLanguage: string;
+  imageGenerationEnabled: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
   /** Display name resolved via the users + people join. */
@@ -23,6 +24,7 @@ export const SITE_SETTINGS_DEFAULTS = {
   siteName: "Love in Action Database",
   contactEmail: "info@defendingthecause.org",
   responseTimeLanguage: "1-3 business days",
+  imageGenerationEnabled: false,
 };
 
 const ADMIN_COLS = `
@@ -30,6 +32,7 @@ const ADMIN_COLS = `
   s.site_name              as "siteName",
   s.contact_email          as "contactEmail",
   s.response_time_language as "responseTimeLanguage",
+  s.image_generation_enabled as "imageGenerationEnabled",
   s.updated_at             as "updatedAt",
   s.updated_by             as "updatedBy",
   case when p.id is not null
@@ -42,6 +45,7 @@ const INTERNAL_COLS = `
   site_name              as "siteName",
   contact_email          as "contactEmail",
   response_time_language as "responseTimeLanguage",
+  image_generation_enabled as "imageGenerationEnabled",
   updated_at             as "updatedAt",
   updated_by             as "updatedBy",
   null::text             as "updatedByName"`;
@@ -138,6 +142,7 @@ export type UpsertSiteSettingsInput = {
   siteName: string;
   contactEmail: string;
   responseTimeLanguage: string;
+  imageGenerationEnabled: boolean;
   updatedByUserId: string | null;
 };
 
@@ -150,17 +155,18 @@ export async function upsertSiteSettings(
     q<SiteSettingsRow>(
       c,
       `insert into site_settings (
-         id, site_name, contact_email, response_time_language, updated_at, updated_by
+         id, site_name, contact_email, response_time_language, image_generation_enabled, updated_at, updated_by
        )
-       values (1, $1, $2, $3, now(), $4)
+       values (1, $1, $2, $3, $4, now(), $5)
        on conflict (id) do update set
          site_name              = excluded.site_name,
          contact_email          = excluded.contact_email,
          response_time_language = excluded.response_time_language,
+          image_generation_enabled = excluded.image_generation_enabled,
          updated_at             = now(),
          updated_by             = excluded.updated_by
        returning ${INTERNAL_COLS}`,
-      [input.siteName, input.contactEmail, input.responseTimeLanguage, input.updatedByUserId],
+       [input.siteName, input.contactEmail, input.responseTimeLanguage, input.imageGenerationEnabled, input.updatedByUserId],
     ),
   );
   const row = rows[0];
@@ -179,17 +185,18 @@ export async function resetSiteSettingsToDefaults(
     q<SiteSettingsRow>(
       c,
       `insert into site_settings (
-         id, site_name, contact_email, response_time_language, updated_at, updated_by
+         id, site_name, contact_email, response_time_language, image_generation_enabled, updated_at, updated_by
        )
-       values (1, $1, $2, $3, now(), $4)
+       values (1, $1, $2, $3, $4, now(), $5)
        on conflict (id) do update set
          site_name              = excluded.site_name,
          contact_email          = excluded.contact_email,
          response_time_language = excluded.response_time_language,
+          image_generation_enabled = excluded.image_generation_enabled,
          updated_at             = now(),
          updated_by             = excluded.updated_by
        returning ${INTERNAL_COLS}`,
-      [d.siteName, d.contactEmail, d.responseTimeLanguage, updatedByUserId],
+       [d.siteName, d.contactEmail, d.responseTimeLanguage, d.imageGenerationEnabled, updatedByUserId],
     ),
   );
   const row = rows[0];

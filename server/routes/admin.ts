@@ -1771,6 +1771,10 @@ export function registerAdminRoutes(app: Express): void {
   // never replaces an uploaded photo. Runs synchronously so staff see the
   // result or the exact error. Item and volunteer requests behave identically.
   app.post("/api/admin/requests/item/:id/generate-image", requireStaff, async (req: Request, res: Response) => {
+    if (!dal.siteSettings.getCachedSiteSettings().imageGenerationEnabled) {
+      res.status(409).json({ message: "Automatic image generation is disabled in site settings." });
+      return;
+    }
     const id = req.params.id ?? "";
     if (!UUID_RE.test(id)) {
       sendNotFound(res);
@@ -1812,6 +1816,10 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   app.post("/api/admin/requests/item/:id/remove-generated-image", requireStaff, async (req: Request, res: Response) => {
+    if (!dal.siteSettings.getCachedSiteSettings().imageGenerationEnabled) {
+      res.status(409).json({ message: "Automatic image generation is disabled in site settings." });
+      return;
+    }
     const id = req.params.id ?? "";
     if (!UUID_RE.test(id)) {
       sendNotFound(res);
@@ -1859,6 +1867,10 @@ export function registerAdminRoutes(app: Express): void {
   // ---- Volunteer twins of the two endpoints above. Same guards, same voice;
   // only the table differs.
   app.post("/api/admin/requests/volunteer/:id/generate-image", requireStaff, async (req: Request, res: Response) => {
+    if (!dal.siteSettings.getCachedSiteSettings().imageGenerationEnabled) {
+      res.status(409).json({ message: "Automatic image generation is disabled in site settings." });
+      return;
+    }
     const id = req.params.id ?? "";
     if (!UUID_RE.test(id)) {
       sendNotFound(res);
@@ -1903,6 +1915,10 @@ export function registerAdminRoutes(app: Express): void {
     "/api/admin/requests/volunteer/:id/remove-generated-image",
     requireStaff,
     async (req: Request, res: Response) => {
+      if (!dal.siteSettings.getCachedSiteSettings().imageGenerationEnabled) {
+        res.status(409).json({ message: "Automatic image generation is disabled in site settings." });
+        return;
+      }
       const id = req.params.id ?? "";
       if (!UUID_RE.test(id)) {
         sendNotFound(res);
