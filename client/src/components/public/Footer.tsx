@@ -7,7 +7,7 @@ import { Link } from "wouter";
  *
  * Full-bleed navy matching the .pb2-banner treatment already used elsewhere.
  * Left: organization identity and copyright. Right: quiet links to the
- * About page, digest signup and member login, then the Alliance's social
+ * About page, digest signup and login, then the Alliance's social
  * accounts.
  *
  * LinkedIn is deliberately absent: only the org's display name is confirmed
@@ -54,7 +54,7 @@ export function Footer(): ReactElement {
               Weekly email signup
             </Link>
             <Link href="/login" className="pb-footer-link">
-              Member login
+              Login
             </Link>
           </nav>
           <ul className="pb-footer-social">

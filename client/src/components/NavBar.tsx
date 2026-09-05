@@ -3,7 +3,7 @@
  *
  * Desktop: logo left; the right side is a two-row stack inside one navigation
  * landmark, mirroring the main Alliance site's header. The lower row holds
- * ABOUT, ALLIANCE HOMEPAGE (external, new tab), MEMBER LOGIN (unauthenticated
+ * ABOUT, ALLIANCE HOMEPAGE (external, new tab), LOGIN (unauthenticated
  * only), PROVIDE AN ITEM, and VOLUNTEER as plain text links, followed by the
  * org switcher when the session carries one. The floating top row only renders
  * when authenticated: it holds the in-portal controls (DASHBOARD, ADMIN, user
@@ -168,9 +168,9 @@ export function NavBar(): ReactElement {
   // authenticated session, membership or not — otherwise a member-less
   // login has no way to see who they are or sign out.
   const showUserMenu = !isLoading && session?.authenticated === true;
-  // Member login is offered only to visitors without a session; an
+  // Login is offered only to visitors without a session; an
   // authenticated visitor already has the user menu.
-  const showMemberLogin = !isLoading && session?.authenticated !== true;
+  const showLogin = !isLoading && session?.authenticated !== true;
   const firstName = session?.user?.firstName ?? "";
   // Admin link: visible to any staff session (approver or admin); both roles
   // can reach /admin/organizations (the first non-staff-admin-only surface).
@@ -200,7 +200,7 @@ export function NavBar(): ReactElement {
         <nav className="site-nav-stack" aria-label="Main navigation">
           {/* The floating top row only renders for authenticated sessions so it
               never creates a blank gap in the flex stack for logged-out visitors. */}
-          {showMemberLogin ? null : (
+          {showLogin ? null : (
             <div className="site-nav-top">
               {showDashboard ? (
                 <Link href="/dashboard" className="site-nav-btn ui-btn">
@@ -243,9 +243,9 @@ export function NavBar(): ReactElement {
             <Link href="/volunteer" className="site-nav-link">
               VOLUNTEER
             </Link>
-            {showMemberLogin ? (
+            {showLogin ? (
               <Link href="/login" className="site-nav-btn ui-btn">
-                MEMBER LOGIN
+                LOGIN
               </Link>
             ) : null}
             <OrgSwitcher className="site-nav-switcher" />
@@ -303,9 +303,9 @@ export function NavBar(): ReactElement {
           <Link href="/volunteer" className="site-nav-panel-item" onClick={() => setMenuOpen(false)}>
             VOLUNTEER
           </Link>
-          {showMemberLogin ? (
+          {showLogin ? (
             <Link href="/login" className="site-nav-btn ui-btn" onClick={() => setMenuOpen(false)}>
-              MEMBER LOGIN
+              LOGIN
             </Link>
           ) : null}
           <OrgSwitcher className="site-nav-switcher site-nav-switcher-mobile" />

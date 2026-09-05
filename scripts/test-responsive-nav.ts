@@ -45,9 +45,9 @@ const PUBLIC_SIGNED_OUT = [
   { text: "ALLIANCE HOMEPAGE", href: ALLIANCE_HOMEPAGE },
   { text: "PROVIDE AN ITEM", href: "/items" },
   { text: "VOLUNTEER", href: "/volunteer" },
-  { text: "MEMBER LOGIN", href: "/login" },
+  { text: "LOGIN", href: "/login" },
 ] as const;
-const PUBLIC_AUTHENTICATED = PUBLIC_SIGNED_OUT.filter(({ text }) => text !== "MEMBER LOGIN");
+const PUBLIC_AUTHENTICATED = PUBLIC_SIGNED_OUT.filter(({ text }) => text !== "LOGIN");
 
 type AuthState = Awaited<ReturnType<BrowserContext["storageState"]>>;
 type SessionExpectation =
@@ -342,7 +342,7 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
 
   if (mobile) {
     // Collect all direct anchor children of the panel in DOM order: plain
-    // links use site-nav-panel-item; MEMBER LOGIN (unauthenticated only) now
+    // links use site-nav-panel-item; LOGIN (unauthenticated only) now
     // uses site-nav-btn. Both are direct <a> children so one selector covers
     // both without breaking DOM order.
     const panelItems = await page.locator(".site-nav-panel > a:visible").allTextContents();
@@ -369,31 +369,31 @@ async function assertPublicDestinations(page: Page, authenticated: boolean, mobi
     `Expected ${JSON.stringify(expectedTopOrder)}, got ${JSON.stringify(topOrder)}.`,
   );
   // Collect all direct anchor children of the lower row in DOM order: plain
-  // links use site-nav-link; MEMBER LOGIN (unauthenticated only) now uses
+  // links use site-nav-link; LOGIN (unauthenticated only) now uses
   // site-nav-btn. Both are direct <a> children so one selector covers both.
   const rightOrder = (await page.locator(".site-nav-right > a:visible").allTextContents()).map((item) =>
     item.trim(),
   );
   // PROVIDE AN ITEM and VOLUNTEER are plain links in the lower row for every
   // visitor state. The top row is only rendered when authenticated (portal
-  // controls); logged-out visitors see MEMBER LOGIN as a navy button at the
+  // controls); logged-out visitors see LOGIN as a navy button at the
   // far right, after VOLUNTEER.
   const expectedRightOrder = authenticated
     ? ["ABOUT", "ALLIANCE HOMEPAGE", "PROVIDE AN ITEM", "VOLUNTEER"]
-    : ["ABOUT", "ALLIANCE HOMEPAGE", "PROVIDE AN ITEM", "VOLUNTEER", "MEMBER LOGIN"];
+    : ["ABOUT", "ALLIANCE HOMEPAGE", "PROVIDE AN ITEM", "VOLUNTEER", "LOGIN"];
   assertThat(
     JSON.stringify(rightOrder) === JSON.stringify(expectedRightOrder),
     "Desktop secondary public destinations are in the wrong order.",
     `Expected ${JSON.stringify(expectedRightOrder)}, got ${JSON.stringify(rightOrder)}.`,
   );
-  // MEMBER LOGIN must use the navy button style, not a plain text link.
+  // LOGIN must use the navy button style, not a plain text link.
   if (!authenticated) {
     const loginClass = await page
       .locator('.site-nav-right > a[href="/login"]:visible')
       .getAttribute("class");
     assertThat(
       loginClass !== null && loginClass.includes("site-nav-btn"),
-      "MEMBER LOGIN must use the site-nav-btn class in the desktop nav.",
+      "LOGIN must use the site-nav-btn class in the desktop nav.",
       `Got class=${JSON.stringify(loginClass)}.`,
     );
   }
@@ -434,11 +434,11 @@ async function assertSignedOutNavigation(page: Page, width: number): Promise<voi
 
 async function assertAuthenticatedNavigation(page: Page, width: number, expected: NavExpectation): Promise<void> {
   const mobile = width <= 720;
-  const memberLoginCount = await page
+  const loginCount = await page
     .locator(".site-nav a")
-    .filter({ hasText: exactText("MEMBER LOGIN") })
+    .filter({ hasText: exactText("LOGIN") })
     .count();
-  assertThat(memberLoginCount === 0, `Authenticated navigation contains ${memberLoginCount} MEMBER LOGIN link(s).`);
+  assertThat(loginCount === 0, `Authenticated navigation contains ${loginCount} LOGIN link(s).`);
 
   if (mobile) {
     assertThat((await page.locator(".site-nav-stack:visible").count()) === 0, "Desktop navigation is visible at a mobile width.");
@@ -815,15 +815,15 @@ async function runNavFlashCase(
     //
     // Teal CTA buttons no longer exist anywhere in the nav — but the check is
     // kept to guard against a future regression that reintroduces them.
-    //   showMemberLogin = !isLoading && !authenticated  →  false while loading
+    //   showLogin = !isLoading && !authenticated  →  false while loading
     assertThat(
       (await page.locator(".site-nav .site-nav-btn-cta:visible").count()) === 0,
       `${label}: teal CTA buttons are visible during the session loading window.`,
     );
-    // MEMBER LOGIN link (unauthenticated-only):
+    // LOGIN link (unauthenticated-only):
     assertThat(
       (await page.locator(".site-nav a[href='/login']:visible").count()) === 0,
-      `${label}: MEMBER LOGIN link is visible during the session loading window.`,
+      `${label}: LOGIN link is visible during the session loading window.`,
     );
     // DASHBOARD link (authenticated-only):
     //   showDashboard = !isLoading && authenticated && memberships ≥ 1
@@ -893,7 +893,7 @@ async function runNavFlashCase(
     }
     assertThat(
       (await page.locator(".site-nav a[href='/login']:visible").count()) === 0,
-      `${label}: MEMBER LOGIN still visible after the session resolved for an authenticated user.`,
+      `${label}: LOGIN still visible after the session resolved for an authenticated user.`,
     );
 
     console.log(`  ✓ ${label}`);
