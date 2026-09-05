@@ -16,6 +16,7 @@ export type ContactAuditRow = {
   id: string;
   action: string;
   outcome: string;
+  actorName: string | null;
   details: Record<string, unknown>;
   createdAt: string;
 };
@@ -72,10 +73,14 @@ export async function listAuditHistory(ctx: DbContext, personId: string): Promis
   return withDbContext(ctx, (c) =>
     q<ContactAuditRow>(
       c,
-      `select id, action, outcome, details, created_at as "createdAt"
-         from contact_admin_audit
-        where person_id = $1
-        order by created_at desc, id desc
+      `select ca.id, ca.action, ca.outcome,
+              nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as "actorName",
+              ca.details, ca.created_at as "createdAt"
+         from contact_admin_audit ca
+         left join users u on u.id = ca.actor_user_id
+         left join people p on p.id = u.person_id
+        where ca.person_id = $1
+        order by ca.created_at desc, ca.id desc
         limit 100`,
       [personId],
     ),

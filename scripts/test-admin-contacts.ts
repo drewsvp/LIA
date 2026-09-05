@@ -95,6 +95,15 @@ async function main(): Promise<void> {
   const approver = await users.findByEmail(SYSTEM, "approver@thealliance.example.org");
   const linked = await users.findByEmail(SYSTEM, "supporter@example.org");
   assert(staff && approver && linked?.authSubject, "seeded staff, approver, and linked supporter exist");
+  const staffActorName = (
+    await pool.query<{ name: string }>(
+      `select trim(concat_ws(' ', p.first_name, p.last_name)) as name
+         from users u join people p on p.id = u.person_id
+        where u.id = $1`,
+      [staff.id],
+    )
+  ).rows[0]?.name;
+  assert(staffActorName, "staff administrator name is available");
 
   const created: string[] = [];
   const staffCookie = await session("tiffany@defendingthecause.org");
@@ -196,10 +205,24 @@ async function main(): Promise<void> {
         unlinkedAfter.rows[0]?.phone === "555-0199",
       "an unlinked person's normalized email and ordinary edits take effect immediately",
     );
+    await pool.query(
+      `insert into contact_admin_audit (actor_user_id, person_id, action, outcome, details)
+       values (null, $1, 'contact_edit', 'success', $2::jsonb)`,
+      [unlinked.id, JSON.stringify({ zz_fixture: marker, unavailableActor: true })],
+    );
     const editedDetail = await request(`/api/admin/people/${unlinked.id}`, staffCookie);
     assert(
       editedDetail.response.status === 200 && Array.isArray(editedDetail.body.history),
       "contact detail exposes auditable contact-change history",
+    );
+    const history = editedDetail.body.history as Json[];
+    assert(
+      history.some((entry) => entry.actorName === staffActorName),
+      "contact history identifies the acting administrator",
+    );
+    assert(
+      history.some((entry) => (entry.details as Json | undefined)?.unavailableActor === true && entry.actorName === null),
+      "contact history safely represents a deleted or unavailable administrator",
     );
 
     const collision = await request(`/api/admin/people/${unlinked.id}/contact`, staffCookie, "PUT", {
@@ -508,6 +531,7 @@ async function main(): Promise<void> {
         [linked.personId, original.firstName, original.lastName, original.phone]);
       await client.query(`update "user" set email = $2 where id = $1`, [linked.authSubject, original.authEmail]);
       await client.query(`delete from email_log where id = $1`, [historicalEmailLog.id]);
+      await client.query(`delete from contact_admin_audit where details ->> 'zz_fixture' = $1`, [marker]);
     });
     if (created.length) await pool.query(`delete from people where id = any($1::uuid[])`, [created]);
   }

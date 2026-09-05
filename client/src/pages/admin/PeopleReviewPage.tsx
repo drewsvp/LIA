@@ -57,6 +57,7 @@ type Detail = {
     id: string;
     action: string;
     outcome: string;
+    actorName: string | null;
     details: Record<string, unknown>;
     createdAt: string;
   }>;
@@ -489,7 +490,7 @@ export function PeopleReviewPage() {
                   {detail.history.map((entry) => (
                     <li key={entry.id}>
                       {entry.action.replaceAll("_", " ")} — {entry.outcome.replaceAll("_", " ")} —{" "}
-                      {formatDate(entry.createdAt)}
+                      {entry.actorName ?? "Administrator unavailable"} — {formatDate(entry.createdAt)}
                     </li>
                   ))}
                 </ul>
