@@ -46,9 +46,10 @@ function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 import * as dal from "../dal";
-import { withDbContext, type DbContext } from "../db/client";
+import { withDbContext, isUniqueViolation, type DbContext } from "../db/client";
 import { SYSTEM } from "../db/client";
 import { appBaseUrl, sendProfileEmailChange } from "../auth/auth";
+import { reserveContactEmailSend, refundContactEmailSend } from "../services/contact-email-rate-limit";
 import { ACTIVE_ORG_COOKIE, SUPPORTER_CONTEXT_COOKIE } from "../auth/session";
 import type { DeadlineType, MembershipRole, MembershipStatus } from "../../shared/types";
 import { dispatchQueuedEmails, headerImageDataUri, unresolvedVariables, leftoverPlaceholders, type PendingDispatch } from "../email/send";
@@ -2131,6 +2132,123 @@ export function registerAdminRoutes(app: Express): void {
   // ADMIN-04 — People review queue (docs/specs/ADMIN-04.md). Staff ADMIN
   // only (§11): a staff approver gets the same 404 as a nonexistent route.
   // --------------------------------------------------------------------------
+
+  // The review queue remains available below, but ADMIN-04 is also the
+  // staff-admin contact directory: unflagging a person never makes them
+  // unfindable.  Detail deliberately has the same attached-record material as
+  // review so the merge decision remains available from either entry point.
+  app.get("/api/admin/people", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const page = Number(req.query.page ?? 1);
+    const pageSize = Number(req.query.pageSize ?? 25);
+    if (search.length > 100 || !Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      res.status(400).json({ message: "Choose a valid search, page, and page size." });
+      return;
+    }
+    try { res.json(await dal.adminContacts.list(staffCtx(req), { search, page, pageSize })); } catch (err) { next(err); }
+  });
+
+  app.get("/api/admin/people/:id", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const id = req.params.id ?? "";
+    // Preserve the pre-existing /people/review route, which is registered
+    // below and would otherwise be shadowed by this one-segment matcher.
+    if (id === "review") { next(); return; }
+    if (!UUID_RE.test(id)) { sendNotFound(res); return; }
+    try {
+      const ctx = staffCtx(req);
+      const person = await dal.adminContacts.get(ctx, id);
+      if (!person) { sendNotFound(res); return; }
+      const [attached, candidateRows, pendingEmail, history] = await Promise.all([
+        dal.peopleReview.getAttachedRecords(ctx, id),
+        dal.peopleReview.listDuplicateCandidates(ctx, id),
+        dal.adminContacts.getPendingEmail(ctx, id),
+        dal.adminContacts.listAuditHistory(ctx, id),
+      ]);
+      const candidates = await Promise.all(candidateRows.map(async candidate => ({
+        person: candidate, attached: await dal.peopleReview.getAttachedRecords(ctx, candidate.id),
+      })));
+      res.json({ person, attached, candidates, pendingEmail, history });
+    } catch (err) { next(err); }
+  });
+
+  function parseContactBody(body: unknown): { firstName: string; lastName: string; email: string; phone: string | null } | { fieldErrors: Record<string, string> } {
+    const input = (body ?? {}) as Record<string, unknown>;
+    const firstName = typeof input.firstName === "string" ? input.firstName.trim() : "";
+    const lastName = typeof input.lastName === "string" ? input.lastName.trim() : "";
+    const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
+    const phone = typeof input.phone === "string" ? input.phone.trim() : "";
+    const fieldErrors: Record<string, string> = {};
+    if (!firstName) fieldErrors.firstName = "First name is required."; else if (firstName.length > 100) fieldErrors.firstName = "First name must be 100 characters or fewer.";
+    if (!lastName) fieldErrors.lastName = "Last name is required."; else if (lastName.length > 100) fieldErrors.lastName = "Last name must be 100 characters or fewer.";
+    if (!email || email.length > 254 || !EMAIL_RE.test(email)) fieldErrors.email = "Enter a valid email address.";
+    if (phone.length > 50) fieldErrors.phone = "Phone must be 50 characters or fewer.";
+    return Object.keys(fieldErrors).length ? { fieldErrors } : { firstName, lastName, email, phone: phone || null };
+  }
+  app.put("/api/admin/people/:id/contact", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const personId = req.params.id ?? ""; if (!UUID_RE.test(personId)) { sendNotFound(res); return; }
+    const parsed = parseContactBody(req.body);
+    if ("fieldErrors" in parsed) { res.status(400).json({ message: "Check the highlighted fields and try again.", fieldErrors: parsed.fieldErrors }); return; }
+    const token = randomBytes(32).toString("base64url"); const tokenHash = createHash("sha256").update(token).digest("hex");
+    const actorUserId = staffContext(req).userId;
+    try {
+      const before = await dal.adminContacts.get(staffCtx(req), personId);
+      if (!before) { sendNotFound(res); return; }
+      const linkedUser = before.hasUser ? await dal.users.findByPersonId(staffCtx(req), personId) : null;
+      const emailChange = before.email.trim().toLowerCase() !== parsed.email;
+      if (emailChange && linkedUser && !reserveContactEmailSend(linkedUser.id, parsed.email, req.ip ?? "unknown")) {
+        res.set("Retry-After", "60").status(429).json({ message: "Please wait before sending another email-change confirmation." }); return;
+      }
+      const result = await dal.adminContacts.update(staffCtx(req), { actorUserId, personId, ...parsed, tokenHash });
+      if (result.pendingEmail) {
+        try {
+          await sendProfileEmailChange({ firstName: parsed.firstName, newEmail: result.pendingEmail, personId, url: `${appBaseUrl()}/api/profile/email/confirm?token=${encodeURIComponent(token)}` });
+        } catch (error) {
+          await withDbContext(SYSTEM, async c => {
+            await dal.authProvider.deleteProfileEmailChangeByTokenInTx(c, tokenHash);
+            await dal.adminContacts.recordAuditInTx(c, { actorUserId, personId, action: "contact_email_confirmation", outcome: "send_failed" });
+          });
+          if (linkedUser) refundContactEmailSend(linkedUser.id, result.pendingEmail, req.ip ?? "unknown");
+          res.status(502).json({ person: result.contact, pendingEmail: null, message: "Name and phone were saved, but the email confirmation could not be sent. The sign-in email was not changed." }); return;
+        }
+      }
+      res.json({ person: result.contact, pendingEmail: result.pendingEmail, message: result.pendingEmail ? "Contact details saved. The email address will change only after confirmation from the new mailbox." : "Contact details saved." });
+    } catch (err) {
+      if (err instanceof dal.adminContacts.ContactNotFoundError) { sendNotFound(res); return; }
+      if (err instanceof dal.adminContacts.ContactEmailConflictError || isUniqueViolation(err)) { res.status(409).json({ message: "That email address is already in use by another account." }); return; }
+      if (err instanceof dal.adminContacts.ContactMissingAuthIdentityError) { res.status(409).json({ message: "This linked account has no authentication identity. Nothing was changed." }); return; }
+      next(err);
+    }
+  });
+
+  app.post("/api/admin/people/:id/email/cancel", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const personId = req.params.id ?? ""; if (!UUID_RE.test(personId)) { sendNotFound(res); return; }
+    try { const cancelled = await dal.adminContacts.cancelPending(staffCtx(req), staffContext(req).userId, personId); res.json({ pendingEmail: null, message: cancelled ? "Pending email change cancelled." : "There was no pending email change." }); }
+    catch (err) { if (err instanceof dal.adminContacts.ContactNotFoundError) { sendNotFound(res); return; } next(err); }
+  });
+
+  app.post("/api/admin/people/:id/email/resend", requireStaffAdmin, async (req: Request, res: Response, next) => {
+    const personId = req.params.id ?? ""; if (!UUID_RE.test(personId)) { sendNotFound(res); return; }
+    const actorUserId = staffContext(req).userId, token = randomBytes(32).toString("base64url"), tokenHash = createHash("sha256").update(token).digest("hex"), ip = req.ip ?? "unknown";
+    try {
+      // Expired requests are deliberately replaced with a new token rather
+      // than revived; the old confirmation remains unusable.
+      const existing = await dal.adminContacts.getLatestPendingEmail(staffCtx(req), personId);
+      const linkedUser = existing ? await dal.users.findByPersonId(staffCtx(req), personId) : null;
+      if (!existing || !linkedUser) { res.status(409).json({ message: "There is no pending email change to resend." }); return; }
+      if (!reserveContactEmailSend(linkedUser.id, existing.email, ip)) { res.set("Retry-After", "60").status(429).json({ message: "Please wait before sending another email-change confirmation." }); return; }
+      const pending = await dal.adminContacts.replacePending(staffCtx(req), { actorUserId, personId, tokenHash });
+      try { await sendProfileEmailChange({ firstName: pending.firstName, newEmail: pending.email, personId, url: `${appBaseUrl()}/api/profile/email/confirm?token=${encodeURIComponent(token)}` }); }
+      catch (error) {
+        await withDbContext(SYSTEM, async c => { await dal.authProvider.deleteProfileEmailChangeByTokenInTx(c, tokenHash); await dal.adminContacts.recordAuditInTx(c, { actorUserId, personId, action: "contact_email_resend", outcome: "send_failed" }); });
+        refundContactEmailSend(pending.userId, pending.email, ip); res.status(502).json({ message: "The confirmation could not be sent. The pending email change was cancelled." }); return;
+      }
+      res.json({ pendingEmail: pending.email, message: "A replacement confirmation was sent to the pending email address." });
+    } catch (err) {
+      if (err instanceof dal.adminContacts.ContactNotFoundError) { sendNotFound(res); return; }
+      if (err instanceof dal.adminContacts.ContactEmailConflictError) { res.status(409).json({ message: "That email address is already in use by another account." }); return; }
+      next(err);
+    }
+  });
 
   // ---- §4 region 1: flagged people with counts of what hangs off them.
   app.get("/api/admin/people/review", requireStaffAdmin, async (req: Request, res: Response, next) => {

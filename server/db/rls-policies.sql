@@ -735,6 +735,14 @@ create policy supporter_admin_audit_system_staff_all on supporter_admin_audit
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 
+alter table contact_admin_audit enable row level security;
+alter table contact_admin_audit force row level security;
+
+drop policy if exists contact_admin_audit_system_staff_all on contact_admin_audit;
+create policy contact_admin_audit_system_staff_all on contact_admin_audit
+  using (current_setting('app.context', true) in ('system','staff'))
+  with check (current_setting('app.context', true) in ('system','staff'));
+
 -- ---------------------------------------------------------------- participation_history
 
 alter table participation_history enable row level security;

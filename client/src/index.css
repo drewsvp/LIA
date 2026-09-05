@@ -3691,6 +3691,64 @@ a.site-nav-btn {
 .adm-form-row { display: flex; gap: 12px; margin: 10px 0; flex-wrap: wrap; }
 .adm-form-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5a6b7c; }
 .adm-form-row input { padding: 6px 8px; border: 1px solid #d7dde4; font-size: 14px; min-width: 200px; border-radius: 4px; }
+
+/* ---- ADMIN-04 contacts -------------------------------------------------- */
+.adm-contacts-search,
+.adm-contacts-pagination {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.adm-contacts-search .adm-filter {
+  min-width: min(100%, 340px);
+  margin: 0;
+  flex-direction: column;
+  align-items: stretch;
+}
+.adm-contacts-pagination {
+  align-items: center;
+  justify-content: space-between;
+}
+.adm-contact-form {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid #d7dde4;
+  border-radius: var(--radius-card);
+  background: #fbfcfd;
+}
+.adm-contact-form .adm-subheading { margin-top: 0; }
+.adm-contact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+  margin-bottom: 14px;
+}
+.adm-contact-grid .adm-filter {
+  margin: 0;
+  flex-direction: column;
+  align-items: stretch;
+}
+.adm-pending-email {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--color-teal);
+  background: #edf8f7;
+}
+.adm-pending-email p { margin: 4px 0; }
+.adm-review-actions {
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px solid #e4c982;
+  border-radius: var(--radius-card);
+  background: #fffdf6;
+}
+.adm-review-actions > .adm-subheading { margin-top: 0; }
+@media (max-width: 620px) {
+  .adm-contact-grid { grid-template-columns: 1fr; }
+  .adm-contacts-pagination { align-items: stretch; flex-direction: column; }
+}
 .adm-record-list { margin: 4px 0 10px; padding-left: 20px; font-size: 13px; }
 .adm-record-list li { margin: 2px 0; }
 .adm-list-label { margin: 10px 0 2px; font-size: 13px; color: #163a5f; }

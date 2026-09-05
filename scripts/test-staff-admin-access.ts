@@ -129,7 +129,7 @@ const SURFACE_ASSERTIONS: Record<
   string,
   { authSelector: string; authText?: string }
 > = {
-  "ADMIN-04": { authSelector: "h1.adm-heading", authText: "People review" },
+  "ADMIN-04": { authSelector: "h1.adm-heading", authText: "Contacts" },
   "ADMIN-05": { authSelector: "h1.adm-heading", authText: "Populations" },
   "ADMIN-08": { authSelector: "h1.adm-heading", authText: "Subscribers" },
   "ADMIN-09": { authSelector: "h1.adm-heading", authText: "Roles" },

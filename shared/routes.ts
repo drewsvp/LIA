@@ -53,7 +53,8 @@ export const SURFACE_ROUTES: readonly SurfaceRoute[] = [
   { id: "ADMIN-01", path: "/admin/organizations", title: "Organizations", area: "admin" },
   { id: "ADMIN-02", path: "/admin/requests", title: "Requests", area: "admin" },
   { id: "ADMIN-03", path: "/admin/members", title: "Members", area: "admin" },
-  { id: "ADMIN-04", path: "/admin/people/review", title: "People review", area: "admin" },
+  // The established review URL remains the Contacts deep-link.
+  { id: "ADMIN-04", path: "/admin/people/review", title: "Contacts", area: "admin" },
   { id: "ADMIN-05", path: "/admin/populations", title: "Populations", area: "admin" },
   { id: "ADMIN-06", path: "/admin/email", title: "Email log", area: "admin" },
   { id: "ADMIN-07", path: "/admin/activity", title: "Activity", area: "admin" },

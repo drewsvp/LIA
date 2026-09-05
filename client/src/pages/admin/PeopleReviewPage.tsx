@@ -16,7 +16,7 @@
  * irreversible action — ships with the merge_people() database function
  * once that DDL is approved; until then candidates render read-only.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type Person = {
@@ -52,10 +52,19 @@ type Detail = {
   person: Person;
   attached: Attached;
   candidates: { person: Person; attached: Attached }[];
+  pendingEmail: { email: string; expiresAt: string } | null;
+  history: Array<{
+    id: string;
+    action: string;
+    outcome: string;
+    details: Record<string, unknown>;
+    createdAt: string;
+  }>;
 };
 
 /** §8 verbatim. */
 const EMPTY_QUEUE = "No records need review.";
+const EMPTY_DIRECTORY = "No contacts match that search.";
 const NO_CANDIDATES = "No possible duplicates found.";
 const SAVE_NAMES_RESULT = "Name updated. This record is still flagged for review.";
 const FAILURE = "That did not save. Nothing was changed.";
@@ -112,20 +121,24 @@ function movesSummary(a: Attached): string {
   return parts.length === 0 ? "Nothing is attached to it" : `Moves: ${parts.join(", ")}`;
 }
 
-async function postJson(path: string, body?: unknown): Promise<{ ok: boolean; message: string }> {
+async function jsonRequest(
+  path: string,
+  method: "PUT" | "POST",
+  body?: unknown,
+): Promise<{ ok: boolean; message: string; fieldErrors: Record<string, string> }> {
   const res = await fetch(path, {
-    method: "POST",
+    method,
     credentials: "include",
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  let payload: { message?: string } = {};
+  let payload: { message?: string; fieldErrors?: Record<string, string> } = {};
   try {
     payload = (await res.json()) as { message?: string };
   } catch {
     /* non-JSON body — fall through to the generic failure line */
   }
-  return { ok: res.ok, message: payload.message ?? FAILURE };
+  return { ok: res.ok, message: payload.message ?? FAILURE, fieldErrors: payload.fieldErrors ?? {} };
 }
 
 /** Named attached-record lists (§4 region 2) — shared by person and candidates. */
@@ -221,9 +234,12 @@ export function PeopleReviewPage() {
     const personId = new URLSearchParams(window.location.search).get("personId");
     return personId && /^[0-9a-f-]{36}$/i.test(personId) ? personId : null;
   });
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [namesLoadedFor, setNamesLoadedFor] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ firstName: "", lastName: "", email: "", phone: "" });
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [searchDraft, setSearchDraft] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [confirmClear, setConfirmClear] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -238,27 +254,39 @@ export function PeopleReviewPage() {
     }
   }, [selectedId]);
 
-  const listQuery = useQuery<{ people: QueueRow[] }>({ queryKey: ["/api/admin/people/review"] });
+  const listKey = useMemo(() => {
+    const params = new URLSearchParams({ page: String(page), pageSize: "25" });
+    if (search) params.set("search", search);
+    return `/api/admin/people?${params.toString()}`;
+  }, [page, search]);
+  const listQuery = useQuery<{ people: QueueRow[]; total: number; page: number; pageSize: number }>({
+    queryKey: [listKey],
+  });
   const detailQuery = useQuery<Detail>({
-    queryKey: [`/api/admin/people/review/${selectedId}`],
+    queryKey: [`/api/admin/people/${selectedId}`],
     enabled: selectedId !== null,
   });
 
   const detail = detailQuery.data ?? null;
 
-  // Seed the editable name fields once per selected record.
+  // Seed the unified editable fields once per selected record.
   useEffect(() => {
-    if (detail && detail.person.id !== namesLoadedFor) {
-      setFirstName(detail.person.firstName);
-      setLastName(detail.person.lastName);
-      setNamesLoadedFor(detail.person.id);
+    if (detail && detail.person.id !== loadedFor) {
+      setDraft({
+        firstName: detail.person.firstName,
+        lastName: detail.person.lastName,
+        email: detail.person.email,
+        phone: detail.person.phone ?? "",
+      });
+      setLoadedFor(detail.person.id);
+      setFieldErrors({});
     }
-  }, [detail, namesLoadedFor]);
+  }, [detail, loadedFor]);
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: ["/api/admin/people/review"] });
+    await queryClient.invalidateQueries({ queryKey: [listKey] });
     if (selectedId) {
-      await queryClient.invalidateQueries({ queryKey: [`/api/admin/people/review/${selectedId}`] });
+      await queryClient.invalidateQueries({ queryKey: [`/api/admin/people/${selectedId}`] });
     }
   }
 
@@ -267,7 +295,7 @@ export function PeopleReviewPage() {
     setResult(null);
     let ok = false;
     try {
-      const r = await postJson(path, body);
+      const r = await jsonRequest(path, "POST", body);
       ok = r.ok;
       setResult({ kind: r.ok ? "ok" : "error", text: r.message });
     } catch {
@@ -281,31 +309,92 @@ export function PeopleReviewPage() {
 
   const rows = listQuery.data?.people ?? [];
   const person = detail?.person ?? null;
-  const namesChanged =
-    person !== null && (firstName.trim() !== person.firstName || lastName.trim() !== person.lastName);
-  const namesValid = firstName.trim() !== "" && lastName.trim() !== "";
+  const contactChanged =
+    person !== null &&
+    (draft.firstName.trim() !== person.firstName ||
+      draft.lastName.trim() !== person.lastName ||
+      draft.email.trim() !== person.email ||
+      draft.phone.trim() !== (person.phone ?? ""));
+  const contactValid = draft.firstName.trim() !== "" && draft.lastName.trim() !== "" && draft.email.trim() !== "";
+  const total = listQuery.data?.total ?? 0;
+  const pageSize = listQuery.data?.pageSize ?? 25;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  async function saveContact(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!person || busy) return;
+    setBusy(true);
+    setResult(null);
+    setFieldErrors({});
+    try {
+      const response = await jsonRequest(`/api/admin/people/${person.id}/contact`, "PUT", {
+        firstName: draft.firstName.trim(),
+        lastName: draft.lastName.trim(),
+        email: draft.email.trim(),
+        phone: draft.phone.trim() || null,
+      });
+      if (!response.ok) {
+        setFieldErrors(response.fieldErrors);
+        setResult({ kind: "error", text: response.message });
+        return;
+      }
+      setResult({ kind: "ok", text: response.message });
+      await refresh();
+    } catch {
+      setResult({ kind: "error", text: FAILURE });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div>
-      <h1 className="adm-heading">People review</h1>
+      <h1 className="adm-heading">Contacts</h1>
+      <p className="adm-muted">Search and update every contact. Review and merge controls appear only for flagged records.</p>
 
       {selectedId === null && result && (
         <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>
       )}
+
+      <form
+        className="adm-contacts-search"
+        role="search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSearch(searchDraft.trim());
+          setPage(1);
+          setSelectedId(null);
+          setResult(null);
+        }}
+      >
+        <label className="adm-filter">
+          Search by name, email, or phone
+          <input value={searchDraft} maxLength={100} onChange={(event) => setSearchDraft(event.target.value)} />
+        </label>
+        <button type="submit" className="adm-btn">Search</button>
+        {search ? (
+          <button type="button" className="adm-btn adm-btn-outline" onClick={() => {
+            setSearch("");
+            setSearchDraft("");
+            setPage(1);
+            setSelectedId(null);
+          }}>Clear</button>
+        ) : null}
+      </form>
 
       {listQuery.isError ? (
         <p className="adm-alert">{LIST_ERROR}</p>
       ) : listQuery.isLoading ? (
         <p className="adm-muted">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="adm-muted">{EMPTY_QUEUE}</p>
+        <p className="adm-muted">{search ? EMPTY_DIRECTORY : EMPTY_QUEUE}</p>
       ) : (
-        <table className="adm-table">
+        <div className="adm-table-wrap"><table className="adm-table">
           <thead>
             <tr>
-              <th>Name as imported</th>
+              <th>Name</th>
               <th>Email</th>
-              <th>Why flagged</th>
+              <th>Review status</th>
               <th>Attached</th>
             </tr>
           </thead>
@@ -316,7 +405,8 @@ export function PeopleReviewPage() {
                 className={selectedId === row.id ? "adm-row adm-row-on" : "adm-row"}
                 onClick={() => {
                   setSelectedId(row.id);
-                  setNamesLoadedFor(null);
+                  setLoadedFor(null);
+                  setFieldErrors({});
                   setConfirmClear(false);
                   setMerge(null);
                   setMergeToken("");
@@ -325,12 +415,19 @@ export function PeopleReviewPage() {
               >
                 <td>{fullName(row)}</td>
                 <td>{row.email}</td>
-                <td>{row.reviewNote ?? "—"}</td>
+                <td>{row.needsReview ? row.reviewNote ?? "Needs review" : "No review needed"}</td>
                 <td>{countsSummary(row)}</td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
+      )}
+      {total > pageSize && (
+        <div className="adm-contacts-pagination" aria-label="Contact pages">
+          <button className="adm-btn adm-btn-outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button>
+          <span>Page {page} of {pageCount} ({total} contacts)</span>
+          <button className="adm-btn adm-btn-outline" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next</button>
+        </div>
       )}
 
       {selectedId !== null && (
@@ -343,22 +440,38 @@ export function PeopleReviewPage() {
             <>
               <h2 className="adm-subheading">{fullName(person)}</h2>
 
-              {/* §5: names editable; email is the identity key and is not. */}
-              <div className="adm-form-row">
-                <label>
-                  First name
-                  <input value={firstName} onChange={(e) => setFirstName(e.target.value)} disabled={busy} />
-                </label>
-                <label>
-                  Last name
-                  <input value={lastName} onChange={(e) => setLastName(e.target.value)} disabled={busy} />
-                </label>
-              </div>
+              <form className="adm-contact-form" onSubmit={(event) => void saveContact(event)} noValidate>
+                <h3 className="adm-subheading">Contact information</h3>
+                <div className="adm-contact-grid">
+                  {(["firstName", "lastName", "email", "phone"] as const).map((field) => (
+                    <label className="adm-filter" key={field}>
+                      {field === "firstName" ? "First name" : field === "lastName" ? "Last name" : field === "email" ? "Email" : "Phone"}
+                      <input
+                        type={field === "email" ? "email" : field === "phone" ? "tel" : "text"}
+                        value={draft[field]}
+                        disabled={busy}
+                        aria-invalid={fieldErrors[field] ? "true" : undefined}
+                        onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))}
+                      />
+                      {fieldErrors[field] ? <small className="adm-error-text">{fieldErrors[field]}</small> : null}
+                    </label>
+                  ))}
+                </div>
+                {detail.pendingEmail ? (
+                  <div className="adm-pending-email">
+                    <p><strong>Current email:</strong> {person.email}</p>
+                    <p><strong>Pending email:</strong> {detail.pendingEmail.email}. It will become current after confirmation from that mailbox{detail.pendingEmail.expiresAt ? ` before ${formatDate(detail.pendingEmail.expiresAt)}` : ""}.</p>
+                    <div className="adm-actions">
+                      <button type="button" className="adm-btn adm-btn-outline" disabled={busy} onClick={() => void act(`/api/admin/people/${person.id}/email/resend`)}>Resend confirmation</button>
+                      <button type="button" className="adm-btn adm-btn-outline" disabled={busy} onClick={() => void act(`/api/admin/people/${person.id}/email/cancel`)}>Cancel pending change</button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="adm-muted">For a contact with a login account, a changed email remains pending until the new mailbox confirms it. Contacts without a login update immediately.</p>
+                )}
+                <button type="submit" className="adm-btn adm-btn-primary" disabled={busy || !contactValid || !contactChanged}>{busy ? "Saving…" : "Save contact"}</button>
+              </form>
               <dl className="adm-kv">
-                <dt>Email</dt>
-                <dd>{person.email}</dd>
-                <dt>Phone</dt>
-                <dd>{person.phone ?? "Not provided"}</dd>
                 {/* §3: the two notes have distinct jobs; label them distinctly. */}
                 <dt>Source note</dt>
                 <dd>{person.sourceNote ?? "—"}</dd>
@@ -368,27 +481,33 @@ export function PeopleReviewPage() {
 
               <AttachedRecords attached={detail.attached} personName={fullName(person)} />
 
+              <h3 className="adm-subheading">Contact change history</h3>
+              {detail.history.length === 0 ? (
+                <p className="adm-muted">No administrator contact changes recorded.</p>
+              ) : (
+                <ul className="adm-record-list">
+                  {detail.history.map((entry) => (
+                    <li key={entry.id}>
+                      {entry.action.replaceAll("_", " ")} — {entry.outcome.replaceAll("_", " ")} —{" "}
+                      {formatDate(entry.createdAt)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}
 
-              <div className="adm-actions">
-                <button
-                  className="adm-btn adm-btn-primary"
-                  disabled={busy || !namesValid || !namesChanged}
-                  onClick={() =>
-                    void act(`/api/admin/people/review/${person.id}/names`, {
-                      firstName: firstName.trim(),
-                      lastName: lastName.trim(),
-                    })
-                  }
-                >
-                  Save names
-                </button>
-                <button className="adm-btn" disabled={busy} onClick={() => setConfirmClear(true)}>
-                  Clear flag
-                </button>
-              </div>
+              {person.needsReview && (
+                <section className="adm-review-actions" aria-label="Review actions">
+                  <h3 className="adm-subheading">Review actions</h3>
+                  <p className="adm-muted">These actions apply only because this contact is flagged for review.</p>
+                  <div className="adm-actions">
+                    <button className="adm-btn" disabled={busy} onClick={() => setConfirmClear(true)}>Clear flag</button>
+                  </div>
+                </section>
+              )}
 
-              {confirmClear && (
+              {person.needsReview && confirmClear && (
                 <div className="adm-confirm">
                   {/* §8 verbatim. */}
                   <p>Clear the review flag on {fullName(person)}?</p>
@@ -401,7 +520,6 @@ export function PeopleReviewPage() {
                           const ok = await act(`/api/admin/people/review/${person.id}/clear-flag`);
                           if (ok) {
                             setConfirmClear(false);
-                            setSelectedId(null);
                           }
                         })();
                       }}
@@ -415,7 +533,8 @@ export function PeopleReviewPage() {
                 </div>
               )}
 
-              {/* §4 region 3: candidates with their own attached summaries. */}
+              {/* Merging is deliberately restricted to the review workflow. */}
+              {person.needsReview && <section className="adm-review-actions">
               <h3 className="adm-subheading">Possible duplicates</h3>
               {detail.candidates.length === 0 ? (
                 <p className="adm-muted">{NO_CANDIDATES}</p>
@@ -527,7 +646,7 @@ export function PeopleReviewPage() {
                                       setBusy(true);
                                       setResult(null);
                                       try {
-                                        const r = await postJson(`/api/admin/people/review/${person.id}/merge`, {
+                                        const r = await jsonRequest(`/api/admin/people/review/${person.id}/merge`, "POST", {
                                           duplicateId,
                                           survivorId,
                                           confirm: mergeToken,
@@ -571,6 +690,7 @@ export function PeopleReviewPage() {
                   );
                 })
               )}
+              </section>}
             </>
           )}
         </div>

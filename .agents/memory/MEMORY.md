@@ -38,3 +38,4 @@
 - [Organization-context lifecycle](organization-context-lifecycle.md) — server contexts expire durably and are revoked atomically when an organization becomes ineligible; lazy request checks are only defense in depth.
 - [Append-only directory paging](append-only-directory-paging.md) — offset paging over immutable history must carry a server-time snapshot across pages and index the full stable ordering key.
 - [Optimistic mutation versions](optimistic-mutation-versions.md) — use locked monotonic versions, not timestamps; JS loses PostgreSQL microseconds and rounding permits same-millisecond overwrites.
+- [Composed rate-limit reservations](composed-rate-limit-reservations.md) — failed multi-bucket reservations must undo the failing consume plus prior consumes before later refunds can work.

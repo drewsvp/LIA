@@ -928,6 +928,17 @@ export function registerRoutes(app: Express): void {
         );
         await dal.authProvider.deleteProfileEmailChangesInTx(client, pending.userId);
         if (pending.initiatedByUserId) {
+          // The same confirmation primitive serves staff contact changes for
+          // every account kind, not just the historical supporter directory.
+          // Keep its person-centric audit alongside the legacy supporter audit
+          // (which is retained for existing supporter reporting).
+          await dal.adminContacts.recordAuditInTx(client, {
+            actorUserId: pending.initiatedByUserId,
+            personId: pending.personId,
+            action: "contact_email_confirm",
+            outcome: "success",
+            details: { newEmail: pending.newEmail },
+          });
           await dal.adminSupporters.recordAuditInTx(client, {
             actorUserId: pending.initiatedByUserId,
             targetUserId: pending.userId,

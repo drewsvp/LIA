@@ -37,6 +37,7 @@ export * as validation from "./validation";
 export * as adminCounts from "./admin-counts";
 export * as adminRequests from "./admin-requests";
 export * as peopleReview from "./people-review";
+export * as adminContacts from "./admin-contacts";
 export * as volunteerInterests from "./volunteer-interests";
 export * as volunteerAlerts from "./volunteer-alerts";
 export * as requestEngagement from "./request-engagement";
