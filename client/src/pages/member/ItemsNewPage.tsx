@@ -116,7 +116,7 @@ export function ItemsNewPage() {
           <input id="mp7-org" className="pub-input mp5-input mp6-readonly" type="text" value={orgName} disabled />
 
           <label className="mp5-label" htmlFor="mp7-contact-first">
-            Contact Full Name *
+            Primary Contact Full Name *
           </label>
           <div className="mp5-name-row">
             <div className="mp5-name-col">
@@ -126,7 +126,7 @@ export function ItemsNewPage() {
                 type="text"
                 value={contactFirstName}
                 onChange={(e) => setContactFirstName(e.target.value)}
-                aria-label="Contact first name"
+                aria-label="Primary contact first name"
               />
               {fieldError("contactFirstName")}
             </div>
@@ -136,14 +136,14 @@ export function ItemsNewPage() {
                 type="text"
                 value={contactLastName}
                 onChange={(e) => setContactLastName(e.target.value)}
-                aria-label="Contact last name"
+                aria-label="Primary contact last name"
               />
               {fieldError("contactLastName")}
             </div>
           </div>
 
           <label className="mp5-label" htmlFor="mp7-contact-email">
-            Contact Email Address *
+            Primary Contact Email Address *
           </label>
           <input
             id="mp7-contact-email"
@@ -155,7 +155,7 @@ export function ItemsNewPage() {
           {fieldError("contactEmail")}
 
           <label className="mp5-label" htmlFor="mp7-contact-phone">
-            Contact Phone Number *
+            Primary Contact Phone Number *
           </label>
           <input
             id="mp7-contact-phone"

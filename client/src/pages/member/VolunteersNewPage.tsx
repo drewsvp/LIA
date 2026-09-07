@@ -138,7 +138,7 @@ export function VolunteersNewPage() {
           <input id="mp10-org" className="pub-input mp5-input mp6-readonly" type="text" value={orgName} disabled />
 
           <label className="mp5-label" htmlFor="mp10-contact-first">
-            Contact First Name *
+            Primary Contact First Name *
           </label>
           <input
             id="mp10-contact-first"
@@ -150,7 +150,7 @@ export function VolunteersNewPage() {
           {fieldError("contactFirstName")}
 
           <label className="mp5-label" htmlFor="mp10-contact-last">
-            Contact Last Name *
+            Primary Contact Last Name *
           </label>
           <input
             id="mp10-contact-last"
@@ -162,7 +162,7 @@ export function VolunteersNewPage() {
           {fieldError("contactLastName")}
 
           <label className="mp5-label" htmlFor="mp10-contact-email">
-            Contact Email Address *
+            Primary Contact Email Address *
           </label>
           <input
             id="mp10-contact-email"
@@ -174,7 +174,7 @@ export function VolunteersNewPage() {
           {fieldError("contactEmail")}
 
           <label className="mp5-label" htmlFor="mp10-contact-phone">
-            Contact Phone Number *
+            Primary Contact Phone Number *
           </label>
           <input
             id="mp10-contact-phone"
