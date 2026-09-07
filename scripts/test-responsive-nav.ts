@@ -430,6 +430,18 @@ async function assertSignedOutNavigation(page: Page, width: number): Promise<voi
   }
 
   await assertPublicDestinations(page, false, mobile);
+
+  const footerLogin = page
+    .locator('.pb-footer-links a[href="/login"]')
+    .filter({ hasText: exactText("Login") });
+  assertThat(
+    (await footerLogin.count()) === 1,
+    "Public footer must show exactly one Login link targeting /login.",
+  );
+  assertThat(
+    (await page.locator(".pb-footer-links a").filter({ hasText: exactText("Member login") }).count()) === 0,
+    "Public footer must not show Member login.",
+  );
 }
 
 async function assertAuthenticatedNavigation(page: Page, width: number, expected: NavExpectation): Promise<void> {
