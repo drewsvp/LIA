@@ -384,15 +384,24 @@ create policy item_requests_system_staff_all on item_requests
   using (current_setting('app.context', true) in ('system','staff'))
   with check (current_setting('app.context', true) in ('system','staff'));
 
--- Public sees active requests of approved member orgs, plus archived ones so a
--- fulfilled request's page can say "this need has been met" instead of dying.
--- Draft and pending are never public.
+-- Public sees only active, unexpired requests of eligible approved orgs.
+-- Draft, pending, expired, and archived requests are never public.
 drop policy if exists item_requests_public_select on item_requests;
 create policy item_requests_public_select on item_requests for select
   using (
     current_setting('app.context', true) = 'public'
-    and status in ('active','archived')
-    and org_id in (select o.id from organizations o where o.kind = 'member_org' and o.status = 'approved')
+    and status = 'active'
+    and not item_request_expired_on(
+      deadline_type,
+      deadline_date,
+      expires_on,
+      item_request_current_la_date()
+    )
+    and org_id in (
+      select o.id from organizations o
+       where o.status = 'approved'
+         and o.kind in ('member_org', 'platform_owner')
+    )
   );
 
 drop policy if exists item_requests_member_select on item_requests;
@@ -456,8 +465,14 @@ create policy items_public_select on items
         from item_requests r
         join organizations o on o.id = r.org_id
        where r.id = items.item_request_id
-         and r.status in ('active', 'archived')
-         and o.kind = 'member_org'
+          and r.status = 'active'
+          and not item_request_expired_on(
+            r.deadline_type,
+            r.deadline_date,
+            r.expires_on,
+            item_request_current_la_date()
+          )
+          and o.kind in ('member_org', 'platform_owner')
          and o.status = 'approved'
     )
   );

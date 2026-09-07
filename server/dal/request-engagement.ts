@@ -1,4 +1,5 @@
 import { q, withDbContext, type DbContext } from "../db/client";
+import { PUBLIC_ITEM_ORGANIZATION_SQL } from "./item-requests";
 import { PUBLIC_VOLUNTEER_ORGANIZATION_SQL } from "./volunteer-requests";
 
 export type EngagementEventType =
@@ -41,8 +42,7 @@ export async function recordPublicEvent(
                join organizations o on o.id = r.org_id
               where r.id = $1
                 and r.status = 'active'
-                and o.kind = 'member_org'
-                and o.status = 'approved'
+                 and ${PUBLIC_ITEM_ORGANIZATION_SQL}
                 and not item_request_expired_on(
                   r.deadline_type, r.deadline_date, r.expires_on,
                   item_request_current_la_date()
@@ -148,7 +148,7 @@ export async function listRecentlyViewedForUser(
               l.last_viewed_at as "lastViewedAt",
               case
                 when l.request_kind = 'item' then (
-                  ir.status = 'active' and o.status = 'approved' and o.kind = 'member_org'
+                   ir.status = 'active' and ${PUBLIC_ITEM_ORGANIZATION_SQL}
                   and not item_request_expired_on(
                     ir.deadline_type, ir.deadline_date, ir.expires_on,
                     item_request_current_la_date()
@@ -485,8 +485,7 @@ export async function listEligibleOutreachRecipients(
          select 'item'::text as request_kind, r.id as request_id, r.title,
                 o.name as org_name,
                 r.status = 'active'
-                  and o.kind = 'member_org'
-                  and o.status = 'approved'
+                  and ${PUBLIC_ITEM_ORGANIZATION_SQL}
                   and not item_request_expired_on(
                     r.deadline_type, r.deadline_date, r.expires_on,
                     item_request_current_la_date()

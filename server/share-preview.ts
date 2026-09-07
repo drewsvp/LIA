@@ -23,6 +23,7 @@
 import { PUBLIC } from "./db/client";
 import * as dal from "./dal";
 import { getCachedSiteSettings } from "./dal/site-settings";
+import { isPublicItemOrganization } from "./dal/item-requests";
 import { absoluteUrl } from "./email/send";
 import {
   itemShareDescription,
@@ -145,7 +146,7 @@ async function itemPreview(id: string): Promise<SharePreview | null> {
   const request = await dal.itemRequests.getActiveAvailableById(PUBLIC, id);
   if (!request) return null;
   const org = await dal.organizations.getById(PUBLIC, request.orgId);
-  if (!org || org.status !== "approved" || org.kind !== "member_org") return null;
+  if (!isPublicItemOrganization(org)) return null;
 
   const title = itemShareTitle(request.title, org.name);
   return {

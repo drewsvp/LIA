@@ -12,6 +12,7 @@
  * two runs and none can fall between them.
  */
 import { pool, q, withDbContext, type DbContext } from "../db/client";
+import { ITEM_REQUEST_EXPIRED_SQL, PUBLIC_ITEM_ORGANIZATION_SQL } from "./item-requests";
 import { PUBLIC_VOLUNTEER_ORGANIZATION_SQL } from "./volunteer-requests";
 
 export type DigestRunStatus = "running" | "sent" | "skipped_empty";
@@ -211,7 +212,8 @@ export async function newActiveNeeds(ctx: DbContext, from: string, to: string): 
       `select r.id, 'item' as type, r.title as name, o.name as "orgName", r.image_url as "imageUrl"
          from item_requests r
          join organizations o on o.id = r.org_id
-        where r.status = 'active' and o.kind = 'member_org' and o.status = 'approved'
+        where r.status = 'active' and not (${ITEM_REQUEST_EXPIRED_SQL})
+          and ${PUBLIC_ITEM_ORGANIZATION_SQL}
           and exists (select 1 from approval_events e
                        where e.entity_type = 'item_request' and e.entity_id = r.id
                          and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)
@@ -311,7 +313,8 @@ export async function upcomingNeeds(ctx: DbContext): Promise<{ window: UpcomingW
                           and x.excluded_at > $1::timestamptz)) as excluded
          from item_requests r
          join organizations o on o.id = r.org_id
-        where r.status = 'active' and o.kind = 'member_org' and o.status = 'approved'
+        where r.status = 'active' and not (${ITEM_REQUEST_EXPIRED_SQL})
+          and ${PUBLIC_ITEM_ORGANIZATION_SQL}
           and exists (select 1 from approval_events e
                        where e.entity_type = 'item_request' and e.entity_id = r.id
                          and e.to_status = 'active' and e.created_at > $1 and e.created_at <= $2)

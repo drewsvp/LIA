@@ -48,6 +48,7 @@
     "test:image-sweep": "tsx scripts/test-image-sweep.ts",
     "test:staff-admin-access": "tsx scripts/test-staff-admin-access.ts",
     "test:alliance-staff-conversion": "tsx scripts/test-alliance-staff-conversion.ts",
+    "test:alliance-needs-publication": "tsx scripts/test-alliance-volunteer-publication.ts",
     "test:alliance-volunteer-publication": "tsx scripts/test-alliance-volunteer-publication.ts",
     "test:role-status-management": "tsx scripts/test-role-status-management.ts",
     "test:account-email-identity": "tsx scripts/test-account-email-identity.ts",

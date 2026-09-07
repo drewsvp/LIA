@@ -18,6 +18,20 @@ import type {
 } from "../../shared/types";
 import { insertInTx } from "./approval-events";
 
+/**
+ * The public organization gate for physical needs. Approved needs from member
+ * organizations and the single platform owner share the same public lifecycle.
+ * Keep SQL callers and route-level BYPASSRLS checks on this same definition.
+ */
+export const PUBLIC_ITEM_ORGANIZATION_SQL =
+  "o.status = 'approved' and o.kind in ('member_org', 'platform_owner')";
+
+export function isPublicItemOrganization<T extends { status: string; kind: string }>(
+  org: T | null | undefined,
+): org is T {
+  return org?.status === "approved" && (org.kind === "member_org" || org.kind === "platform_owner");
+}
+
 const COLS = `r.id, r.legacy_wix_id as "legacyWixId", r.org_id as "orgId", r.title, r.description,
   r.image_url as "imageUrl", r.image_generated as "imageGenerated", r.image_gen_status as "imageGenStatus",
   r.image_gen_error as "imageGenError", r.image_gen_retries as "imageGenRetries",
@@ -257,7 +271,7 @@ export type TransitionInput = {
  */
 const ITEM_REQUEST_CURRENT_LA_DATE = `(clock_timestamp() at time zone 'America/Los_Angeles')::date`;
 
-const ITEM_REQUEST_EXPIRED = `(
+export const ITEM_REQUEST_EXPIRED_SQL = `(
   (r.expires_on is not null and r.expires_on < ${ITEM_REQUEST_CURRENT_LA_DATE})
   or (
     r.deadline_type = 'date_specific'
@@ -276,7 +290,7 @@ export async function expiredActiveIds(ctx: DbContext, limit: number): Promise<s
     q<{ id: string }>(
       c,
       `select r.id from item_requests r
-        where r.status = 'active' and ${ITEM_REQUEST_EXPIRED}
+        where r.status = 'active' and ${ITEM_REQUEST_EXPIRED_SQL}
         order by least(
           coalesce(r.expires_on, 'infinity'::date),
           coalesce(case when r.deadline_type = 'date_specific' then r.deadline_date end, 'infinity'::date)
@@ -303,7 +317,7 @@ export async function archiveExpiredIfEligibleInTx(c: PoolClient, requestId: str
 
   const eligibility = await q<{ expired: boolean }>(
     c,
-    `select ${ITEM_REQUEST_EXPIRED} as expired from item_requests r where r.id = $1`,
+    `select ${ITEM_REQUEST_EXPIRED_SQL} as expired from item_requests r where r.id = $1`,
     [requestId],
   );
   if (eligibility[0]?.expired !== true) return false;
@@ -324,7 +338,7 @@ export async function getActiveAvailableById(ctx: DbContext, requestId: string):
     q<ItemRequest>(
       c,
       `select ${COLS} from item_requests r
-        where r.id = $1 and r.status = 'active' and not (${ITEM_REQUEST_EXPIRED})`,
+        where r.id = $1 and r.status = 'active' and not (${ITEM_REQUEST_EXPIRED_SQL})`,
       [requestId],
     ),
   );
@@ -377,7 +391,7 @@ export async function listByStatus(ctx: DbContext, status: RequestStatus): Promi
 }
 
 /**
- * Active, unexpired requests of approved orgs with public org fields (PB-01).
+ * Active, unexpired requests of eligible approved orgs with public org fields (PB-01).
  * Passing orgId narrows the SAME predicate to one organization (PB-08) so the
  * profile page can never show a request the browse page would hide.
  */
@@ -395,8 +409,8 @@ export async function listActivePublic(ctx: DbContext, orgId?: string): Promise<
       `select ${COLS}, o.name as "orgName", o.slug as "orgSlug", o.mission as "orgMission",
               o.website_url as "orgWebsiteUrl", o.city as "orgCity"
          from item_requests r join organizations o on o.id = r.org_id
-         where r.status = 'active' and not (${ITEM_REQUEST_EXPIRED})
-           and o.status = 'approved' and o.kind = 'member_org'
+          where r.status = 'active' and not (${ITEM_REQUEST_EXPIRED_SQL})
+           and ${PUBLIC_ITEM_ORGANIZATION_SQL}
            ${orgId === undefined ? "" : "and r.org_id = $1"}
         order by r.approved_at desc nulls last, r.created_at desc`,
       orgId === undefined ? [] : [orgId],

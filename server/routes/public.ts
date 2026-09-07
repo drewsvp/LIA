@@ -27,6 +27,7 @@ import { submitOrganizationSignup, OrgNameTakenError } from "../services/org-sig
 import { resolveSessionInfo } from "../auth/session";
 import type { Item, PublicItemRequest, PublicVolunteerRequest } from "../../shared/types";
 import { getCachedSiteSettings } from "../dal/site-settings";
+import { isPublicItemOrganization } from "../dal/item-requests";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -360,7 +361,7 @@ export function registerPublicRoutes(app: Express): void {
     }
   });
 
-  // ---- PB-01: browse active item requests of approved member orgs.
+  // ---- PB-01: browse active item requests of eligible approved orgs.
   app.get("/api/public/item-requests", async (_req: Request, res: Response, next) => {
     try {
       const rows = await dal.itemRequests.listActivePublic(PUBLIC);
@@ -457,7 +458,7 @@ export function registerPublicRoutes(app: Express): void {
         loadPublicItems(id),
         dal.populations.listByOrganization(PUBLIC, request.orgId),
       ]);
-      if (!org || org.status !== "approved" || org.kind !== "member_org") {
+      if (!isPublicItemOrganization(org)) {
         // Explicit check — the runtime DB role has BYPASSRLS, so the PUBLIC
         // context does NOT filter rows. Never trust the fetch alone.
         res.status(404).json(NOT_FOUND_BODY);
@@ -517,12 +518,12 @@ export function registerPublicRoutes(app: Express): void {
       // Review fix: record_item_pledge checks only request.status, and the
       // runtime DB role has BYPASSRLS — no RLS policy filters anything at
       // runtime. Every visibility rule must therefore be explicit here:
-      // request active AND org approved member_org (same rule as the GET
+      // request active AND an eligible approved org (same rule as the GET
       // and the browse SQL). Non-active under a public org keeps its 410
       // contract; everything else is indistinguishable from nonexistent.
       const gateRequest = await dal.itemRequests.getById(PUBLIC, requestId);
       const gateOrg = gateRequest === null ? null : await dal.organizations.getById(PUBLIC, gateRequest.orgId);
-      const orgIsPublic = gateOrg !== null && gateOrg.status === "approved" && gateOrg.kind === "member_org";
+      const orgIsPublic = isPublicItemOrganization(gateOrg);
       if (gateRequest === null || !orgIsPublic) {
         res.status(404).json(NOT_FOUND_BODY);
         return;

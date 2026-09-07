@@ -1,5 +1,5 @@
 /**
- * End-to-end regression coverage for Alliance volunteer publication.
+ * End-to-end regression coverage for Alliance volunteer and physical-need publication.
  * Requires the development workflow and seeded quick-login accounts.
  */
 import { randomUUID } from "node:crypto";
@@ -9,17 +9,22 @@ import * as dal from "../server/dal";
 const BASE = process.env.TEST_BASE_URL ?? "http://127.0.0.1:5000";
 const runId = `${process.pid}-${Date.now()}`;
 const title = `zz_fixture Alliance volunteer publication ${runId}`;
-const itemTitle = `zz_fixture Alliance item exclusion ${runId}`;
+const itemTitle = `zz_fixture Alliance physical-need publication ${runId}`;
 const supporterEmail = `zz.fixture.alliance-volunteer.${runId}@example.org`;
 const signupEmail = `zz.fixture.alliance-signup.${runId}@example.org`;
+const pledgeEmail = `zz.fixture.alliance-pledge.${runId}@example.org`;
 
 let volunteerRequestId: string | null = null;
 let volunteerRoleId: string | null = null;
 let itemRequestId: string | null = null;
+let itemId: string | null = null;
+let pledgeId: string | null = null;
 let supporterUserId: string | null = null;
 let supporterPersonId: string | null = null;
 let signupPersonId: string | null = null;
+let pledgePersonId: string | null = null;
 const engagementEventId = randomUUID();
+const itemEngagementEventId = randomUUID();
 const rlsRoleName = `zz_alliance_public_${process.pid}_${Date.now()}`;
 let rlsRoleCreated = false;
 let passed = 0;
@@ -68,6 +73,29 @@ function hasRequest(body: Record<string, unknown>, key: "requests" | "volunteerR
   return Array.isArray(rows) && rows.some((row) => typeof row === "object" && row !== null && "id" in row && row.id === id);
 }
 
+async function publicRlsItemCounts(requestId: string, childId: string | null): Promise<{ requests: number; children: number } | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("select set_config('app.context', 'public', true)");
+    await client.query(`set local role ${rlsRoleName}`);
+    const result = await client.query<{ requests: number; children: number }>(
+      `select (select count(*)::int from item_requests where id = $1) as requests,
+              (select count(*)::int from items where id = $2) as children`,
+      [requestId, childId],
+    );
+    await client.query("rollback");
+    return result.rows[0] ?? null;
+  } finally {
+    try {
+      await client.query("rollback");
+    } catch {
+      // The transaction may already be closed.
+    }
+    client.release();
+  }
+}
+
 async function main(): Promise<void> {
   const login = await request("/api/login/quick", {
     method: "POST",
@@ -86,8 +114,8 @@ async function main(): Promise<void> {
   if (!alliance || alliance.kind !== "platform_owner" || alliance.status !== "approved") {
     throw new Error("staff quick login did not resolve the approved Alliance organization");
   }
-  const actorRows = await pool.query<{ firstName: string; lastName: string }>(
-    `select p.first_name as "firstName", p.last_name as "lastName"
+  const actorRows = await pool.query<{ firstName: string; lastName: string; personId: string }>(
+    `select p.id as "personId", p.first_name as "firstName", p.last_name as "lastName"
        from users u join people p on p.id = u.person_id
       where u.id = $1`,
     [user.id],
@@ -278,88 +306,221 @@ async function main(): Promise<void> {
     check(archived.response.status === 200, "normal staff archive succeeds");
     check((await request(`/api/public/volunteer-requests/${volunteerRequestId}`)).response.status === 404, "archived detail is hidden");
 
-    console.log("\nItem exclusion, member-org parity, and RLS intent");
-    const itemRows = await pool.query<{ id: string }>(
-      `insert into item_requests
-         (org_id, title, description, dropoff_location, people_helped, deadline_type, status, created_by)
-       values ($1, $2, 'Temporary fixture.', 'Roseville', 1, 'until_fulfilled', 'active', $3)
-       returning id`,
-      [alliance.id, itemTitle, user.id],
-    );
-    itemRequestId = itemRows.rows[0]?.id ?? null;
-    if (!itemRequestId) throw new Error("Alliance item fixture creation failed");
+    console.log("\nAlliance physical-need publication, parity, and RLS intent");
+    await pool.query(`create role ${rlsRoleName} nologin`);
+    rlsRoleCreated = true;
     await pool.query(
-      `insert into items (item_request_id, name, description, condition, quantity_requested, sort_order)
-       values ($1, 'Fixture item', 'Temporary fixture.', 'new', 1, 0)`,
+      `grant usage on schema public to ${rlsRoleName};
+       grant select on organizations, item_requests, items to ${rlsRoleName}`,
+    );
+    const itemCreated = await request("/api/dashboard/items", {
+      method: "POST",
+      cookie,
+      body: {
+        contactFirstName: actor.firstName,
+        contactLastName: actor.lastName,
+        contactEmail: user.email,
+        contactPhone: "555-0120",
+        title: itemTitle,
+        description: "Temporary Alliance physical need.",
+        deadlineType: "until_fulfilled",
+        peopleHelped: 1,
+      },
+    });
+    itemRequestId = typeof itemCreated.body.id === "string" ? itemCreated.body.id : null;
+    check(itemCreated.response.status === 200 && itemRequestId !== null, "Alliance staff creates a physical-need draft");
+    if (!itemRequestId) throw new Error("physical-need draft creation returned no id");
+
+    let itemBrowse = await request("/api/public/item-requests");
+    profile = await request(`/api/public/organizations/${alliance.slug}`);
+    check(!hasRequest(itemBrowse.body, "requests", itemRequestId), "physical-need draft is hidden from browse");
+    check(!hasRequest(profile.body, "itemRequests", itemRequestId), "physical-need draft is hidden from the Alliance profile");
+    check((await request(`/api/public/item-requests/${itemRequestId}`)).response.status === 404, "physical-need draft detail is hidden");
+    const draftRls = await publicRlsItemCounts(itemRequestId, null);
+    check(draftRls?.requests === 0, "a non-bypassing public role cannot read the physical-need draft", draftRls);
+
+    const itemEdit = await request(`/api/dashboard/items/${itemRequestId}/edit`, { cookie });
+    check(itemEdit.response.status === 200, "Alliance staff opens the physical-need dashboard edit endpoint");
+    const edited = await request(`/api/dashboard/items/${itemRequestId}/edit/request`, {
+      method: "POST",
+      cookie,
+      body: {
+        contactFirstName: actor.firstName,
+        contactLastName: actor.lastName,
+        contactEmail: user.email,
+        contactPhone: "555-0120",
+        title: itemTitle,
+        description: "Temporary Alliance physical need edited through the dashboard.",
+        dropoffLocation: "Roseville",
+        peopleHelped: 2,
+        deadlineType: "until_fulfilled",
+        deadlineDate: "",
+        statusTo: null,
+      },
+    });
+    check(edited.response.status === 200, "Alliance staff edits the physical-need dashboard draft");
+    const addedItem = await request(`/api/dashboard/items/${itemRequestId}/edit/add-item`, {
+      method: "POST",
+      cookie,
+      body: {
+        name: "Alliance publication fixture item",
+        description: "Temporary requested physical item.",
+        productUrl: null,
+        condition: "new",
+        quantityRequested: 2,
+      },
+    });
+    const addedItemBody = addedItem.body.item as { id?: string } | undefined;
+    itemId = typeof addedItemBody?.id === "string" ? addedItemBody.id : null;
+    check(addedItem.response.status === 200 && itemId !== null, "Alliance staff adds a requested physical item");
+    if (!itemId) throw new Error("physical-need item creation returned no id");
+
+    const itemSubmitted = await request(`/api/dashboard/items/${itemRequestId}/submit`, { method: "POST", cookie });
+    check(itemSubmitted.response.status === 200, "Alliance staff submits the physical need");
+    check((await dal.itemRequests.getById(SYSTEM, itemRequestId))?.status === "pending", "physical-need submission is pending");
+    check((await request(`/api/public/item-requests/${itemRequestId}`)).response.status === 404, "pending physical-need detail is hidden");
+    const pendingRls = await publicRlsItemCounts(itemRequestId, itemId);
+    check(
+      pendingRls?.requests === 0 && pendingRls.children === 0,
+      "a non-bypassing public role cannot read pending physical-need rows",
+      pendingRls,
+    );
+
+    const itemApproved = await request(`/api/admin/requests/item/${itemRequestId}/approve`, { method: "POST", cookie });
+    check(itemApproved.response.status === 200, "staff approval activates the Alliance physical need", itemApproved.body);
+    check((await dal.itemRequests.getById(SYSTEM, itemRequestId))?.status === "active", "approved physical need is active");
+
+    itemBrowse = await request("/api/public/item-requests");
+    profile = await request(`/api/public/organizations/${alliance.slug}`);
+    const itemDetail = await request(`/api/public/item-requests/${itemRequestId}`);
+    check(hasRequest(itemBrowse.body, "requests", itemRequestId), "physical need appears in item browse");
+    check(hasRequest(profile.body, "itemRequests", itemRequestId), "physical need appears on the Alliance profile");
+    check(itemDetail.response.status === 200, "public physical-need detail loads");
+    const itemShareResponse = await fetch(`${BASE}/items/${itemRequestId}`);
+    check(
+      itemShareResponse.status === 200 && (await itemShareResponse.text()).includes(itemTitle),
+      "server-rendered share preview uses the Alliance physical need",
+    );
+    check(
+      (
+        await request("/api/public/engagement", {
+          method: "POST",
+          cookie,
+          body: { eventId: itemEngagementEventId, eventType: "detail_view", requestKind: "item", requestId: itemRequestId },
+        })
+      ).response.status === 202,
+      "public engagement accepts the Alliance physical need",
+    );
+    const itemDigestNeeds = await dal.digestRuns.newActiveNeeds(SYSTEM, beforeApproval, new Date(Date.now() + 60_000).toISOString());
+    check(itemDigestNeeds.some((need) => need.type === "item" && need.id === itemRequestId), "digest selection includes the Alliance physical need");
+    check((await dal.digestRuns.upcomingNeeds(SYSTEM)).needs.some((need) => need.type === "item" && need.id === itemRequestId), "digest preview includes the Alliance physical need");
+
+    const recentlyViewed = await dal.requestEngagement.listRecentlyViewedForUser(SYSTEM, user.id, actor.personId);
+    check(recentlyViewed.some((row) => row.requestKind === "item" && row.requestId === itemRequestId && row.available), "attributed recently-viewed history marks the Alliance physical need available");
+    await pool.query(
+      `insert into request_engagement_events (client_event_id, event_type, request_kind, item_request_id, user_id)
+       values (gen_random_uuid(), 'detail_view', 'item', $1, $2)`,
+      [itemRequestId, supporterUserId],
+    );
+    const itemOutreach = await dal.requestEngagement.listEligibleOutreachRecipients(SYSTEM, {
+      requestKind: "item",
+      requestId: itemRequestId,
+      userIds: [supporterUserId!],
+    });
+    check(itemOutreach.recipients.some((recipient) => recipient.userId === supporterUserId), "outreach revalidation includes the Alliance physical need");
+
+    const pledge = await request(`/api/public/item-requests/${itemRequestId}/pledges`, {
+      method: "POST",
+      body: {
+        firstName: "zz_fixture",
+        lastName: "Alliance Pledge",
+        email: pledgeEmail,
+        phone: "555-0130",
+        agree: true,
+        lines: [{ itemId, quantity: 1 }],
+      },
+    });
+    check(pledge.response.status === 201, "public physical-need pledge succeeds", pledge.body);
+    const pledgeRow = await pool.query<{ id: string }>(`select id from item_pledges where item_request_id = $1 and person_id = (select id from people where email = $2)`, [itemRequestId, pledgeEmail]);
+    pledgeId = pledgeRow.rows[0]?.id ?? null;
+    pledgePersonId = (await dal.people.findByEmail(SYSTEM, pledgeEmail))?.id ?? null;
+    const itemCounter = await pool.query<{ quantityClaimed: number }>(`select quantity_claimed as "quantityClaimed" from items where id = $1`, [itemId]);
+    const pledgeEmails = await pool.query<{ keys: string[] }>(`select coalesce(array_agg(distinct template_key), '{}') as keys from email_log where entity_id = $1`, [pledgeId]);
+    check(itemCounter.rows[0]?.quantityClaimed === 1, "pledge updates the physical-item counter");
+    check(pledgeEmails.rows[0]?.keys.includes("donor_item_confirmation") === true && pledgeEmails.rows[0]?.keys.includes("org_new_item_donation") === true, "pledge queues normal item confirmation emails", pledgeEmails.rows[0]?.keys);
+
+    await pool.query(`update item_requests set expires_on = (now() at time zone 'America/Los_Angeles')::date - 1 where id = $1`, [itemRequestId]);
+    check((await request(`/api/public/item-requests/${itemRequestId}`)).response.status === 404, "expired physical need is hidden");
+    const expiredRls = await publicRlsItemCounts(itemRequestId, itemId);
+    check(
+      expiredRls?.requests === 0 && expiredRls.children === 0,
+      "a non-bypassing public role cannot read expired physical-need rows",
+      expiredRls,
+    );
+    const expiredDigestNeeds = await dal.digestRuns.newActiveNeeds(
+      SYSTEM,
+      beforeApproval,
+      new Date(Date.now() + 60_000).toISOString(),
+    );
+    check(
+      !expiredDigestNeeds.some((need) => need.type === "item" && need.id === itemRequestId),
+      "digest selection excludes the expired Alliance physical need",
+    );
+    check(
+      !(await dal.digestRuns.upcomingNeeds(SYSTEM)).needs.some(
+        (need) => need.type === "item" && need.id === itemRequestId,
+      ),
+      "digest preview excludes the expired Alliance physical need",
+    );
+    await pool.query(`update item_requests set expires_on = null where id = $1`, [itemRequestId]);
+    await pool.query(`update organizations set status = 'disabled' where id = $1`, [alliance.id]);
+    check((await request(`/api/public/item-requests/${itemRequestId}`)).response.status === 404, "disabled-organization physical need is hidden");
+    const disabledPledgeCountBefore = await pool.query<{ count: number }>(
+      `select count(*)::int as count from item_pledges where item_request_id = $1`,
       [itemRequestId],
     );
-    const itemBrowse = await request("/api/public/item-requests");
-    profile = await request(`/api/public/organizations/${alliance.slug}`);
-    check(!hasRequest(itemBrowse.body, "requests", itemRequestId), "Alliance item stays out of item browse");
-    check(!hasRequest(profile.body, "itemRequests", itemRequestId), "Alliance item stays off the Alliance profile");
-    check((await request(`/api/public/item-requests/${itemRequestId}`)).response.status === 404, "Alliance item detail stays hidden");
-
-    const memberVolunteer = await pool.query<{ id: string }>(
-      `select r.id
-         from volunteer_requests r join organizations o on o.id = r.org_id
-        where r.status = 'active' and o.status = 'approved' and o.kind = 'member_org'
-          and (r.expires_on is null or r.expires_on >= current_date)
-        limit 1`,
+    const disabledPledge = await request(`/api/public/item-requests/${itemRequestId}/pledges`, {
+      method: "POST",
+      body: {
+        firstName: "zz_fixture",
+        lastName: "Blocked Alliance Pledge",
+        email: `blocked.${pledgeEmail}`,
+        phone: "555-0131",
+        agree: true,
+        lines: [{ itemId, quantity: 1 }],
+      },
+    });
+    const disabledPledgeCountAfter = await pool.query<{ count: number }>(
+      `select count(*)::int as count from item_pledges where item_request_id = $1`,
+      [itemRequestId],
     );
-    const memberVolunteerId = memberVolunteer.rows[0]?.id;
     check(
-      typeof memberVolunteerId === "string" &&
-        (await request(`/api/public/volunteer-requests/${memberVolunteerId}`)).response.status === 200,
-      "existing member-organization volunteer detail remains public",
+      disabledPledge.response.status === 404 &&
+        disabledPledgeCountAfter.rows[0]?.count === disabledPledgeCountBefore.rows[0]?.count,
+      "disabled-organization pledge is rejected without writing",
+      { status: disabledPledge.response.status, before: disabledPledgeCountBefore.rows[0], after: disabledPledgeCountAfter.rows[0] },
     );
+    await pool.query(`update organizations set status = 'approved' where id = $1`, [alliance.id]);
 
-    const policies = await pool.query<{ name: string; expression: string }>(
-      `select polname as name, pg_get_expr(polqual, polrelid) as expression
-         from pg_policy
-        where polname in ('item_requests_public_select', 'volunteer_requests_public_select', 'volunteer_roles_public_select')`,
-    );
+    const memberItem = await pool.query<{ id: string }>(`select r.id from item_requests r join organizations o on o.id = r.org_id where r.status = 'active' and o.status = 'approved' and o.kind = 'member_org' and exists (select 1 from items i where i.item_request_id = r.id) and not item_request_expired_on(r.deadline_type, r.deadline_date, r.expires_on, item_request_current_la_date()) limit 1`);
+    check(typeof memberItem.rows[0]?.id === "string" && (await request(`/api/public/item-requests/${memberItem.rows[0]!.id}`)).response.status === 200, "member-organization physical-need detail remains public");
+
+    const policies = await pool.query<{ name: string; expression: string }>(`select polname as name, pg_get_expr(polqual, polrelid) as expression from pg_policy where polname in ('item_requests_public_select', 'items_public_select')`);
     const byName = new Map(policies.rows.map((row) => [row.name, row.expression]));
-    check(byName.get("volunteer_requests_public_select")?.includes("platform_owner"), "volunteer request RLS allows the platform owner");
-    check(byName.get("volunteer_roles_public_select")?.includes("platform_owner"), "volunteer role RLS allows the platform owner");
-    check(!byName.get("item_requests_public_select")?.includes("platform_owner"), "item request RLS remains member-org-only");
+    check(byName.get("item_requests_public_select")?.includes("platform_owner"), "item request RLS allows the platform owner");
+    check(byName.get("items_public_select")?.includes("platform_owner"), "item child RLS allows the platform owner");
 
-    const rlsClient = await pool.connect();
-    try {
-      await rlsClient.query(`create role ${rlsRoleName} nologin`);
-      rlsRoleCreated = true;
-      await rlsClient.query(
-        `grant usage on schema public to ${rlsRoleName};
-         grant select on organizations, organization_populations, org_memberships,
-           volunteer_requests, volunteer_roles, item_requests
-           to ${rlsRoleName}`,
-      );
-      await rlsClient.query("begin");
-      await rlsClient.query("select set_config('app.context', 'public', true)");
-      await rlsClient.query(`set local role ${rlsRoleName}`);
-      const enforced = await rlsClient.query<{ orgs: number; volunteers: number; roles: number; items: number }>(
-        `select
-           (select count(*)::int from organizations where id = $1) as orgs,
-           (select count(*)::int from volunteer_requests where id = $2) as volunteers,
-           (select count(*)::int from volunteer_roles where id = $3) as roles,
-           (select count(*)::int from item_requests where id = $4) as items`,
-        [alliance.id, volunteerRequestId, volunteerRoleId, itemRequestId],
-      );
-      await rlsClient.query("rollback");
-      const visible = enforced.rows[0];
-      check(
-        visible?.orgs === 1 && visible.volunteers === 1 && visible.roles === 1,
-        "a non-bypassing public role can read the Alliance organization, volunteer request, and role",
-        visible,
-      );
-      check(visible?.items === 0, "the same RLS role cannot read an Alliance item", visible);
-    } finally {
-      try {
-        await rlsClient.query("rollback");
-      } catch {
-        // The transaction may already be closed.
-      }
-      rlsClient.release();
-    }
+    const enforced = await publicRlsItemCounts(itemRequestId, itemId);
+    check(enforced?.requests === 1 && enforced.children === 1, "a non-bypassing public role can read the Alliance request and child after publication", enforced);
+    const itemArchived = await request(`/api/admin/requests/item/${itemRequestId}/archive`, { method: "POST", cookie });
+    check(itemArchived.response.status === 200, "normal staff archives the Alliance physical need");
+    check((await request(`/api/public/item-requests/${itemRequestId}`)).response.status === 404, "archived physical need detail is hidden");
+    const archivedRls = await publicRlsItemCounts(itemRequestId, itemId);
+    check(
+      archivedRls?.requests === 0 && archivedRls.children === 0,
+      "a non-bypassing public role cannot read archived physical-need rows",
+      archivedRls,
+    );
   } finally {
     if (volunteerRequestId) {
       // Signup notifications dispatch after the HTTP response. Do not delete
@@ -405,24 +566,52 @@ async function main(): Promise<void> {
       await pool.query(`delete from volunteer_requests where id = $1`, [volunteerRequestId]);
     }
     if (itemRequestId) {
+      // Pledge notifications dispatch after the HTTP response, just like
+      // volunteer signup notifications. Wait before deleting their rows.
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const unsettled = await pool.query<{ count: number }>(
+          `select count(*)::int as count from email_log
+            where status in ('queued', 'sending')
+              and entity_id in (select id from item_pledges where item_request_id = $1)`,
+          [itemRequestId],
+        );
+        if (unsettled.rows[0]?.count === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await pool.query(
+        `delete from email_log where entity_id in (select id from item_pledges where item_request_id = $1)`,
+        [itemRequestId],
+      );
+      await pool.query(
+        `delete from item_pledge_lines where item_pledge_id in (select id from item_pledges where item_request_id = $1)`,
+        [itemRequestId],
+      );
+      await pool.query(`delete from item_pledges where item_request_id = $1`, [itemRequestId]);
+      await pool.query(`delete from request_engagement_events where item_request_id = $1`, [itemRequestId]);
       await pool.query(`delete from approval_events where entity_type = 'item_request' and entity_id = $1`, [itemRequestId]);
       await pool.query(`delete from item_requests where id = $1`, [itemRequestId]);
     }
     if (supporterUserId) await pool.query(`delete from users where id = $1`, [supporterUserId]);
     if (supporterPersonId) await pool.query(`delete from people where id = $1`, [supporterPersonId]);
     if (signupPersonId) await pool.query(`delete from people where id = $1`, [signupPersonId]);
+    if (pledgePersonId) await pool.query(`delete from people where id = $1`, [pledgePersonId]);
+    // This fixture only exercises an approved Alliance organization, but make
+    // a failed disabled-org assertion incapable of leaving seed state altered.
+    await pool.query(`update organizations set status = 'approved' where id = $1`, [alliance.id]);
     if (rlsRoleCreated) {
       await pool.query(`drop owned by ${rlsRoleName}`);
       await pool.query(`drop role if exists ${rlsRoleName}`);
     }
-    await pool.query(`delete from request_engagement_events where client_event_id = $1`, [engagementEventId]);
+    await pool.query(`delete from request_engagement_events where client_event_id = any($1::uuid[])`, [
+      [engagementEventId, itemEngagementEventId],
+    ]);
     const leftovers = await pool.query<{ count: number }>(
       `select (
          (select count(*) from volunteer_requests where title = $1) +
          (select count(*) from item_requests where title = $2) +
-         (select count(*) from people where email in ($3, $4))
+          (select count(*) from people where email in ($3, $4, $5))
        )::int as count`,
-      [title, itemTitle, supporterEmail, signupEmail],
+      [title, itemTitle, supporterEmail, signupEmail, pledgeEmail],
     );
     check(leftovers.rows[0]?.count === 0, "fixture cleanup leaves no Alliance publication rows");
     await pool.end();

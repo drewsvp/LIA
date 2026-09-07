@@ -894,6 +894,31 @@ $$;
 
 
 --
+-- Name: reject_ineligible_item_pledge(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reject_ineligible_item_pledge() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  perform 1
+    from item_requests r
+    join organizations o on o.id = r.org_id
+   where r.id = new.item_request_id
+     and o.status = 'approved'
+     and o.kind in ('member_org', 'platform_owner')
+   for share of o;
+
+  if not found then
+    raise exception 'request_not_found';
+  end if;
+
+  return new;
+end;
+$$;
+
+
+--
 -- Name: reject_expired_item_pledge(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2862,6 +2887,13 @@ CREATE TRIGGER approval_events_capture_organization_context BEFORE INSERT ON pub
 
 
 --
+-- Name: item_pledges item_pledges_reject_ineligible_organization; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER item_pledges_reject_ineligible_organization BEFORE INSERT ON public.item_pledges FOR EACH ROW EXECUTE FUNCTION public.reject_ineligible_item_pledge();
+
+
+--
 -- Name: item_pledges item_pledges_reject_expired_request; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3881,9 +3913,9 @@ CREATE POLICY item_requests_member_update ON public.item_requests FOR UPDATE USI
 -- Name: item_requests item_requests_public_select; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY item_requests_public_select ON public.item_requests FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (status = ANY (ARRAY['active'::text, 'archived'::text])) AND (org_id IN ( SELECT o.id
+CREATE POLICY item_requests_public_select ON public.item_requests FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (status = 'active'::text) AND (NOT public.item_request_expired_on(deadline_type, deadline_date, expires_on, public.item_request_current_la_date())) AND (org_id IN ( SELECT o.id
    FROM public.organizations o
-  WHERE ((o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
+  WHERE ((o.status = 'approved'::text) AND (o.kind = ANY (ARRAY['member_org'::text, 'platform_owner'::text])))))));
 
 
 --
@@ -3921,7 +3953,7 @@ CREATE POLICY items_member_all ON public.items USING (((current_setting('app.con
 CREATE POLICY items_public_select ON public.items FOR SELECT USING (((current_setting('app.context'::text, true) = 'public'::text) AND (EXISTS ( SELECT 1
    FROM (public.item_requests r
      JOIN public.organizations o ON ((o.id = r.org_id)))
-  WHERE ((r.id = items.item_request_id) AND (r.status = ANY (ARRAY['active'::text, 'archived'::text])) AND (o.kind = 'member_org'::text) AND (o.status = 'approved'::text))))));
+  WHERE ((r.id = items.item_request_id) AND (r.status = 'active'::text) AND (NOT public.item_request_expired_on(r.deadline_type, r.deadline_date, r.expires_on, public.item_request_current_la_date())) AND (o.status = 'approved'::text) AND (o.kind = ANY (ARRAY['member_org'::text, 'platform_owner'::text])))))));
 
 
 --
