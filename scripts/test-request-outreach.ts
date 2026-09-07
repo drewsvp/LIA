@@ -267,7 +267,9 @@ async function main(): Promise<void> {
 
   const prior = await dal.emailLog.insertQueued(SYSTEM, {
     templateKey: "staff_request_viewer_follow_up",
-    toEmail: person.email,
+    // Model a historical delivery made before this person acquired their
+    // current account identity. Account-linked people cannot change email.
+    toEmail: `${marker}.old-address@example.test`,
     toPersonId: person.id,
     entityType: "item_request",
     entityId: itemRequestId,
@@ -281,10 +283,6 @@ async function main(): Promise<void> {
     `fixture timeout; ${MAY_HAVE_SENT_MARKER}`,
     "provider_timeout",
   );
-  await pool.query(`update people set email = $2 where id = $1`, [
-    person.id,
-    `${marker}.changed@example.test`,
-  ]);
   const uncertainResponse = await post("/api/admin/analytics/outreach/send", adminCookie, {
     confirmationToken: emailPreview.confirmationToken,
   });
@@ -298,10 +296,6 @@ async function main(): Promise<void> {
     uncertainBody,
   );
   await dal.emailLog.markSent(SYSTEM, prior.entry.id, `zz_fixture_provider_${process.pid}`);
-  await pool.query(`update people set email = $2 where id = $1`, [
-    person.id,
-    `${marker}.changed-again@example.test`,
-  ]);
   const changedEmailResponse = await post("/api/admin/analytics/outreach/send", adminCookie, {
     confirmationToken: emailPreview.confirmationToken,
   });
