@@ -6,7 +6,11 @@ import {
   readMigrationFiles,
   withoutTopLevelTransactionControl,
 } from "../server/db/migration-files";
-import { checkDbSchemaVersion } from "../server/db/startup-checks";
+import {
+  checkDbSchemaVersion,
+  checkRequiredRlsEnforcement,
+  REQUIRED_RLS_TABLES,
+} from "../server/db/startup-checks";
 
 type QueryRow = Record<string, unknown>;
 type FakeQuery = (text: string, values?: unknown[]) => Promise<{ rows: QueryRow[] }>;
@@ -214,11 +218,97 @@ async function testSchemaVersionDirections(): Promise<void> {
   }
 }
 
+async function testRlsInventoryMatchesPolicyFile(): Promise<void> {
+  const policySql = await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("../server/db/rls-policies.sql", import.meta.url), "utf8"),
+  );
+  const declared = new Set(
+    [...policySql.matchAll(/alter table\s+([a-z_]+)\s+(?:enable|force) row level security/gi)]
+      .map((match) => match[1]),
+  );
+  assert(
+    declared.size === REQUIRED_RLS_TABLES.length &&
+      REQUIRED_RLS_TABLES.every((table) => declared.has(table)),
+    "the startup RLS inventory covers every table declared in rls-policies.sql",
+  );
+}
+
+async function testRlsFlagFailures(): Promise<void> {
+  const rows = REQUIRED_RLS_TABLES.map((relname) => ({
+    relname,
+    relrowsecurity: relname !== "item_requests",
+    relforcerowsecurity: relname !== "volunteer_requests",
+  }));
+  const realError = console.error;
+  console.error = () => {};
+  try {
+    const result = await withFakeClient(async () => ({ rows }), checkRequiredRlsEnforcement);
+    assert(result.status === "missing" && !result.ok, "disabled RLS enforcement fails closed");
+    assert(
+      result.rlsDisabledTables.includes("item_requests"),
+      "the check identifies a table missing RLS enablement",
+    );
+    assert(
+      result.forceDisabledTables.includes("volunteer_requests"),
+      "the check identifies a table missing forced enforcement",
+    );
+  } finally {
+    console.error = realError;
+  }
+}
+
+async function testNonBypassRoleCannotReadPrivateRows(): Promise<void> {
+  const client = await pool.connect();
+  const role = `zz_rls_release_${process.pid}`;
+  try {
+    await client.query("begin");
+    await client.query(`create role ${role} nologin`);
+    await client.query(`grant usage on schema public to ${role}`);
+    // organizations' member policy also references org_memberships. PostgreSQL
+    // checks that referenced-table privilege even when the public policy is the
+    // one relevant to this query.
+    await client.query(`grant select on organizations, org_memberships to ${role}`);
+    await client.query(
+      `select set_config('app.context', 'system', true),
+              set_config('app.user_id', '', true)`,
+    );
+    const inserted = await client.query<{ id: string }>(
+      `insert into organizations (name, slug, kind, status)
+       values ($1, $2, 'member_org', 'pending')
+       returning id`,
+      [`zz fixture RLS release ${process.pid}`, `zz-rls-release-${process.pid}`],
+    );
+    await client.query(`set local role ${role}`);
+    await client.query(`select set_config('app.context', 'public', true)`);
+    const visible = await client.query(
+      `select id from organizations where id = $1`,
+      [inserted.rows[0]?.id],
+    );
+    assert(visible.rows.length === 0, "a non-BYPASSRLS public role cannot read a pending organization");
+    await client.query("reset role");
+    await client.query("rollback");
+  } catch (err) {
+    try {
+      await client.query("reset role");
+      await client.query("rollback");
+    } catch {
+      // Preserve the original failure.
+    }
+    throw err;
+  } finally {
+    await pool.query(`drop role if exists ${role}`);
+    client.release();
+  }
+}
+
 async function main(): Promise<void> {
   await testPendingBatchRollsBackTogether();
   await testClosedLedgerDriftException();
   await testUnknownDuplicateFailsClosed();
   await testSchemaVersionDirections();
+  await testRlsInventoryMatchesPolicyFile();
+  await testRlsFlagFailures();
+  await testNonBypassRoleCannotReadPrivateRows();
   console.log(`\n${passed} deployment-migration checks passed`);
 }
 

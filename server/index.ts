@@ -84,9 +84,15 @@ async function start(): Promise<void> {
     await applyMigrations();
   }
 
-  // Check both routine presence and code/schema version before accepting
-  // traffic. These checks are diagnostic and never block startup themselves.
-  await runDbRoutineChecks();
+  // Validate routines, schema version, and table-level RLS enforcement before
+  // accepting traffic. Missing routines remain diagnostic, but a production
+  // candidate must never become healthy with privacy enforcement disabled.
+  const dbChecks = await runDbRoutineChecks();
+  if (process.env.NODE_ENV === "production" && !dbChecks.rls.ok) {
+    throw new Error(
+      `Production startup blocked: row-level security enforcement is ${dbChecks.rls.status}.`,
+    );
+  }
   // Feature flags must reflect their persisted values before jobs start or
   // requests are accepted. The cache's default-off fallback is only a
   // pre-initialization safety net, not a substitute for startup hydration.

@@ -19,7 +19,7 @@
  *   reachable but parity cannot be verified.
  *
  * Test 4 — missing-function warning
- *   Temporarily drops item_request_expired_on from the database, runs
+ *   Temporarily renames item_request_expired_on in the database, runs
  *   checkRequiredDbFunctions(), and asserts that console.error was called with
  *   the function name and the repair migration filename. The function is
  *   restored in a finally block so the database is never left in a broken
@@ -52,30 +52,7 @@ function assert(condition: boolean, label: string, detail = ""): void {
 const FUNCTION_NAME = "item_request_expired_on";
 const MIGRATION_FILE = "0045_restore_routine_parity.sql";
 
-/**
- * The CREATE OR REPLACE body from migrations/0045 — used to restore the
- * function after the test drops it. Must match the canonical definition so
- * the trigger that calls it continues to work after the test exits.
- */
-const RESTORE_SQL = `
-  create or replace function item_request_expired_on(
-    p_deadline_type text,
-    p_deadline_date date,
-    p_expires_on date,
-    p_today date
-  ) returns boolean
-  language sql
-  immutable
-  as $$
-    select
-      (p_expires_on is not null and p_expires_on < p_today)
-      or (
-        p_deadline_type = 'date_specific'
-        and p_deadline_date is not null
-        and p_deadline_date < p_today
-      );
-  $$
-`;
+const TEMP_FUNCTION_NAME = "zz_item_request_expired_on_startup_check";
 
 /**
  * Test 1 — connection-failure guard for checkRequiredDbFunctions.
@@ -253,12 +230,11 @@ async function main(): Promise<void> {
   };
 
   try {
-    // Remove the function so the check sees it as absent.
-    // item_request_expired_on is a SQL-language function; the PL/pgSQL trigger
-    // function that calls it does not create a pg_depend entry, so the plain
-    // DROP (no CASCADE) succeeds without touching the trigger.
+    // Rename by object identity so the startup name check sees it as absent
+    // without dropping the RLS policies that depend on the function.
     await pool.query(
-      "DROP FUNCTION IF EXISTS item_request_expired_on(text, date, date, date)",
+      `ALTER FUNCTION item_request_expired_on(text, date, date, date)
+       RENAME TO ${TEMP_FUNCTION_NAME}`,
     );
 
     // Run the startup check — it should emit a console.error for every absent
@@ -296,11 +272,19 @@ async function main(): Promise<void> {
 
 async function restore(): Promise<void> {
   try {
-    await pool.query(RESTORE_SQL);
+    const renamed = await pool.query<{ present: boolean }>(
+      `select to_regprocedure($1) is not null as present`,
+      [`${TEMP_FUNCTION_NAME}(text,date,date,date)`],
+    );
+    if (renamed.rows[0]?.present) {
+      await pool.query(
+        `ALTER FUNCTION ${TEMP_FUNCTION_NAME}(text, date, date, date)
+         RENAME TO ${FUNCTION_NAME}`,
+      );
+    }
   } catch (err) {
     console.error(
-      "FATAL: could not restore item_request_expired_on — run " +
-        "migrations/0045_restore_routine_parity.sql manually:",
+      "FATAL: could not restore item_request_expired_on function name:",
       err,
     );
     process.exitCode = 1;

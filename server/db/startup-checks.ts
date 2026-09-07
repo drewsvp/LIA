@@ -19,6 +19,52 @@ import { pool } from "./client";
 import { readMigrationFiles } from "./migration-files";
 
 /**
+ * Every application table protected by server/db/rls-policies.sql.
+ *
+ * Keep this explicit inventory in lockstep with that file. A policy can remain
+ * present while relrowsecurity/relforcerowsecurity are disabled, so policy
+ * text alone is not evidence that privacy enforcement is active.
+ */
+export const REQUIRED_RLS_TABLES = [
+  "admin_organization_contexts",
+  "approval_events",
+  "contact_admin_audit",
+  "digest_exclusions",
+  "digest_runs",
+  "digest_subscribers",
+  "email_log",
+  "email_schedules",
+  "email_template_overrides",
+  "item_pledge_lines",
+  "item_pledges",
+  "item_requests",
+  "items",
+  "organization_context_actions",
+  "organization_populations",
+  "organization_revisions",
+  "organizations",
+  "org_memberships",
+  "participation_history",
+  "people",
+  "person_volunteer_interests",
+  "populations",
+  "request_engagement_events",
+  "request_revisions",
+  "storage_cleanup_queue",
+  "supporter_admin_audit",
+  "supporter_impersonation_contexts",
+  "users",
+  "volunteer_alert_preferences",
+  "volunteer_categories",
+  "volunteer_match_alert_claims",
+  "volunteer_request_categories",
+  "volunteer_requests",
+  "volunteer_roles",
+  "volunteer_signup_roles",
+  "volunteer_signups",
+] as const;
+
+/**
  * Custom PostgreSQL functions that must be present in the public schema.
  * Each entry names the function and the migration that (re-)creates it so
  * the error message points staff to the right repair step.
@@ -113,6 +159,19 @@ export type DbRoutineCheckResult = {
   errorMessage?: string;
   /** Code-versus-ledger comparison from the same startup check. */
   schema: DbSchemaCheckResult;
+  /** Table-level row-security enforcement from the same startup check. */
+  rls: DbRlsCheckResult;
+};
+
+export type DbRlsCheckResult = {
+  status: "pending" | "ok" | "missing" | "error";
+  ok: boolean;
+  checkedAt: string | null;
+  requiredTableCount: number;
+  missingTables: string[];
+  rlsDisabledTables: string[];
+  forceDisabledTables: string[];
+  errorMessage?: string;
 };
 
 export type DbSchemaCheckResult = {
@@ -140,6 +199,16 @@ const pendingSchemaResult = (): DbSchemaCheckResult => ({
   unexpectedMigrations: [],
 });
 
+const pendingRlsResult = (): DbRlsCheckResult => ({
+  status: "pending",
+  ok: false,
+  checkedAt: null,
+  requiredTableCount: REQUIRED_RLS_TABLES.length,
+  missingTables: [],
+  rlsDisabledTables: [],
+  forceDisabledTables: [],
+});
+
 let _checkResult: DbRoutineCheckResult = {
   status: "pending",
   ok: false,
@@ -149,6 +218,7 @@ let _checkResult: DbRoutineCheckResult = {
   requiredFunctionCount: REQUIRED_FUNCTIONS.length,
   requiredTriggerCount: REQUIRED_TRIGGERS.length,
   schema: pendingSchemaResult(),
+  rls: pendingRlsResult(),
 };
 
 /**
@@ -174,6 +244,76 @@ type FunctionCheckOutcome =
 type TriggerCheckOutcome =
   | { checkFailed: false; missing: Array<{ name: string; table: string }> }
   | { checkFailed: true; error: string };
+
+/**
+ * Verify that every table in the protected inventory exists and has both
+ * ENABLE ROW LEVEL SECURITY and FORCE ROW LEVEL SECURITY active.
+ *
+ * Never throws: callers choose whether a failed result is diagnostic
+ * (development) or release-blocking (production startup).
+ */
+export async function checkRequiredRlsEnforcement(): Promise<DbRlsCheckResult> {
+  const checkedAt = new Date().toISOString();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[db-check] Could not connect to database for RLS enforcement check:", err);
+    return { ...pendingRlsResult(), status: "error", checkedAt, errorMessage: `Connection failed: ${message}` };
+  }
+
+  try {
+    const result = await client.query<{
+      relname: string;
+      relrowsecurity: boolean;
+      relforcerowsecurity: boolean;
+    }>(
+      `select c.relname, c.relrowsecurity, c.relforcerowsecurity
+         from pg_class c
+         join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'public'
+          and c.relkind in ('r', 'p')
+          and c.relname = any($1::text[])`,
+      [[...REQUIRED_RLS_TABLES]],
+    );
+    const byName = new Map(result.rows.map((row) => [row.relname, row]));
+    const missingTables = REQUIRED_RLS_TABLES.filter((table) => !byName.has(table));
+    const rlsDisabledTables = REQUIRED_RLS_TABLES.filter(
+      (table) => byName.has(table) && byName.get(table)?.relrowsecurity !== true,
+    );
+    const forceDisabledTables = REQUIRED_RLS_TABLES.filter(
+      (table) => byName.has(table) && byName.get(table)?.relforcerowsecurity !== true,
+    );
+    const missing = missingTables.length + rlsDisabledTables.length + forceDisabledTables.length > 0;
+
+    for (const table of missingTables) {
+      console.error(`[db-check] ✖  Required RLS table is missing: "${table}"`);
+    }
+    for (const table of rlsDisabledTables) {
+      console.error(`[db-check] ✖  Row-level security is DISABLED on protected table: "${table}"`);
+    }
+    for (const table of forceDisabledTables) {
+      console.error(`[db-check] ✖  Forced row-level security is DISABLED on protected table: "${table}"`);
+    }
+
+    return {
+      status: missing ? "missing" : "ok",
+      ok: !missing,
+      checkedAt,
+      requiredTableCount: REQUIRED_RLS_TABLES.length,
+      missingTables: [...missingTables],
+      rlsDisabledTables: [...rlsDisabledTables],
+      forceDisabledTables: [...forceDisabledTables],
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[db-check] RLS enforcement catalog query failed:", err);
+    return { ...pendingRlsResult(), status: "error", checkedAt, errorMessage: `Catalog query failed: ${message}` };
+  } finally {
+    client.release();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Code/schema version check.
@@ -430,20 +570,22 @@ export async function checkRequiredDbTriggers(): Promise<TriggerCheckOutcome> {
  * This is the entry point used by server/index.ts. The caller should
  * `.catch(() => {})` to swallow any unexpected rejection.
  */
-export async function runDbRoutineChecks(): Promise<void> {
-  const [schema, fnOutcome, tgOutcome] = await Promise.all([
+export async function runDbRoutineChecks(): Promise<DbRoutineCheckResult> {
+  const [schema, rls, fnOutcome, tgOutcome] = await Promise.all([
     checkDbSchemaVersion(),
+    checkRequiredRlsEnforcement(),
     checkRequiredDbFunctions(),
     checkRequiredDbTriggers(),
   ]);
 
   const now = new Date().toISOString();
 
-  if (fnOutcome.checkFailed || tgOutcome.checkFailed) {
+  if (fnOutcome.checkFailed || tgOutcome.checkFailed || rls.status === "error") {
     // One or both catalog queries could not complete — we cannot assert parity.
     const errors = [
       fnOutcome.checkFailed ? fnOutcome.error : null,
       tgOutcome.checkFailed ? tgOutcome.error : null,
+      rls.status === "error" ? rls.errorMessage : null,
     ]
       .filter(Boolean)
       .join("; ");
@@ -458,18 +600,22 @@ export async function runDbRoutineChecks(): Promise<void> {
       requiredTriggerCount: REQUIRED_TRIGGERS.length,
       errorMessage: errors,
       schema,
+      rls,
     };
 
     console.error(
       `[db-check] ✖  DB routine check could not complete — catalog queries failed. ` +
         `Routine parity is unverified. Check GET /api/admin/db-health for details.`,
     );
-    return;
+    return _checkResult;
   }
 
   const missingFunctions = fnOutcome.missing;
   const missingTriggers = tgOutcome.missing;
-  const anyMissing = missingFunctions.length > 0 || missingTriggers.length > 0;
+  const anyMissing =
+    missingFunctions.length > 0 ||
+    missingTriggers.length > 0 ||
+    !rls.ok;
 
   _checkResult = {
     status: anyMissing ? "missing" : "ok",
@@ -480,6 +626,7 @@ export async function runDbRoutineChecks(): Promise<void> {
     requiredFunctionCount: REQUIRED_FUNCTIONS.length,
     requiredTriggerCount: REQUIRED_TRIGGERS.length,
     schema,
+    rls,
   };
 
   if (!anyMissing) {
@@ -490,8 +637,10 @@ export async function runDbRoutineChecks(): Promise<void> {
   } else {
     console.error(
       `[db-check] ✖  DB routine check complete: ` +
-        `${missingFunctions.length} function(s) and ${missingTriggers.length} trigger(s) missing. ` +
+        `${missingFunctions.length} function(s), ${missingTriggers.length} trigger(s), ` +
+        `and ${rls.ok ? "no" : "one or more"} RLS enforcement failure(s). ` +
         `Run GET /api/admin/db-health as a staff user to see the full list.`,
     );
   }
+  return _checkResult;
 }
