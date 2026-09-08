@@ -446,7 +446,11 @@ h3 {
   display: grid;
   justify-items: center;
   gap: 14px;
+  width: 100%;
   min-width: 0;
+}
+.pb0-tile-option .pb0-tile {
+  width: 100%;
 }
 .pb0-tile-button {
   min-width: 180px;
