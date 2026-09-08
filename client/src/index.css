@@ -442,6 +442,16 @@ h3 {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   transition: box-shadow 0.25s ease, transform 0.25s ease;
 }
+.pb0-tile-option {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.pb0-tile-button {
+  min-width: 180px;
+  text-align: center;
+}
 .pb0-tile:hover,
 .pb0-tile:focus-visible {
   box-shadow: 0 18px 45px rgba(6, 54, 93, 0.45);

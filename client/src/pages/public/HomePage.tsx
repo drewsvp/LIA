@@ -33,18 +33,28 @@ export function HomePage(): ReactElement {
 
         {/* Image tiles (§6) */}
         <div className="pb0-tiles">
-          <Link href="/items" className="pb0-tile" aria-label="Provide an Item">
-            <div
-              className="pb0-tile-bg"
-              style={{ backgroundImage: `url(${provideHeader})` }}
-            />
-          </Link>
-          <Link href="/volunteer" className="pb0-tile" aria-label="Volunteer Your Time">
-            <div
-              className="pb0-tile-bg"
-              style={{ backgroundImage: `url(${volunteerHeader})` }}
-            />
-          </Link>
+          <div className="pb0-tile-option">
+            <Link href="/items" className="pb0-tile" aria-label="Provide an Item">
+              <div
+                className="pb0-tile-bg"
+                style={{ backgroundImage: `url(${provideHeader})` }}
+              />
+            </Link>
+            <Link href="/items" className="btn-navy pb0-tile-button">
+              Provide an Item
+            </Link>
+          </div>
+          <div className="pb0-tile-option">
+            <Link href="/volunteer" className="pb0-tile" aria-label="Volunteer Your Time">
+              <div
+                className="pb0-tile-bg"
+                style={{ backgroundImage: `url(${volunteerHeader})` }}
+              />
+            </Link>
+            <Link href="/volunteer" className="btn-navy pb0-tile-button">
+              Volunteer Your Time
+            </Link>
+          </div>
         </div>
 
         {/* Digest callout — the question carries the emphasis, the answer below
