@@ -87,10 +87,41 @@ function isAlreadyMaterialized(filename: string, err: unknown): boolean {
 
 export async function applyMigrations(): Promise<void> {
   const files = readMigrationFiles();
+  const expected = new Map(
+    files.map(({ filename, sql }) => [
+      filename,
+      createHash("sha256").update(sql).digest("hex"),
+    ]),
+  );
   const client = await pool.connect();
   let transactionStarted = false;
 
   try {
+    // Autoscale may start several candidate instances at once. When the
+    // ledger is already exactly current, avoid making every instance queue
+    // behind the migration lock before it can bind the HTTP port.
+    //
+    // This is only a fast no-op path: any missing, extra, or changed row falls
+    // through to the original locked transaction, where drift still fails
+    // loudly and pending migrations still apply atomically.
+    try {
+      const currentRows = await client.query(`select filename, sha256 from schema_migrations`);
+      const current = new Map<string, string>(
+        currentRows.rows.map((r): [string, string] => [String(r.filename), String(r.sha256)]),
+      );
+      const exactlyCurrent =
+        current.size === expected.size &&
+        [...expected].every(([filename, sha]) => current.get(filename) === sha);
+      if (exactlyCurrent) {
+        console.log(`migrations up to date (${current.size} recorded).`);
+        return;
+      }
+    } catch (err) {
+      // A fresh database has no ledger yet. Only that expected condition may
+      // proceed to bootstrap; connectivity and permission errors stay loud.
+      if ((err as { code?: unknown } | null)?.code !== "42P01") throw err;
+    }
+
     await client.query("begin");
     transactionStarted = true;
     // Serialize startup/build-tool invocations. The lock is transaction-local,
@@ -108,7 +139,7 @@ export async function applyMigrations(): Promise<void> {
     );
 
     for (const { filename, sql } of files) {
-      const sha = createHash("sha256").update(sql).digest("hex");
+      const sha = expected.get(filename)!;
       const prior = recorded.get(filename);
 
       if (prior !== undefined) {

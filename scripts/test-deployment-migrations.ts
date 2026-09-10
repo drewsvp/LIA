@@ -67,6 +67,36 @@ function recordedRows(except: ReadonlySet<string>): QueryRow[] {
     }));
 }
 
+async function testCurrentLedgerSkipsMigrationLock(): Promise<void> {
+  const commands: string[] = [];
+
+  await withFakeClient(
+    async (text) => {
+      const normalized = text.trim();
+      commands.push(normalized);
+      if (normalized === "select filename, sha256 from schema_migrations") {
+        return { rows: recordedRows(new Set()) };
+      }
+      return { rows: [] };
+    },
+    async () => {
+      const realLog = console.log;
+      console.log = () => {};
+      try {
+        await applyMigrations();
+      } finally {
+        console.log = realLog;
+      }
+    },
+  );
+
+  assert(!commands.includes("begin"), "an exactly current ledger skips the migration transaction");
+  assert(
+    !commands.some((text) => text.includes("pg_advisory_xact_lock")),
+    "an exactly current ledger skips the migration lock",
+  );
+}
+
 async function testPendingBatchRollsBackTogether(): Promise<void> {
   const pending = files.slice(-2).map(({ filename }) => filename);
   const commands: string[] = [];
@@ -302,6 +332,7 @@ async function testNonBypassRoleCannotReadPrivateRows(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await testCurrentLedgerSkipsMigrationLock();
   await testPendingBatchRollsBackTogether();
   await testClosedLedgerDriftException();
   await testUnknownDuplicateFailsClosed();

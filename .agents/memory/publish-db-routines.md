@@ -50,3 +50,20 @@ SQL compatible with PostgreSQL transactions, preserve the closed and audited
 exception for historical publish-synced ledger drift, and add every new
 migration to the code manifest by placing it in the numbered migrations
 directory. Never broaden duplicate-object tolerance as an automatic baseline.
+
+## Autoscale startup requires an exact-ledger fast path
+
+When the production ledger exactly matches every migration filename and
+checksum in the running image, return before opening the migration transaction
+or acquiring its advisory lock. Any missing, extra, or mismatched row must still
+use the locked fail-closed path.
+
+**Why:** Autoscale starts several candidate instances together. Making every
+already-current instance queue behind the global migration lock kept port 5000
+closed past the readiness deadline, so the platform repeatedly killed healthy
+code in a crash loop.
+
+**How to apply:** Keep the fast path strict: equal row count and exact checksum
+match for the entire manifest. It is only a no-op optimization, never a way to
+skip pending work or tolerate drift. Measure it against Autoscale's startup
+window after adding migrations.
