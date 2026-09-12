@@ -49,21 +49,66 @@ from pathlib import Path
 NS = uuid.UUID("6f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f")  # arbitrary, fixed forever
 
 FILES = {
-    "organizations":       "Area_Needs_-_Organizations.csv",
-    "item_requests":       "Area_Needs_-_Item_Requests.csv",
-    "items":               "Area_Needs_-_Items.csv",
-    "volunteer_requests":  "Area_Needs_-_Volunteer_Requests.csv",
-    "volunteer_roles":     "Area_Needs_-_Volunteer_Roles.csv",
-    "donors":              "Area_Needs_-_Donors.csv",
+    "organizations": "Area_Needs_-_Organizations.csv",
+    "item_requests": "Area_Needs_-_Item_Requests.csv",
+    "items": "Area_Needs_-_Items.csv",
+    "volunteer_requests": "Area_Needs_-_Volunteer_Requests.csv",
+    "volunteer_roles": "Area_Needs_-_Volunteer_Roles.csv",
+    "donors": "Area_Needs_-_Donors.csv",
 }
 
+# Confirmed against the 2026-09-12 re-export. The prior audit baseline (2026-08-14)
+# was 49/120/403/24/58/127; every collection grew in the intervening four weeks.
 EXPECTED_SOURCE_ROWS = {
-    "organizations": 49, "item_requests": 120, "items": 403,
-    "volunteer_requests": 24, "volunteer_roles": 58, "donors": 127,
+    "organizations": 51,
+    "item_requests": 124,
+    "items": 429,
+    "volunteer_requests": 26,
+    "volunteer_roles": 59,
+    "donors": 134,
 }
+
+# Transform-run timestamp, for the handful of rows the migration invents rather
+# than carries over. This is the one value in the output that is not a pure
+# function of the inputs, so two runs differ in exactly these two cells.
+MIGRATION_TS = datetime.now(timezone.utc).isoformat()
 
 PLATFORM_OWNER_NAME = "The Alliance"
 PLATFORM_OWNER_SLUG = "the-alliance"
+
+# Contacts export (separate from the six CMS collections; see docs/migration/field-map.md
+# section 4). Filename is not part of FILES/EXPECTED_SOURCE_ROWS: it does not participate
+# in the drift check, since its size is not audited the way the six CMS exports are.
+CONTACTS_FILENAME = "contacts.csv"
+LABEL_APPROVED_MEMBER = "Approved Area Needs Member"
+LABEL_ORG_REP = "Member Organization Representatives"
+LABEL_DIGEST = "Weekly Love in Action Emails"
+DIGEST_LEGACY_SOURCE = "wix_contacts_export"
+
+# Membership provisioning keys on LABEL_APPROVED_MEMBER alone. Measured on the
+# 2026-09-12 export: 95 of 113 approved-member rows (84%) carry an Organization
+# Name matching an imported organization, while only 8 of 186 rows holding
+# LABEL_ORG_REP without approval do (4%) — 169 of those have no organization
+# name at all. LABEL_ORG_REP is a mailing-list label, not an approval flag.
+# Rows carrying only LABEL_ORG_REP get no users row and therefore no login;
+# most already arrive as digest subscribers.
+MEMBERSHIP_LABELS = {LABEL_APPROVED_MEMBER}
+
+# Contacts-export organization names that do not literally match the name in the
+# Organizations collection. Keys and values are compared via key(). Confirmed by
+# the captain against the live organization list; never inferred from string
+# similarity. Add only names a human has verified.
+CONTACT_ORG_ALIASES = {
+    "koinonia homes for teens": "Koinonia Family Services",
+}
+
+# Contacts-export email domains mapped to an organization name, used ONLY when a
+# row's Organization Name is blank. A work domain is strong evidence of employer
+# but weaker than a stated name, so a resolution by this route always flags the
+# membership for review. Confirmed by the captain; never inferred.
+CONTACT_ORG_DOMAINS = {
+    "kfh.org": "Koinonia Family Services",
+}
 
 # NOTE THE SOURCE MISSPELLING. 78 rows. A correctly spelled key defaults them all.
 DEADLINE_TYPE = {
@@ -112,7 +157,20 @@ POPULATION_MERGE = {
 NEED_STATUS = {"active": "active", "pending": "pending", "archived": "archived"}
 ORG_STATUS = {"approved": "approved", "pending": "pending"}
 
-NAME_PARTICLES = {"van", "von", "de", "del", "della", "der", "di", "du", "la", "le", "da", "st"}
+NAME_PARTICLES = {
+    "van",
+    "von",
+    "de",
+    "del",
+    "della",
+    "der",
+    "di",
+    "du",
+    "la",
+    "le",
+    "da",
+    "st",
+}
 NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "md", "phd", "esq"}
 MULTI_PERSON = (" and ", " & ", " + ")
 PLACEHOLDER = "Unknown"
@@ -155,7 +213,11 @@ def ts(v):
     if s is None:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+        return (
+            datetime.fromisoformat(s.replace("Z", "+00:00"))
+            .astimezone(timezone.utc)
+            .isoformat()
+        )
     except ValueError:
         return None
 
@@ -200,12 +262,29 @@ class Report:
         self.counts = Counter()
         self.notes = []
 
-    def add(self, entity, legacy_id, identifier, kind, field, source_value, imported_value, reason):
-        self.exceptions.append({
-            "entity": entity, "legacy_id": legacy_id, "identifier": identifier,
-            "kind": kind, "field": field, "source_value": source_value,
-            "imported_value": imported_value, "reason": reason,
-        })
+    def add(
+        self,
+        entity,
+        legacy_id,
+        identifier,
+        kind,
+        field,
+        source_value,
+        imported_value,
+        reason,
+    ):
+        self.exceptions.append(
+            {
+                "entity": entity,
+                "legacy_id": legacy_id,
+                "identifier": identifier,
+                "kind": kind,
+                "field": field,
+                "source_value": source_value,
+                "imported_value": imported_value,
+                "reason": reason,
+            }
+        )
         self.counts[f"exception:{kind}"] += 1
 
     def note(self, text):
@@ -235,8 +314,11 @@ def split_name(raw):
         return first, last, True, why, original
 
     if cleaned == "":
-        return flag(PLACEHOLDER, PLACEHOLDER,
-                    "The source record had no name. Both name fields are placeholders.")
+        return flag(
+            PLACEHOLDER,
+            PLACEHOLDER,
+            "The source record had no name. Both name fields are placeholders.",
+        )
 
     if any(m in f" {cleaned.lower()} " for m in MULTI_PERSON):
         # 'Don & Patty Anderson' is two humans sharing one surname at the end.
@@ -245,26 +327,38 @@ def split_name(raw):
         first = parts[0].split()[0]
         tail = parts[-1].split()
         last = tail[-1] if len(tail) > 1 else (tail[0] if tail else PLACEHOLDER)
-        return flag(first, last,
-                    "The source name appears to contain more than one person. The first given "
-                    "name and the shared last name were kept. Confirm who this record belongs to.")
+        return flag(
+            first,
+            last,
+            "The source name appears to contain more than one person. The first given "
+            "name and the shared last name were kept. Confirm who this record belongs to.",
+        )
 
     if "," in cleaned:
         t = re.sub(r"\s+", " ", cleaned.replace(",", " ")).strip().split(" ")
-        return flag(t[0], " ".join(t[1:]) or PLACEHOLDER,
-                    "The source name contained a comma and may be reversed. "
-                    "Confirm the first and last name.")
+        return flag(
+            t[0],
+            " ".join(t[1:]) or PLACEHOLDER,
+            "The source name contained a comma and may be reversed. "
+            "Confirm the first and last name.",
+        )
 
     t = cleaned.split(" ")
 
     if len(t) == 1:
-        return flag(t[0], PLACEHOLDER,
-                    "The source recorded only one name. No last name was present.")
+        return flag(
+            t[0],
+            PLACEHOLDER,
+            "The source recorded only one name. No last name was present.",
+        )
 
     if len(t) == 2:
         if t[1].lower().replace(".", "") in NAME_SUFFIXES:
-            return flag(t[0], t[1],
-                        "The source name ends in a suffix and has no separate last name.")
+            return flag(
+                t[0],
+                t[1],
+                "The source name ends in a suffix and has no separate last name.",
+            )
         # The only path that does not flag.
         return t[0], t[1], False, None, None
 
@@ -282,8 +376,11 @@ def split_name(raw):
         core, suffix = t, None
 
     if len(core) < 2:
-        return flag(core[0] if core else PLACEHOLDER, suffix or PLACEHOLDER,
-                    "The source name is a single token followed by a suffix.")
+        return flag(
+            core[0] if core else PLACEHOLDER,
+            suffix or PLACEHOLDER,
+            "The source name is a single token followed by a suffix.",
+        )
 
     def with_suffix(last):
         return f"{last} {suffix}" if suffix else last
@@ -292,22 +389,31 @@ def split_name(raw):
     # taking only the final token would produce 'Rio' and 'Housen'.
     for i in range(1, len(core)):
         if core[i].lower().replace(".", "") in NAME_PARTICLES:
-            return flag(" ".join(core[:i]), with_suffix(" ".join(core[i:])),
-                        "The source name contains a surname particle. The particle and "
-                        "everything after it were kept together as the last name.")
+            return flag(
+                " ".join(core[:i]),
+                with_suffix(" ".join(core[i:])),
+                "The source name contains a surname particle. The particle and "
+                "everything after it were kept together as the last name.",
+            )
 
     # An initial is a single letter, with or without a period.
     middles = core[1:-1]
     if middles and all(re.fullmatch(r"[A-Za-z]\.?", m) for m in middles):
-        return flag(core[0], with_suffix(core[-1]),
-                    "The source name contained a middle initial, which was dropped. Confirm "
-                    "the first and last name.")
+        return flag(
+            core[0],
+            with_suffix(core[-1]),
+            "The source name contained a middle initial, which was dropped. Confirm "
+            "the first and last name.",
+        )
 
     # A middle word is part of what the person goes by, so it stays with the
     # first name rather than being guessed into the surname.
-    return flag(" ".join(core[:-1]), with_suffix(core[-1]),
-                "The source name has more than two parts. The final token was taken as the "
-                "last name and everything before it as the first name. Confirm the split.")
+    return flag(
+        " ".join(core[:-1]),
+        with_suffix(core[-1]),
+        "The source name has more than two parts. The final token was taken as the "
+        "last name and everything before it as the first name. Confirm the split.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -318,8 +424,14 @@ def split_name(raw):
 def parse_address(raw):
     """Returns a dict of address columns plus how city was obtained."""
     out = {
-        "address_line1": None, "address_line2": None, "city": None, "state": None,
-        "postal_code": None, "address_formatted": None, "_city_parsed": False, "_note": None,
+        "address_line1": None,
+        "address_line2": None,
+        "city": None,
+        "state": None,
+        "postal_code": None,
+        "address_formatted": None,
+        "_city_parsed": False,
+        "_note": None,
     }
     a = jload(raw)
     if not a:
@@ -330,20 +442,25 @@ def parse_address(raw):
     out["address_formatted"] = formatted
 
     street = a.get("streetAddress") or {}
-    out["address_line1"] = (
-        txt(street.get("formattedAddressLine"))
-        or txt(" ".join(x for x in [street.get("number"), street.get("name")] if x))
+    out["address_line1"] = txt(street.get("formattedAddressLine")) or txt(
+        " ".join(x for x in [street.get("number"), street.get("name")] if x)
     )
     out["address_line2"] = txt(street.get("apt"))
 
     # ADMINISTRATIVE_AREA_LEVEL_1 is the state. The array also holds county and
     # city entries, so never take subdivisions[0] positionally.
     level1 = next(
-        (s for s in (a.get("subdivisions") or [])
-         if s.get("type") == "ADMINISTRATIVE_AREA_LEVEL_1"), None
+        (
+            s
+            for s in (a.get("subdivisions") or [])
+            if s.get("type") == "ADMINISTRATIVE_AREA_LEVEL_1"
+        ),
+        None,
     )
-    out["state"] = txt(level1.get("code")) if level1 else (
-        re.sub(r"^US-", "", txt(a.get("subdivision")) or "") or None
+    out["state"] = (
+        txt(level1.get("code"))
+        if level1
+        else (re.sub(r"^US-", "", txt(a.get("subdivision")) or "") or None)
     )
 
     out["city"] = txt(a.get("city"))
@@ -360,9 +477,13 @@ def parse_address(raw):
             # Bare place names: "Roseville ", "Grass Valley". Three organizations.
             out["city"] = formatted.strip()
             out["_city_parsed"] = True
-            out["_note"] = f'The formatted address contained only a place name: "{formatted}"'
+            out["_note"] = (
+                f'The formatted address contained only a place name: "{formatted}"'
+            )
         else:
-            out["_note"] = f'City could not be parsed from the formatted address: "{formatted}"'
+            out["_note"] = (
+                f'City could not be parsed from the formatted address: "{formatted}"'
+            )
 
     return out
 
@@ -384,8 +505,8 @@ class People:
     """
 
     def __init__(self, report: Report):
-        self.rows = {}          # lower(email) -> dict
-        self.hits = Counter()   # lower(email) -> times seen
+        self.rows = {}  # lower(email) -> dict
+        self.hits = Counter()  # lower(email) -> times seen
         self.report = report
 
     def resolve(self, raw_name, raw_email, raw_phone, source, legacy_id):
@@ -396,7 +517,13 @@ class People:
             # TE8 confirms zero in the CMS export. If the contacts export ever produces
             # one, exclude rather than synthesize — ADMIN-04 closed-with-default.
             self.report.add(
-                "people", legacy_id, str(raw_name or ""), "excluded", "email", "", "",
+                "people",
+                legacy_id,
+                str(raw_name or ""),
+                "excluded",
+                "email",
+                "",
+                "",
                 "The source record had no email address. The person is excluded from the "
                 "load rather than importing a synthesized address. Resolve at ADMIN-04 "
                 "once a correct email is available from the source.",
@@ -413,7 +540,9 @@ class People:
         first, last, needs_review, review_note, source_note = split_name(raw_name)
 
         if source_note is not None:
-            source_note = f'Source name as exported: "{source_note}" ({source} {legacy_id})'
+            source_note = (
+                f'Source name as exported: "{source_note}" ({source} {legacy_id})'
+            )
 
         self.rows[email] = {
             "id": new_id("person", email),
@@ -434,8 +563,14 @@ class People:
             self.report.n("people flagged needs_review")
         if needs_review:
             self.report.add(
-                "people", legacy_id, email, "inferred", "first_name/last_name",
-                str(raw_name or ""), f"{first} | {last}", review_note,
+                "people",
+                legacy_id,
+                email,
+                "inferred",
+                "first_name/last_name",
+                str(raw_name or ""),
+                f"{first} | {last}",
+                review_note,
             )
         return self.rows[email]["id"]
 
@@ -452,10 +587,17 @@ class People:
         row = self.rows[email]
 
         first, last, needs_review, _, _ = split_name(raw_name)
-        if not needs_review and (first != row["first_name"] or last != row["last_name"]):
+        if not needs_review and (
+            first != row["first_name"] or last != row["last_name"]
+        ):
             self.report.add(
-                "people", legacy_id, email, "conflict", "first_name/last_name",
-                f"{first} | {last} ({source})", f'{row["first_name"]} | {row["last_name"]}',
+                "people",
+                legacy_id,
+                email,
+                "conflict",
+                "first_name/last_name",
+                f"{first} | {last} ({source})",
+                f"{row['first_name']} | {row['last_name']}",
                 "The same email arrived from more than one source with different names. The "
                 "earlier-loaded value was kept and no second person was created.",
             )
@@ -489,13 +631,16 @@ def load_sources(source_dir: Path, allow_drift: bool):
 
     drift = [
         f"  {k}: expected {v}, got {len(src[k])}"
-        for k, v in EXPECTED_SOURCE_ROWS.items() if len(src[k]) != v
+        for k, v in EXPECTED_SOURCE_ROWS.items()
+        if len(src[k]) != v
     ]
     if drift:
-        msg = ("Source row counts differ from docs/migration/data-audit.md:\n"
-               + "\n".join(drift)
-               + "\n\nThe live system changes daily. Re-run the audit against this export "
-                 "and update EXPECTED_SOURCE_ROWS, or pass --allow-drift to proceed knowingly.")
+        msg = (
+            "Source row counts differ from docs/migration/data-audit.md:\n"
+            + "\n".join(drift)
+            + "\n\nThe live system changes daily. Re-run the audit against this export "
+            "and update EXPECTED_SOURCE_ROWS, or pass --allow-drift to proceed knowingly."
+        )
         if allow_drift:
             print(f"[WARN] {msg}\n", file=sys.stderr)
         else:
@@ -509,7 +654,10 @@ def load_exclusions(path: Path):
     flagged for a human decision nobody has made yet; they still import.
     """
     if not path.exists():
-        print(f"[WARN] No exclusions file at {path}. Nothing will be excluded.", file=sys.stderr)
+        print(
+            f"[WARN] No exclusions file at {path}. Nothing will be excluded.",
+            file=sys.stderr,
+        )
         return {"item_request": set(), "item": set(), "volunteer_role": set()}, []
 
     rows = read_csv(path)
@@ -541,8 +689,15 @@ def build_populations(report: Report):
         while slug in taken:
             slug, n = f"{base}-{n}", n + 1
         taken.add(slug)
-        rows.append({"id": new_id("population", name), "name": name, "slug": slug,
-                     "sort_order": i, "is_active": True})
+        rows.append(
+            {
+                "id": new_id("population", name),
+                "name": name,
+                "slug": slug,
+                "sort_order": i,
+                "is_active": True,
+            }
+        )
         report.n("populations seeded")
 
     by_name = {r["name"]: r["id"] for r in rows}
@@ -572,82 +727,368 @@ def resolve_population(raw, pop_ids_by_key):
     return None, v
 
 
+def contact_labels(raw):
+    return {l.strip() for l in (raw or "").split(";") if l.strip()}
+
+
+def stage_contacts(rows, people: People, report: Report):
+    """
+    Phase order (field-map.md section 4): contacts is meant to load before
+    organizations, so its already-separated first/last name wins a conflict
+    over a later source's best-effort split from a single Name string. This
+    function runs first and only resolves people; org matching needs organization
+    ids, which do not exist yet, so that half is deferred to
+    build_contacts_memberships, called after build_organizations.
+
+    Only rows carrying at least one of the three target labels are staged. The
+    other ~3,000 rows in a typical export are general mailing-list history with
+    nothing to migrate.
+    """
+    membership_candidates = []
+    digest_rows = []
+    seen_digest_emails = set()
+
+    for i, c in enumerate(rows):
+        labels = contact_labels(c.get("Labels"))
+        relevant = labels & {LABEL_APPROVED_MEMBER, LABEL_ORG_REP, LABEL_DIGEST}
+        if not relevant:
+            continue
+
+        email = txt(c.get("Email 1")) or txt(c.get("Email 2")) or txt(c.get("Email 3"))
+        first, last = txt(c.get("First Name")), txt(c.get("Last Name"))
+        raw_name = f"{first} {last}" if (first and last) else (first or last or "")
+        identifier = email or f"contacts-row-{i}"
+
+        person_id = people.resolve(
+            raw_name, email, c.get("Phone 1"), "contacts", identifier
+        )
+        if person_id is None:
+            continue  # people.resolve() already logged the missing-email exclusion
+
+        if labels & MEMBERSHIP_LABELS:
+            org_name = txt(c.get("Organization Name"))
+            domain_org, by_domain = None, False
+            if org_name is None and email:
+                domain = email.split("@")[-1].lower()
+                domain_org = CONTACT_ORG_DOMAINS.get(domain)
+                by_domain = domain_org is not None
+            resolved = org_name or domain_org
+            if resolved is not None:
+                resolved = CONTACT_ORG_ALIASES.get(key(resolved), resolved)
+            membership_candidates.append(
+                {
+                    "person_id": person_id,
+                    "email": email,
+                    "identifier": identifier,
+                    "org_name_key": key(resolved) if resolved else None,
+                    "org_name_raw": org_name,
+                    "by_domain": by_domain,
+                    "approved": LABEL_APPROVED_MEMBER in labels,
+                }
+            )
+
+        if LABEL_DIGEST in labels and email.lower() not in seen_digest_emails:
+            seen_digest_emails.add(email.lower())
+            person_row = people.rows.get(email.lower(), {})
+            digest_rows.append(
+                {
+                    "id": new_id("digest_subscriber", email.lower()),
+                    "person_id": person_id,
+                    "email": email.lower(),
+                    "status": "subscribed",
+                    "unsubscribed_at": None,
+                    "legacy_source": DIGEST_LEGACY_SOURCE,
+                    "first_name": person_row.get("first_name"),
+                    "last_name": person_row.get("last_name"),
+                }
+            )
+
+    report.n("contacts rows staged for membership", by=len(membership_candidates))
+    report.n("contacts rows staged for digest", by=len(digest_rows))
+    return membership_candidates, digest_rows
+
+
+def build_contacts_memberships(candidates, orgs, report: Report):
+    """
+    Second pass, after build_organizations. One user per person; role is
+    always 'member', the export gives no reliable signal for 'owner' versus
+    'member' so it is never guessed. status is 'active' when Approved Area
+    Needs Member is present, else 'pending'. approved_at/approved_by stay
+    null even when active: the export has no per-membership approval
+    timestamp, same rule D48 applies to item and volunteer requests.
+    """
+    org_by_name = {}
+    for o in orgs:
+        if o["name"]:
+            org_by_name.setdefault(key(o["name"]), o["id"])
+
+    users_by_person, user_rows, membership_rows = {}, [], []
+    unmatched_orgs = 0
+    by_domain_count = 0
+
+    for cand in candidates:
+        person_id = cand["person_id"]
+        if person_id not in users_by_person:
+            uid = new_id("user", person_id)
+            users_by_person[person_id] = uid
+            user_rows.append(
+                {
+                    "id": uid,
+                    "person_id": person_id,
+                    "auth_subject": None,
+                    "status": "invited",
+                    "last_login_at": None,
+                    "kind": "member",
+                    "created_at": None,
+                    "updated_at": None,
+                }
+            )
+            report.n("users created")
+
+        org_id = org_by_name.get(cand["org_name_key"]) if cand["org_name_key"] else None
+        if org_id is None:
+            unmatched_orgs += 1
+            report.add(
+                "org_memberships",
+                cand["identifier"],
+                cand["email"] or "",
+                "excluded",
+                "org_id",
+                cand["org_name_raw"] or "",
+                "",
+                "The source Organization Name did not match any imported organization by "
+                "exact name. A users row was still created so this person can log in; the "
+                "org_membership must be attached by hand once the correct organization is "
+                "identified.",
+            )
+            continue
+
+        membership_rows.append(
+            {
+                "id": new_id(
+                    "org_membership", f"{org_id}:{users_by_person[person_id]}"
+                ),
+                "org_id": org_id,
+                "user_id": users_by_person[person_id],
+                "role": "member",
+                "status": "active" if cand["approved"] else "pending",
+                "invited_by": None,
+                "approved_at": None,
+                "approved_by": None,
+                "created_at": None,
+                "updated_at": None,
+            }
+        )
+        report.n("org_memberships created")
+        if cand["by_domain"]:
+            by_domain_count += 1
+            report.add(
+                "org_memberships",
+                cand["identifier"],
+                cand["email"] or "",
+                "inferred",
+                "org_id",
+                "",
+                cand["org_name_key"] or "",
+                "The source row had no Organization Name. The organization was resolved from "
+                "the email domain using a captain-confirmed mapping. Confirm this person still "
+                "represents that organization.",
+            )
+
+    if unmatched_orgs:
+        report.note(
+            f"{unmatched_orgs} approved-member contacts rows had no organization name match. "
+            "Users rows were created so login works; org_memberships were not. "
+            "See migration-exceptions.csv."
+        )
+    if by_domain_count:
+        report.note(
+            f"{by_domain_count} org_memberships were resolved by email domain rather than a "
+            "stated organization name, using CONTACT_ORG_DOMAINS. Each is flagged inferred in "
+            "migration-exceptions.csv and should be confirmed."
+        )
+    return user_rows, membership_rows
+
+
 def build_organizations(orgs, pop_ids_by_key, people: People, report: Report):
     org_rows, link_rows, email_rows = [], [], []
     by_legacy = {}
     taken = {PLATFORM_OWNER_SLUG}
     approved_at_inferred = 0
 
-    # The platform owner is not in any export. Staff memberships are NOT created:
-    # the roster is an open capture (B4) and inventing one would grant admin
-    # access to a guess.
-    org_rows.append({
+    # The platform owner is seeded here because it may not be in the export.
+    # When the export DOES contain a row with this name, the two are the same
+    # legal entity and the source row merges into this one rather than creating
+    # a second organization; see the merge branch in the loop below.
+    # Staff memberships are NOT created: the roster is an open capture (B4) and
+    # inventing one would grant admin access to a guess.
+    platform_owner = {
         "id": new_id("organization", "__platform_owner__"),
-        "legacy_wix_id": None, "kind": "platform_owner",
-        "name": PLATFORM_OWNER_NAME, "slug": PLATFORM_OWNER_SLUG,
-        "website_url": None, "mission": None, "phone": None, "logo_url": None,
+        "legacy_wix_id": None,
+        "kind": "platform_owner",
+        "name": PLATFORM_OWNER_NAME,
+        "slug": PLATFORM_OWNER_SLUG,
+        "website_url": None,
+        "mission": None,
+        "phone": None,
+        "logo_url": None,
         "populations_other": None,
-        "address_line1": None, "address_line2": None, "city": None, "state": None,
-        "postal_code": None, "address_formatted": None,
-        "primary_contact_person_id": None, "status": "approved",
-        "approved_at": None, "approved_by": None,
-        "created_at": None, "updated_at": None,
-    })
+        "address_line1": None,
+        "address_line2": None,
+        "city": None,
+        "state": None,
+        "postal_code": None,
+        "address_formatted": None,
+        "primary_contact_person_id": None,
+        "status": "approved",
+        "approved_at": None,
+        "approved_by": None,
+        # Not from any export: this row is created by the migration, so its
+        # creation time is transform time. Both columns are NOT NULL and COPY
+        # will not fall back to `default now()` for an explicit NULL.
+        "created_at": MIGRATION_TS,
+        "updated_at": MIGRATION_TS,
+    }
+    org_rows.append(platform_owner)
     report.n("platform owner created")
 
     for o in orgs:
         legacy = txt(o.get("ID"))
         name = txt(o.get("Organization Name"))
         if not legacy or not name:
-            report.add("organizations", legacy or "", name or "(no name)", "excluded",
-                       "ID/Organization Name", "", "",
-                       "The source row had no id or no name and could not be imported.")
+            report.add(
+                "organizations",
+                legacy or "",
+                name or "(no name)",
+                "excluded",
+                "ID/Organization Name",
+                "",
+                "",
+                "The source row had no id or no name and could not be imported.",
+            )
             continue
 
         contact_id = people.resolve(
-            o.get("Primary Contact Name"), o.get("Primary Contact Email"),
-            o.get("Primary Contact Phone Number"), "organizations", legacy,
+            o.get("Primary Contact Name"),
+            o.get("Primary Contact Email"),
+            o.get("Primary Contact Phone Number"),
+            "organizations",
+            legacy,
         )
 
         status = ORG_STATUS.get(key(o.get("Approved")))
         if status is None:
             status = "pending"
-            report.add("organizations", legacy, name, "defaulted", "status",
-                       txt(o.get("Approved")) or "", status,
-                       "The source Approved value was absent or unrecognized. "
-                       "Defaulted to pending, never approved.")
+            report.add(
+                "organizations",
+                legacy,
+                name,
+                "defaulted",
+                "status",
+                txt(o.get("Approved")) or "",
+                status,
+                "The source Approved value was absent or unrecognized. "
+                "Defaulted to pending, never approved.",
+            )
 
         addr = parse_address(o.get("Org Address"))
         if addr["city"] is None:
-            report.add("organizations", legacy, name, "unresolved", "city",
-                       txt(o.get("Org Address")) or "", "",
-                       "No city could be resolved. Every approved organization must have one; "
-                       "it renders as the location on both public browse surfaces. Fill by hand.")
+            report.add(
+                "organizations",
+                legacy,
+                name,
+                "unresolved",
+                "city",
+                txt(o.get("Org Address")) or "",
+                "",
+                "No city could be resolved. Every approved organization must have one; "
+                "it renders as the location on both public browse surfaces. Fill by hand.",
+            )
             report.n("organizations with no city")
         elif addr["_city_parsed"]:
-            report.add("organizations", legacy, name, "inferred", "city",
-                       addr["address_formatted"] or "", addr["city"], addr["_note"])
-
-        base = slugify(name)
-        slug, n = base, 2
-        while slug in taken:
-            slug, n = f"{base}-{n}", n + 1
-        taken.add(slug)
+            report.add(
+                "organizations",
+                legacy,
+                name,
+                "inferred",
+                "city",
+                addr["address_formatted"] or "",
+                addr["city"],
+                addr["_note"],
+            )
 
         updated = ts(o.get("Updated Date"))
         approved_at = updated if status == "approved" else None
-        if approved_at:
-            approved_at_inferred += 1
 
-        org_id = new_id("organization", legacy)
-        by_legacy[legacy] = org_id
+        # The export carries its own row for the platform owner: The Alliance
+        # runs the program AND publishes needs of its own (7 item requests and
+        # 3 volunteer requests on the 2026-09-12 export; the app supports this
+        # explicitly, see migrations 0052 and 0064). Emitting both rows violates
+        # the unique index on organizations.name, and they are one entity. So the
+        # source row's real detail is merged onto the seeded platform-owner row,
+        # keeping kind='platform_owner' and the reserved slug, and by_legacy maps
+        # the legacy id onto it so its requests attach to the right organization.
+        is_platform_owner = key(name) == key(PLATFORM_OWNER_NAME)
+        if is_platform_owner:
+            org_id = platform_owner["id"]
+            by_legacy[legacy] = org_id
+            platform_owner.update(
+                {
+                    "legacy_wix_id": legacy,
+                    "website_url": txt(o.get("Website URL")),
+                    "mission": txt(o.get("Mission Statement")),
+                    "phone": txt(o.get("Org Phone Number")),
+                    "address_line1": addr["address_line1"],
+                    "address_line2": addr["address_line2"],
+                    "city": addr["city"],
+                    "state": addr["state"],
+                    "postal_code": addr["postal_code"],
+                    "address_formatted": addr["address_formatted"],
+                    "primary_contact_person_id": contact_id,
+                    "approved_at": approved_at,
+                    "created_at": ts(o.get("Created Date")) or MIGRATION_TS,
+                    "updated_at": updated or MIGRATION_TS,
+                }
+            )
+            report.add(
+                "organizations",
+                legacy,
+                name,
+                "inferred",
+                "kind",
+                "member_org",
+                "platform_owner",
+                "The export contains an organization with the platform owner's name. "
+                "It is the same entity, so the source detail was merged onto the "
+                "platform-owner organization instead of importing a second row. Its "
+                "status stays approved and its requests attach to it normally.",
+            )
+            report.n("platform owner merged with its source row")
+        else:
+            base = slugify(name)
+            slug, n = base, 2
+            while slug in taken:
+                slug, n = f"{base}-{n}", n + 1
+            taken.add(slug)
+            org_id = new_id("organization", legacy)
+            by_legacy[legacy] = org_id
+
+        if approved_at and not is_platform_owner:
+            approved_at_inferred += 1
 
         values = jload(o.get("Primary Population Served")) or []
         if not values:
-            report.add("organization_populations", legacy, name, "unresolved",
-                       "Primary Population Served", "", "",
-                       "The organization has no populations assigned. It will not appear "
-                       "under any public filter.")
+            report.add(
+                "organization_populations",
+                legacy,
+                name,
+                "unresolved",
+                "Primary Population Served",
+                "",
+                "",
+                "The organization has no populations assigned. It will not appear "
+                "under any public filter.",
+            )
         linked = set()
         other_parts = []
         for raw in values:
@@ -660,44 +1101,76 @@ def build_organizations(orgs, pop_ids_by_key, people: People, report: Report):
                 other_parts.append(other_text)
                 report.n("populations_other preserved")
 
-        org_rows.append({
-            "id": org_id, "legacy_wix_id": legacy, "kind": "member_org",
-            "name": name, "slug": slug,
-            "website_url": txt(o.get("Website URL")),
-            "mission": txt(o.get("Mission Statement")),
-            "phone": txt(o.get("Org Phone Number")),
-            "logo_url": None,          # media pass. Never a source-hosted URL (D38)
-            "populations_other": ", ".join(other_parts) if other_parts else None,
-            "address_line1": addr["address_line1"], "address_line2": addr["address_line2"],
-            "city": addr["city"], "state": addr["state"],
-            "postal_code": addr["postal_code"], "address_formatted": addr["address_formatted"],
-            "primary_contact_person_id": contact_id, "status": status,
-            "approved_at": approved_at, "approved_by": None,
-            "created_at": ts(o.get("Created Date")), "updated_at": updated,
-        })
-        report.n("organizations imported")
+        if is_platform_owner:
+            # Already merged above; population links and email_log below still
+            # apply, keyed on the platform owner's org_id.
+            pass
+        else:
+            org_rows.append(
+                {
+                    "id": org_id,
+                    "legacy_wix_id": legacy,
+                    "kind": "member_org",
+                    "name": name,
+                    "slug": slug,
+                    "website_url": txt(o.get("Website URL")),
+                    "mission": txt(o.get("Mission Statement")),
+                    "phone": txt(o.get("Org Phone Number")),
+                    "logo_url": None,  # media pass. Never a source-hosted URL (D38)
+                    "populations_other": ", ".join(other_parts)
+                    if other_parts
+                    else None,
+                    "address_line1": addr["address_line1"],
+                    "address_line2": addr["address_line2"],
+                    "city": addr["city"],
+                    "state": addr["state"],
+                    "postal_code": addr["postal_code"],
+                    "address_formatted": addr["address_formatted"],
+                    "primary_contact_person_id": contact_id,
+                    "status": status,
+                    "approved_at": approved_at,
+                    "approved_by": None,
+                    "created_at": ts(o.get("Created Date")),
+                    "updated_at": updated,
+                }
+            )
+            report.n("organizations imported")
 
         # D37. Replaces the source Approved Email Sent boolean. Without this the
         # dedup index has no record and staff can re-welcome a two-year member.
         if key(o.get("Approved Email Sent")) == "true":
             to_email = txt(o.get("Primary Contact Email"))
             if to_email:
-                email_rows.append({
-                    "id": new_id("email_log", legacy),
-                    "template_key": "org_approved",
-                    "to_email": to_email.lower(),
-                    "to_person_id": contact_id,
-                    "entity_type": "organization", "entity_id": org_id,
-                    "payload": "{}", "status": "sent",
-                    "provider_message_id": None, "error": None,
-                    "sent_at": updated, "created_at": updated,
-                })
+                email_rows.append(
+                    {
+                        "id": new_id("email_log", legacy),
+                        "template_key": "org_approved",
+                        "to_email": to_email.lower(),
+                        "to_person_id": contact_id,
+                        "entity_type": "organization",
+                        "entity_id": org_id,
+                        "payload": "{}",
+                        "status": "sent",
+                        "provider_message_id": None,
+                        "error": None,
+                        "sent_at": updated,
+                        "created_at": updated,
+                    }
+                )
                 report.n("email_log rows seeded")
             else:
-                report.add("email_log", legacy, name, "unresolved", "to_email", "", "",
-                           "Approved Email Sent was true but there is no primary contact email, "
-                           "so no dedup row could be seeded. This organization can be "
-                           "re-welcomed by mistake.")
+                report.add(
+                    "email_log",
+                    legacy,
+                    name,
+                    "unresolved",
+                    "to_email",
+                    "",
+                    "",
+                    "Approved Email Sent was true but there is no primary contact email, "
+                    "so no dedup row could be seeded. This organization can be "
+                    "re-welcomed by mistake.",
+                )
 
     if approved_at_inferred:
         report.note(
@@ -721,53 +1194,100 @@ def build_item_requests(rows, org_ids, excluded, people: People, report: Report)
         title = txt(r.get("Request Title"))
 
         if legacy in excluded:
-            report.add("item_requests", legacy, title or "(no title)", "excluded", "org_id",
-                       txt(r.get("Organization")) or "", "",
-                       "Listed in docs/migration/exclusions.csv. See that file for the reason.")
+            report.add(
+                "item_requests",
+                legacy,
+                title or "(no title)",
+                "excluded",
+                "org_id",
+                txt(r.get("Organization")) or "",
+                "",
+                "Listed in docs/migration/exclusions.csv. See that file for the reason.",
+            )
             report.n("item requests excluded")
             continue
 
         org_legacy = txt(r.get("Organization"))
         org_id = org_ids.get(org_legacy) if org_legacy else None
         if org_id is None:
-            report.add("item_requests", legacy, title or "(no title)", "excluded", "org_id",
-                       org_legacy or "", "",
-                       "The organization reference does not resolve and this row is NOT in "
-                       "exclusions.csv. The source has changed since the audit. Re-run the audit.")
+            report.add(
+                "item_requests",
+                legacy,
+                title or "(no title)",
+                "excluded",
+                "org_id",
+                org_legacy or "",
+                "",
+                "The organization reference does not resolve and this row is NOT in "
+                "exclusions.csv. The source has changed since the audit. Re-run the audit.",
+            )
             report.n("item requests excluded, unlisted")
             continue
 
         if not title:
-            report.add("item_requests", legacy, "(no title)", "excluded", "title", "", "",
-                       "The source row has no Request Title. title is not null in the schema.")
+            report.add(
+                "item_requests",
+                legacy,
+                "(no title)",
+                "excluded",
+                "title",
+                "",
+                "",
+                "The source row has no Request Title. title is not null in the schema.",
+            )
             continue
 
         status = NEED_STATUS.get(key(r.get("Need Status")))
         if status is None:
             status = "archived"
-            report.add("item_requests", legacy, title, "defaulted", "status",
-                       txt(r.get("Need Status")) or "", status,
-                       "Unmapped Need Status. Defaulted to archived so nothing unexpected "
-                       "becomes public.")
+            report.add(
+                "item_requests",
+                legacy,
+                title,
+                "defaulted",
+                "status",
+                txt(r.get("Need Status")) or "",
+                status,
+                "Unmapped Need Status. Defaulted to archived so nothing unexpected "
+                "becomes public.",
+            )
 
         dtype = DEADLINE_TYPE.get(key(r.get("Deadline Type")))
         if dtype is None:
             dtype = "until_fulfilled"
-            report.add("item_requests", legacy, title, "defaulted", "deadline_type",
-                       txt(r.get("Deadline Type")) or "", dtype, "Unmapped Deadline Type.")
+            report.add(
+                "item_requests",
+                legacy,
+                title,
+                "defaulted",
+                "deadline_type",
+                txt(r.get("Deadline Type")) or "",
+                dtype,
+                "Unmapped Deadline Type.",
+            )
 
         ddate = date_only(r.get("Deadline Date"))
         if dtype == "date_specific" and ddate is None:
             # The schema has a CHECK constraint on this pair.
-            report.add("item_requests", legacy, title, "inferred", "deadline_type",
-                       "date_specific with no date", "until_fulfilled",
-                       "The source said Date Specific but carried no deadline date, which the "
-                       "schema forbids. Coerced to until_fulfilled.")
+            report.add(
+                "item_requests",
+                legacy,
+                title,
+                "inferred",
+                "deadline_type",
+                "date_specific with no date",
+                "until_fulfilled",
+                "The source said Date Specific but carried no deadline date, which the "
+                "schema forbids. Coerced to until_fulfilled.",
+            )
             dtype = "until_fulfilled"
 
         contact_id = people.resolve(
-            r.get("Primary Contact Name"), r.get("Primary Contact Email"),
-            r.get("Primary Contact Phone Number"), "item_requests", legacy,
+            r.get("Primary Contact Name"),
+            r.get("Primary Contact Email"),
+            r.get("Primary Contact Phone Number"),
+            "item_requests",
+            legacy,
         )
 
         updated = ts(r.get("Updated Date"))
@@ -778,24 +1298,38 @@ def build_item_requests(rows, org_ids, excluded, people: People, report: Report)
         rid = new_id("item_request", legacy)
         by_legacy[legacy] = rid
 
-        out.append({
-            "id": rid, "legacy_wix_id": legacy, "org_id": org_id,
-            "title": title, "description": txt(r.get("Description")),
-            "image_url": None,          # media pass
-            "dropoff_location": None,   # no source field exists
-            "people_helped": as_int(r.get("Quantity Helped")),
-            "deadline_type": dtype, "deadline_date": ddate,
-            "expires_on": date_only(r.get("Archive On")),
-            "contact_person_id": contact_id, "status": status,
-            "submitted_at": None,       # D43/D48: null on the historical batch
-            "approved_at": None, "approved_by": None,
-            "archived_at": archived_at, "archived_reason": None,
-            "created_by": None,
-            "created_at": ts(r.get("Created Date")), "updated_at": updated,
-        })
+        out.append(
+            {
+                "id": rid,
+                "legacy_wix_id": legacy,
+                "org_id": org_id,
+                "title": title,
+                "description": txt(r.get("Description")),
+                "image_url": None,  # media pass
+                "dropoff_location": None,  # no source field exists
+                "people_helped": as_int(r.get("Quantity Helped")),
+                "deadline_type": dtype,
+                "deadline_date": ddate,
+                "expires_on": date_only(r.get("Archive On")),
+                "contact_person_id": contact_id,
+                "status": status,
+                "submitted_at": None,  # D43/D48: null on the historical batch
+                "approved_at": None,
+                "approved_by": None,
+                "archived_at": archived_at,
+                "archived_reason": None,
+                "created_by": None,
+                "created_at": ts(r.get("Created Date")),
+                "updated_at": updated,
+            }
+        )
         report.n("item requests imported")
-        redirects.append({"legacy_path": f"/area-needs-request/{legacy}",
-                          "new_path": f"/items/{rid}"})
+        redirects.append(
+            {
+                "legacy_path": f"/area-needs-request/{legacy}",
+                "new_path": f"/items/{rid}",
+            }
+        )
 
     if archived_inferred:
         report.note(
@@ -817,9 +1351,16 @@ def build_items(rows, request_ids, excluded, report: Report):
             continue
 
         if legacy in excluded:
-            report.add("items", legacy, name, "excluded", "item_request_id",
-                       txt(it.get("Item Request")) or "", "",
-                       "Listed in docs/migration/exclusions.csv.")
+            report.add(
+                "items",
+                legacy,
+                name,
+                "excluded",
+                "item_request_id",
+                txt(it.get("Item Request")) or "",
+                "",
+                "Listed in docs/migration/exclusions.csv.",
+            )
             report.n("items excluded")
             continue
 
@@ -827,41 +1368,70 @@ def build_items(rows, request_ids, excluded, report: Report):
         request_id = request_ids.get(parent) if parent else None
         if request_id is None:
             # Includes items whose parent request was itself excluded.
-            report.add("items", legacy, name, "excluded", "item_request_id", parent or "", "",
-                       "The parent item request was not imported, so this item has nowhere "
-                       "to attach.")
+            report.add(
+                "items",
+                legacy,
+                name,
+                "excluded",
+                "item_request_id",
+                parent or "",
+                "",
+                "The parent item request was not imported, so this item has nowhere "
+                "to attach.",
+            )
             report.n("items excluded, parent not imported")
             continue
 
         qty = as_int(it.get("Quantity"))
         if qty is None or qty <= 0:
-            report.add("items", legacy, name, "defaulted", "quantity_requested",
-                       txt(it.get("Quantity")) or "", "1",
-                       "The source quantity was null or zero. The schema requires greater than "
-                       "zero, so it was defaulted to 1. Confirm the real quantity with the "
-                       "organization.")
+            report.add(
+                "items",
+                legacy,
+                name,
+                "defaulted",
+                "quantity_requested",
+                txt(it.get("Quantity")) or "",
+                "1",
+                "The source quantity was null or zero. The schema requires greater than "
+                "zero, so it was defaulted to 1. Confirm the real quantity with the "
+                "organization.",
+            )
             qty = 1
 
         condition = ITEM_CONDITION.get(key(it.get("Item Condition")))
         if condition is None:
             condition = "any"
-            report.add("items", legacy, name, "defaulted", "condition",
-                       txt(it.get("Item Condition")) or "", condition,
-                       "Unmapped Item Condition.")
+            report.add(
+                "items",
+                legacy,
+                name,
+                "defaulted",
+                "condition",
+                txt(it.get("Item Condition")) or "",
+                condition,
+                "Unmapped Item Condition.",
+            )
 
         item_id = new_id("item", legacy)
         by_legacy[legacy] = item_id
 
-        out.append({
-            "id": item_id, "legacy_wix_id": legacy, "item_request_id": request_id,
-            "name": name, "description": txt(it.get("Item Description")),
-            "condition": condition, "product_url": txt(it.get("Product Link")),
-            "quantity_requested": qty,
-            "quantity_claimed": 0,      # recomputed below, never imported
-            "quantity_received": as_int(it.get("Received Quantity")) or 0,
-            "sort_order": order[request_id],
-            "created_at": ts(it.get("Created Date")), "updated_at": ts(it.get("Updated Date")),
-        })
+        out.append(
+            {
+                "id": item_id,
+                "legacy_wix_id": legacy,
+                "item_request_id": request_id,
+                "name": name,
+                "description": txt(it.get("Item Description")),
+                "condition": condition,
+                "product_url": txt(it.get("Product Link")),
+                "quantity_requested": qty,
+                "quantity_claimed": 0,  # recomputed below, never imported
+                "quantity_received": as_int(it.get("Received Quantity")) or 0,
+                "sort_order": order[request_id],
+                "created_at": ts(it.get("Created Date")),
+                "updated_at": ts(it.get("Updated Date")),
+            }
+        )
         order[request_id] += 1
         report.n("items imported")
 
@@ -880,8 +1450,16 @@ def build_volunteer_requests(rows, org_ids, people: People, report: Report):
         org_legacy = txt(r.get("Organization"))
         org_id = org_ids.get(org_legacy) if org_legacy else None
         if org_id is None:
-            report.add("volunteer_requests", legacy, title, "excluded", "org_id",
-                       org_legacy or "", "", "The organization reference does not resolve.")
+            report.add(
+                "volunteer_requests",
+                legacy,
+                title,
+                "excluded",
+                "org_id",
+                org_legacy or "",
+                "",
+                "The organization reference does not resolve.",
+            )
             continue
 
         status = NEED_STATUS.get(key(r.get("Need Status")), "archived")
@@ -891,40 +1469,66 @@ def build_volunteer_requests(rows, org_ids, people: People, report: Report):
         # field, and the control is new per deviation one. date_specific without
         # a date violates the CHECK constraint, so coerce.
         if dtype == "date_specific":
-            report.add("volunteer_requests", legacy, title, "inferred", "deadline_type",
-                       "Date Specific", "ongoing",
-                       "The source marked this Date Specific, but the volunteer collection has "
-                       "no deadline date field to carry. The schema requires a date for "
-                       "date_specific, so the type was coerced. An organization can set a real "
-                       "date after cutover.")
+            report.add(
+                "volunteer_requests",
+                legacy,
+                title,
+                "inferred",
+                "deadline_type",
+                "Date Specific",
+                "ongoing",
+                "The source marked this Date Specific, but the volunteer collection has "
+                "no deadline date field to carry. The schema requires a date for "
+                "date_specific, so the type was coerced. An organization can set a real "
+                "date after cutover.",
+            )
             dtype = "ongoing"
 
         contact_id = people.resolve(
-            r.get("Primary Contact Name"), r.get("Primary Contact Email"),
-            r.get("Primary Contact Phone Number"), "volunteer_requests", legacy,
+            r.get("Primary Contact Name"),
+            r.get("Primary Contact Email"),
+            r.get("Primary Contact Phone Number"),
+            "volunteer_requests",
+            legacy,
         )
 
         updated = ts(r.get("Updated Date"))
         rid = new_id("volunteer_request", legacy)
         by_legacy[legacy] = rid
 
-        out.append({
-            "id": rid, "legacy_wix_id": legacy, "org_id": org_id,
-            "title": title, "description": txt(r.get("Description")),
-            "details": txt(r.get("Details")), "event_location": txt(r.get("Event Location")),
-            "image_url": None,
-            "people_helped": as_int(r.get("Quantity Helped")),
-            "deadline_type": dtype, "deadline_date": None,
-            "expires_on": date_only(r.get("Archive On")),
-            "contact_person_id": contact_id, "status": status,
-            "submitted_at": None, "approved_at": None, "approved_by": None,
-            "archived_at": updated if status == "archived" else None,
-            "archived_reason": None, "created_by": None,
-            "created_at": ts(r.get("Created Date")), "updated_at": updated,
-        })
+        out.append(
+            {
+                "id": rid,
+                "legacy_wix_id": legacy,
+                "org_id": org_id,
+                "title": title,
+                "description": txt(r.get("Description")),
+                "details": txt(r.get("Details")),
+                "event_location": txt(r.get("Event Location")),
+                "image_url": None,
+                "people_helped": as_int(r.get("Quantity Helped")),
+                "deadline_type": dtype,
+                "deadline_date": None,
+                "expires_on": date_only(r.get("Archive On")),
+                "contact_person_id": contact_id,
+                "status": status,
+                "submitted_at": None,
+                "approved_at": None,
+                "approved_by": None,
+                "archived_at": updated if status == "archived" else None,
+                "archived_reason": None,
+                "created_by": None,
+                "created_at": ts(r.get("Created Date")),
+                "updated_at": updated,
+            }
+        )
         report.n("volunteer requests imported")
-        redirects.append({"legacy_path": f"/area-needs-volunteer-request/{legacy}",
-                          "new_path": f"/volunteer/{rid}"})
+        redirects.append(
+            {
+                "legacy_path": f"/area-needs-volunteer-request/{legacy}",
+                "new_path": f"/volunteer/{rid}",
+            }
+        )
 
     return out, by_legacy, redirects
 
@@ -947,45 +1551,75 @@ def build_volunteer_roles(rows, request_ids, excluded, report: Report):
             continue
 
         if legacy in excluded:
-            report.add("volunteer_roles", legacy, name, "excluded", "volunteer_request_id",
-                       txt(r.get("Volunteer Request")) or "", "",
-                       "Listed in docs/migration/exclusions.csv.")
+            report.add(
+                "volunteer_roles",
+                legacy,
+                name,
+                "excluded",
+                "volunteer_request_id",
+                txt(r.get("Volunteer Request")) or "",
+                "",
+                "Listed in docs/migration/exclusions.csv.",
+            )
             report.n("volunteer roles excluded")
             continue
 
         parent = txt(r.get("Volunteer Request"))
         request_id = request_ids.get(parent) if parent else None
         if request_id is None:
-            report.add("volunteer_roles", legacy, name, "excluded", "volunteer_request_id",
-                       parent or "", "", "The parent volunteer request was not imported.")
+            report.add(
+                "volunteer_roles",
+                legacy,
+                name,
+                "excluded",
+                "volunteer_request_id",
+                parent or "",
+                "",
+                "The parent volunteer request was not imported.",
+            )
             continue
 
         qty = as_int(r.get("Quantity"))
         if qty is None or qty <= 0:
-            report.add("volunteer_roles", legacy, name, "defaulted", "quantity_needed",
-                       txt(r.get("Quantity")) or "", "1",
-                       "The source quantity was null or zero. Defaulted to 1.")
+            report.add(
+                "volunteer_roles",
+                legacy,
+                name,
+                "defaulted",
+                "quantity_needed",
+                txt(r.get("Quantity")) or "",
+                "1",
+                "The source quantity was null or zero. Defaulted to 1.",
+            )
             qty = 1
 
         role_id = new_id("volunteer_role", legacy)
         by_legacy[legacy] = role_id
 
-        out.append({
-            "id": role_id, "legacy_wix_id": legacy, "volunteer_request_id": request_id,
-            "name": name, "description": txt(r.get("Role Description")),
-            "quantity_needed": qty,
-            "quantity_interested": 0,   # recomputed below
-            "quantity_confirmed": as_int(r.get("Received Quantity")) or 0,
-            "sort_order": order[request_id],
-            "created_at": ts(r.get("Created Date")), "updated_at": ts(r.get("Updated Date")),
-        })
+        out.append(
+            {
+                "id": role_id,
+                "legacy_wix_id": legacy,
+                "volunteer_request_id": request_id,
+                "name": name,
+                "description": txt(r.get("Role Description")),
+                "quantity_needed": qty,
+                "quantity_interested": 0,  # recomputed below
+                "quantity_confirmed": as_int(r.get("Received Quantity")) or 0,
+                "sort_order": order[request_id],
+                "created_at": ts(r.get("Created Date")),
+                "updated_at": ts(r.get("Updated Date")),
+            }
+        )
         order[request_id] += 1
         report.n("volunteer roles imported")
 
     return out, by_legacy
 
 
-def build_supporters(donors, ir_ids, item_ids, vr_ids, role_ids, people: People, report: Report):
+def build_supporters(
+    donors, ir_ids, item_ids, vr_ids, role_ids, people: People, report: Report
+):
     """
     The Donors collection splits into two branches. Confirmed: 83 item pledges,
     38 volunteer signups, 0 carrying both references, 6 carrying neither.
@@ -1010,29 +1644,50 @@ def build_supporters(donors, ir_ids, item_ids, vr_ids, role_ids, people: People,
             d.get("Name"), d.get("Email"), d.get("Phone Number"), "donors", legacy
         )
         if person_id is None:
-            report.add("donors", legacy, identifier, "excluded", "email",
-                       txt(d.get("Email")) or "", "",
-                       "The source row had no email address. The person is excluded and "
-                       "no pledge or signup was created.")
+            report.add(
+                "donors",
+                legacy,
+                identifier,
+                "excluded",
+                "email",
+                txt(d.get("Email")) or "",
+                "",
+                "The source row had no email address. The person is excluded and "
+                "no pledge or signup was created.",
+            )
             report.n("donor rows excluded missing email")
             continue
 
         if ir_ref and vr_ref:
             # Zero rows here. Kept because a future export may not be so clean.
-            report.add("donors", legacy, identifier, "unresolved",
-                       "Item Request / Volunteer Request", f"{ir_ref} + {vr_ref}", "",
-                       "The source row references both an item request and a volunteer request, "
-                       "which the prior system's prose rule forbade but could not enforce. "
-                       "Neither branch was created. The person was. Resolve by hand.")
+            report.add(
+                "donors",
+                legacy,
+                identifier,
+                "unresolved",
+                "Item Request / Volunteer Request",
+                f"{ir_ref} + {vr_ref}",
+                "",
+                "The source row references both an item request and a volunteer request, "
+                "which the prior system's prose rule forbade but could not enforce. "
+                "Neither branch was created. The person was. Resolve by hand.",
+            )
             report.n("donor rows with both references")
             continue
 
         if not ir_ref and not vr_ref:
-            report.add("donors", legacy, identifier, "excluded",
-                       "Item Request / Volunteer Request", "", "",
-                       "The source row references neither an item request nor a volunteer "
-                       "request. No pledge or signup was created. The person was created "
-                       "and is unaffected.")
+            report.add(
+                "donors",
+                legacy,
+                identifier,
+                "excluded",
+                "Item Request / Volunteer Request",
+                "",
+                "",
+                "The source row references neither an item request nor a volunteer "
+                "request. No pledge or signup was created. The person was created "
+                "and is unaffected.",
+            )
             report.n("donor rows with neither reference")
             continue
 
@@ -1041,17 +1696,31 @@ def build_supporters(donors, ir_ids, item_ids, vr_ids, role_ids, people: People,
         if ir_ref:
             request_id = ir_ids.get(ir_ref)
             if request_id is None:
-                report.add("item_pledges", legacy, identifier, "excluded", "item_request_id",
-                           ir_ref, "", "The referenced item request was not imported. "
-                                       "The person was created.")
+                report.add(
+                    "item_pledges",
+                    legacy,
+                    identifier,
+                    "excluded",
+                    "item_request_id",
+                    ir_ref,
+                    "",
+                    "The referenced item request was not imported. "
+                    "The person was created.",
+                )
                 continue
 
             pledge_id = new_id("item_pledge", legacy)
-            pledges.append({
-                "id": pledge_id, "legacy_wix_id": legacy, "person_id": person_id,
-                "item_request_id": request_id, "notes": txt(d.get("Notes")),
-                "created_at": created, "updated_at": updated,
-            })
+            pledges.append(
+                {
+                    "id": pledge_id,
+                    "legacy_wix_id": legacy,
+                    "person_id": person_id,
+                    "item_request_id": request_id,
+                    "notes": txt(d.get("Notes")),
+                    "created_at": created,
+                    "updated_at": updated,
+                }
+            )
             report.n("item pledges imported")
 
             array = jload(d.get("Item to Quantity Array")) or []
@@ -1059,17 +1728,30 @@ def build_supporters(donors, ir_ids, item_ids, vr_ids, role_ids, people: People,
             if not array:
                 # Zero rows here (TE5). Kept because it was the single largest
                 # predicted source of wrong public numbers.
-                for ref in (jload(d.get("Items")) or []):
+                for ref in jload(d.get("Items")) or []:
                     item_id = item_ids.get(ref)
                     if item_id is None:
                         continue
-                    lines.append({"id": new_id("line", f"{legacy}:{ref}"),
-                                  "item_pledge_id": pledge_id, "item_id": item_id, "quantity": 1})
-                    report.add("item_pledge_lines", legacy, identifier, "defaulted", "quantity",
-                               "(no quantity array)", "1",
-                               "The source recorded which items were claimed but not how many. "
-                               "Defaulted to 1, which understates the claimed quantity if the "
-                               "donor took more.")
+                    lines.append(
+                        {
+                            "id": new_id("line", f"{legacy}:{ref}"),
+                            "item_pledge_id": pledge_id,
+                            "item_id": item_id,
+                            "quantity": 1,
+                        }
+                    )
+                    report.add(
+                        "item_pledge_lines",
+                        legacy,
+                        identifier,
+                        "defaulted",
+                        "quantity",
+                        "(no quantity array)",
+                        "1",
+                        "The source recorded which items were claimed but not how many. "
+                        "Defaulted to 1, which understates the claimed quantity if the "
+                        "donor took more.",
+                    )
                     report.n("pledge lines defaulted to quantity 1")
                 report.n("donor rows with an empty quantity array")
                 continue
@@ -1083,61 +1765,108 @@ def build_supporters(donors, ir_ids, item_ids, vr_ids, role_ids, people: People,
                     merged[entry.get("itemId")] += q
 
             if len(merged) < len(array):
-                report.add("item_pledge_lines", legacy, identifier, "inferred", "quantity",
-                           f"{len(array)} array entries", f"{len(merged)} lines",
-                           "The source quantity array listed the same item more than once in "
-                           "one pledge. The quantities were summed into a single line.")
+                report.add(
+                    "item_pledge_lines",
+                    legacy,
+                    identifier,
+                    "inferred",
+                    "quantity",
+                    f"{len(array)} array entries",
+                    f"{len(merged)} lines",
+                    "The source quantity array listed the same item more than once in "
+                    "one pledge. The quantities were summed into a single line.",
+                )
 
             for ref, q in merged.items():
                 item_id = item_ids.get(ref)
                 if item_id is None:
-                    report.add("item_pledge_lines", legacy, identifier, "excluded", "item_id",
-                               str(ref), "",
-                               "The pledge references an item that was not imported. The line was "
-                               "skipped and the pledge still imported, so the recomputed claimed "
-                               "quantity will be lower than the source.")
+                    report.add(
+                        "item_pledge_lines",
+                        legacy,
+                        identifier,
+                        "excluded",
+                        "item_id",
+                        str(ref),
+                        "",
+                        "The pledge references an item that was not imported. The line was "
+                        "skipped and the pledge still imported, so the recomputed claimed "
+                        "quantity will be lower than the source.",
+                    )
                     continue
-                lines.append({"id": new_id("line", f"{legacy}:{ref}"),
-                              "item_pledge_id": pledge_id, "item_id": item_id, "quantity": q})
+                lines.append(
+                    {
+                        "id": new_id("line", f"{legacy}:{ref}"),
+                        "item_pledge_id": pledge_id,
+                        "item_id": item_id,
+                        "quantity": q,
+                    }
+                )
                 report.n("item pledge lines imported")
         else:
             request_id = vr_ids.get(vr_ref)
             if request_id is None:
-                report.add("volunteer_signups", legacy, identifier, "excluded",
-                           "volunteer_request_id", vr_ref, "",
-                           "The referenced volunteer request was not imported. "
-                           "The person was created.")
+                report.add(
+                    "volunteer_signups",
+                    legacy,
+                    identifier,
+                    "excluded",
+                    "volunteer_request_id",
+                    vr_ref,
+                    "",
+                    "The referenced volunteer request was not imported. "
+                    "The person was created.",
+                )
                 continue
 
             signup_id = new_id("volunteer_signup", legacy)
-            signups.append({
-                "id": signup_id, "legacy_wix_id": legacy, "person_id": person_id,
-                "volunteer_request_id": request_id, "notes": txt(d.get("Notes")),
-                "created_at": created, "updated_at": updated,
-            })
+            signups.append(
+                {
+                    "id": signup_id,
+                    "legacy_wix_id": legacy,
+                    "person_id": person_id,
+                    "volunteer_request_id": request_id,
+                    "notes": txt(d.get("Notes")),
+                    "created_at": created,
+                    "updated_at": updated,
+                }
+            )
             report.n("volunteer signups imported")
 
             # Interest is one spot per role per signup. No quantity.
             seen = set()
-            for ref in (jload(d.get("Volunteer Roles")) or []):
+            for ref in jload(d.get("Volunteer Roles")) or []:
                 role_id = role_ids.get(ref)
                 if role_id is None:
-                    report.add("volunteer_signup_roles", legacy, identifier, "excluded",
-                               "volunteer_role_id", str(ref), "",
-                               "The signup references a role that was not imported. "
-                               "The signup still imported.")
+                    report.add(
+                        "volunteer_signup_roles",
+                        legacy,
+                        identifier,
+                        "excluded",
+                        "volunteer_role_id",
+                        str(ref),
+                        "",
+                        "The signup references a role that was not imported. "
+                        "The signup still imported.",
+                    )
                     continue
                 if role_id in seen:
                     continue
                 seen.add(role_id)
-                signup_roles.append({"id": new_id("signup_role", f"{legacy}:{ref}"),
-                                     "volunteer_signup_id": signup_id, "volunteer_role_id": role_id})
+                signup_roles.append(
+                    {
+                        "id": new_id("signup_role", f"{legacy}:{ref}"),
+                        "volunteer_signup_id": signup_id,
+                        "volunteer_role_id": role_id,
+                    }
+                )
                 report.n("volunteer signup roles imported")
 
     return pledges, lines, signups, signup_roles
 
 
-def recompute_counters(items, lines, roles, signup_roles, source_items, donors, report: Report):
+def recompute_counters(
+    items, lines, roles, signup_roles, source_items, donors, report: Report
+):
     """
     Never carry counter values from the source. quantity_remaining is a
     generated column and is not written at all.
@@ -1161,7 +1890,7 @@ def recompute_counters(items, lines, roles, signup_roles, source_items, donors, 
     # Compare against the source, per legacy id.
     actual = Counter()
     for d in donors:
-        for e in (jload(d.get("Item to Quantity Array")) or []):
+        for e in jload(d.get("Item to Quantity Array")) or []:
             actual[e.get("itemId")] += as_int(e.get("donatedQuantity")) or 0
 
     for it in source_items:
@@ -1170,11 +1899,18 @@ def recompute_counters(items, lines, roles, signup_roles, source_items, donors, 
         recomputed = actual.get(legacy, 0)
         if stored == recomputed:
             continue
-        report.add("items", legacy, txt(it.get("Item Name")) or "", "drift", "quantity_claimed",
-                   str(stored), str(recomputed),
-                   "The source stored claimed quantity disagreed with the sum of its donor "
-                   "pledge lines. The recomputed value is authoritative and was used. This is "
-                   "the counter-drift fault in the prior system, recorded as evidence.")
+        report.add(
+            "items",
+            legacy,
+            txt(it.get("Item Name")) or "",
+            "drift",
+            "quantity_claimed",
+            str(stored),
+            str(recomputed),
+            "The source stored claimed quantity disagreed with the sum of its donor "
+            "pledge lines. The recomputed value is authoritative and was used. This is "
+            "the counter-drift fault in the prior system, recorded as evidence.",
+        )
         report.n("items with source counter drift")
 
     # Nothing may exceed what was requested: quantity_remaining is generated as
@@ -1186,12 +1922,19 @@ def recompute_counters(items, lines, roles, signup_roles, source_items, donors, 
     for it in items:
         if it["quantity_claimed"] <= it["quantity_requested"]:
             continue
-        report.add("items", it["legacy_wix_id"], it["name"], "inferred", "quantity_requested",
-                   str(it["quantity_requested"]), str(it["quantity_claimed"]),
-                   "More was claimed than the organization requested, which the prior system "
-                   "allowed and this schema forbids. quantity_requested was raised to match the "
-                   "real claimed total so no pledge is lost. Remaining becomes zero. Confirm the "
-                   "true requested quantity with the organization.")
+        report.add(
+            "items",
+            it["legacy_wix_id"],
+            it["name"],
+            "inferred",
+            "quantity_requested",
+            str(it["quantity_requested"]),
+            str(it["quantity_claimed"]),
+            "More was claimed than the organization requested, which the prior system "
+            "allowed and this schema forbids. quantity_requested was raised to match the "
+            "real claimed total so no pledge is lost. Remaining becomes zero. Confirm the "
+            "true requested quantity with the organization.",
+        )
         report.n("items where claimed exceeded requested")
         it["quantity_requested"] = it["quantity_claimed"]
 
@@ -1222,39 +1965,178 @@ def write(out_dir: Path, filename: str, rows, columns):
 
 
 COLUMNS = {
-    "people": ["id", "first_name", "last_name", "email", "phone", "needs_review",
-               "review_note", "source_note", "legacy_wix_contact_id"],
+    "people": [
+        "id",
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        "needs_review",
+        "review_note",
+        "source_note",
+        "legacy_wix_contact_id",
+    ],
     "populations": ["id", "name", "slug", "sort_order", "is_active"],
-    "organizations": ["id", "legacy_wix_id", "kind", "name", "slug", "website_url", "mission",
-                      "phone", "logo_url", "populations_other", "address_line1", "address_line2",
-                      "city", "state", "postal_code", "address_formatted",
-                      "primary_contact_person_id", "status", "approved_at", "approved_by",
-                      "created_at", "updated_at"],
+    "organizations": [
+        "id",
+        "legacy_wix_id",
+        "kind",
+        "name",
+        "slug",
+        "website_url",
+        "mission",
+        "phone",
+        "logo_url",
+        "populations_other",
+        "address_line1",
+        "address_line2",
+        "city",
+        "state",
+        "postal_code",
+        "address_formatted",
+        "primary_contact_person_id",
+        "status",
+        "approved_at",
+        "approved_by",
+        "created_at",
+        "updated_at",
+    ],
     "organization_populations": ["org_id", "population_id"],
-    "item_requests": ["id", "legacy_wix_id", "org_id", "title", "description", "image_url",
-                      "dropoff_location", "people_helped", "deadline_type", "deadline_date",
-                      "expires_on", "contact_person_id", "status", "submitted_at", "approved_at",
-                      "approved_by", "archived_at", "archived_reason", "created_by",
-                      "created_at", "updated_at"],
-    "items": ["id", "legacy_wix_id", "item_request_id", "name", "description", "condition",
-              "product_url", "quantity_requested", "quantity_claimed", "quantity_received",
-              "sort_order", "created_at", "updated_at"],
-    "volunteer_requests": ["id", "legacy_wix_id", "org_id", "title", "description", "details",
-                           "event_location", "image_url", "people_helped", "deadline_type",
-                           "deadline_date", "expires_on", "contact_person_id", "status",
-                           "submitted_at", "approved_at", "approved_by", "archived_at",
-                           "archived_reason", "created_by", "created_at", "updated_at"],
-    "volunteer_roles": ["id", "legacy_wix_id", "volunteer_request_id", "name", "description",
-                        "quantity_needed", "quantity_interested", "quantity_confirmed",
-                        "sort_order", "created_at", "updated_at"],
-    "item_pledges": ["id", "legacy_wix_id", "person_id", "item_request_id", "notes",
-                     "created_at", "updated_at"],
+    "item_requests": [
+        "id",
+        "legacy_wix_id",
+        "org_id",
+        "title",
+        "description",
+        "image_url",
+        "dropoff_location",
+        "people_helped",
+        "deadline_type",
+        "deadline_date",
+        "expires_on",
+        "contact_person_id",
+        "status",
+        "submitted_at",
+        "approved_at",
+        "approved_by",
+        "archived_at",
+        "archived_reason",
+        "created_by",
+        "created_at",
+        "updated_at",
+    ],
+    "items": [
+        "id",
+        "legacy_wix_id",
+        "item_request_id",
+        "name",
+        "description",
+        "condition",
+        "product_url",
+        "quantity_requested",
+        "quantity_claimed",
+        "quantity_received",
+        "sort_order",
+        "created_at",
+        "updated_at",
+    ],
+    "volunteer_requests": [
+        "id",
+        "legacy_wix_id",
+        "org_id",
+        "title",
+        "description",
+        "details",
+        "event_location",
+        "image_url",
+        "people_helped",
+        "deadline_type",
+        "deadline_date",
+        "expires_on",
+        "contact_person_id",
+        "status",
+        "submitted_at",
+        "approved_at",
+        "approved_by",
+        "archived_at",
+        "archived_reason",
+        "created_by",
+        "created_at",
+        "updated_at",
+    ],
+    "volunteer_roles": [
+        "id",
+        "legacy_wix_id",
+        "volunteer_request_id",
+        "name",
+        "description",
+        "quantity_needed",
+        "quantity_interested",
+        "quantity_confirmed",
+        "sort_order",
+        "created_at",
+        "updated_at",
+    ],
+    "item_pledges": [
+        "id",
+        "legacy_wix_id",
+        "person_id",
+        "item_request_id",
+        "notes",
+        "created_at",
+        "updated_at",
+    ],
     "item_pledge_lines": ["id", "item_pledge_id", "item_id", "quantity"],
-    "volunteer_signups": ["id", "legacy_wix_id", "person_id", "volunteer_request_id", "notes",
-                          "created_at", "updated_at"],
+    "volunteer_signups": [
+        "id",
+        "legacy_wix_id",
+        "person_id",
+        "volunteer_request_id",
+        "notes",
+        "created_at",
+        "updated_at",
+    ],
     "volunteer_signup_roles": ["id", "volunteer_signup_id", "volunteer_role_id"],
-    "email_log": ["id", "template_key", "to_email", "to_person_id", "entity_type", "entity_id",
-                  "payload", "status", "provider_message_id", "error", "sent_at", "created_at"],
+    "email_log": [
+        "id",
+        "template_key",
+        "to_email",
+        "to_person_id",
+        "entity_type",
+        "entity_id",
+        "payload",
+        "status",
+        "provider_message_id",
+        "error",
+        "sent_at",
+        "created_at",
+    ],
+    # created_at/updated_at are deliberately omitted from these two: the contacts
+    # export carries no per-membership timestamp, and COPY applies a column DEFAULT
+    # only when the column is absent from the list, never when the value is an
+    # explicit NULL. Omitting lets the schema's `default now()` stand, which is the
+    # truthful value — these rows are created at migration time.
+    "users": ["id", "person_id", "auth_subject", "status", "last_login_at", "kind"],
+    "org_memberships": [
+        "id",
+        "org_id",
+        "user_id",
+        "role",
+        "status",
+        "invited_by",
+        "approved_at",
+        "approved_by",
+    ],
+    "digest_subscribers": [
+        "id",
+        "person_id",
+        "email",
+        "status",
+        "unsubscribed_at",
+        "legacy_source",
+        "first_name",
+        "last_name",
+    ],
 }
 
 ORDER = [
@@ -1271,6 +2153,9 @@ ORDER = [
     ("11_volunteer_signups.csv", "volunteer_signups"),
     ("12_volunteer_signup_roles.csv", "volunteer_signup_roles"),
     ("13_email_log.csv", "email_log"),
+    ("14_users.csv", "users"),
+    ("15_org_memberships.csv", "org_memberships"),
+    ("16_digest_subscribers.csv", "digest_subscribers"),
 ]
 
 
@@ -1291,12 +2176,26 @@ def write_load_sql(out_dir: Path, counts):
         "-- COPY does not fire the BEFORE UPDATE triggers, so the preserved source timestamps",
         "-- in created_at and updated_at survive exactly as exported.",
         "--",
-        "-- NOT loaded here: users, org_memberships, digest_subscribers. All three come from the",
-        "-- contacts export, which has not been received. Nobody can log in until it arrives.",
-        "-- Also not loaded: image_url and logo_url, filled by the media pass after upload.",
+        "-- users, org_memberships, and digest_subscribers are populated only when a contacts",
+        "-- export was present at transform time (see CONTACTS_FILENAME). Without one, those",
+        "-- three tables are empty and nobody can log in as a migrated member.",
+        "-- Not loaded here: image_url and logo_url, filled by the media pass after upload.",
+        "",
+        "-- The two item_pledges BEFORE INSERT guards are suspended for this load and",
+        "-- re-enabled before the commit, inside the same transaction, so a failure",
+        "-- anywhere rolls back the load and the disable together and they can never be",
+        "-- left off. reject_expired_item_pledge rejects a pledge against a request past",
+        "-- its deadline; reject_ineligible_item_pledge rejects one against an org that",
+        "-- is not currently approved. Both are correct for new public activity and both",
+        "-- are wrong for historical rows, and neither has a GUC gate the way the counter",
+        "-- and member-transition triggers do. They are the only exception-raising BEFORE",
+        "-- INSERT triggers on any table loaded here.",
         "",
         "\\set ON_ERROR_STOP on",
         "begin;",
+        "",
+        "alter table item_pledges disable trigger item_pledges_reject_expired_request;",
+        "alter table item_pledges disable trigger item_pledges_reject_ineligible_organization;",
         "",
     ]
     for filename, table in ORDER:
@@ -1307,24 +2206,34 @@ def write_load_sql(out_dir: Path, counts):
             "",
         ]
     lines += [
+        "alter table item_pledges enable trigger item_pledges_reject_expired_request;",
+        "alter table item_pledges enable trigger item_pledges_reject_ineligible_organization;",
+        "",
         "commit;",
         "",
         "-- Then prove it worked:",
-        "--     psql \"$DATABASE_URL\" -f docs/migration/validation.sql",
+        '--     psql "$DATABASE_URL" -f docs/migration/validation.sql',
         "",
     ]
     (out_dir.parent.parent / "load.sql").write_text("\n".join(lines), encoding="utf-8")
 
 
 def write_report(out_dir: Path, report: Report, people: People, counts):
-    rows = "\n".join(f"| {k} | {v} |" for k, v in sorted(report.counts.items())
-                     if not k.startswith("exception:"))
-    kinds = "\n".join(f"| {k.split(':', 1)[1]} | {v} |" for k, v in sorted(report.counts.items())
-                      if k.startswith("exception:"))
+    rows = "\n".join(
+        f"| {k} | {v} |"
+        for k, v in sorted(report.counts.items())
+        if not k.startswith("exception:")
+    )
+    kinds = "\n".join(
+        f"| {k.split(':', 1)[1]} | {v} |"
+        for k, v in sorted(report.counts.items())
+        if k.startswith("exception:")
+    )
     notes = "\n".join(f"- {n}" for n in report.notes) or "None."
     tables = "\n".join(f"| `{t}` | {counts.get(t, 0)} |" for _, t in ORDER)
 
-    (out_dir / "transform-report.md").write_text(f"""# Transform report
+    (out_dir / "transform-report.md").write_text(
+        f"""# Transform report
 
 Generated {datetime.now(timezone.utc).isoformat()} by `transform.py`.
 
@@ -1374,16 +2283,23 @@ Full detail in `migration-exceptions.csv`.
 3. `psql "$DATABASE_URL" -f docs/migration/validation.sql`
 4. Run the media pass to attach images.
 5. Review flagged people at ADMIN-04.
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Transform the Wix CMS export into load-ready CSVs.")
+    ap = argparse.ArgumentParser(
+        description="Transform the Wix CMS export into load-ready CSVs."
+    )
     ap.add_argument("--source", default="data/legacy-export", type=Path)
     ap.add_argument("--out", default="data/load", type=Path)
     ap.add_argument("--exclusions", default="docs/migration/exclusions.csv", type=Path)
-    ap.add_argument("--allow-drift", action="store_true",
-                    help="Proceed even if source row counts differ from the audit.")
+    ap.add_argument(
+        "--allow-drift",
+        action="store_true",
+        help="Proceed even if source row counts differ from the audit.",
+    )
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -1391,10 +2307,23 @@ def main():
     src = load_sources(args.source, args.allow_drift)
     excluded, undecided = load_exclusions(args.exclusions)
 
+    contacts_path = args.source / CONTACTS_FILENAME
+    if contacts_path.exists():
+        contacts_rows = read_csv(contacts_path)
+    else:
+        contacts_rows = []
+        print(
+            f"[WARN] No contacts export at {contacts_path}. Proceeding without it: "
+            "no users, org_memberships, or digest_subscribers will be produced.",
+            file=sys.stderr,
+        )
+
     if undecided:
-        print(f"\n[WARN] {len(undecided)} rows in exclusions.csv are flagged "
-              f"needs_human_decision=YES with no legacy id. They WILL be imported:",
-              file=sys.stderr)
+        print(
+            f"\n[WARN] {len(undecided)} rows in exclusions.csv are flagged "
+            f"needs_human_decision=YES with no legacy id. They WILL be imported:",
+            file=sys.stderr,
+        )
         for r in undecided:
             print(f"        - {r['kind']}: {r['identifier']}", file=sys.stderr)
         print("", file=sys.stderr)
@@ -1405,8 +2334,21 @@ def main():
     print("\nTransforming\n")
 
     populations, pop_ids, pop_ids_by_key = build_populations(report)
+
+    # Contacts loads before organizations so its separated first/last name wins
+    # a conflict over a later source's best-effort split (field-map.md section 4).
+    # Org matching is deferred to build_contacts_memberships since it needs
+    # organization ids, which do not exist until build_organizations runs.
+    membership_candidates, digest_subscribers = stage_contacts(
+        contacts_rows, people, report
+    )
+
     orgs, org_pops, email_log, org_ids = build_organizations(
         src["organizations"], pop_ids_by_key, people, report
+    )
+
+    users, org_memberships = build_contacts_memberships(
+        membership_candidates, orgs, report
     )
     item_requests, ir_ids, redirects_a = build_item_requests(
         src["item_requests"], org_ids, excluded["item_request"], people, report
@@ -1421,7 +2363,9 @@ def main():
     pledges, lines, signups, signup_roles = build_supporters(
         src["donors"], ir_ids, item_ids, vr_ids, role_ids, people, report
     )
-    recompute_counters(items, lines, roles, signup_roles, src["items"], src["donors"], report)
+    recompute_counters(
+        items, lines, roles, signup_roles, src["items"], src["donors"], report
+    )
 
     data = {
         "people": list(people.rows.values()),
@@ -1437,43 +2381,73 @@ def main():
         "volunteer_signups": signups,
         "volunteer_signup_roles": signup_roles,
         "email_log": email_log,
+        "users": users,
+        "org_memberships": org_memberships,
+        "digest_subscribers": digest_subscribers,
     }
 
     counts = {}
     for filename, table in ORDER:
         counts[table] = write(args.out, filename, data[table], COLUMNS[table])
 
-    write(args.out, "migration-exceptions.csv", report.exceptions,
-          ["entity", "legacy_id", "identifier", "kind", "field",
-           "source_value", "imported_value", "reason"])
-    write(args.out, "redirects.csv", redirects_a + redirects_b, ["legacy_path", "new_path"])
+    write(
+        args.out,
+        "migration-exceptions.csv",
+        report.exceptions,
+        [
+            "entity",
+            "legacy_id",
+            "identifier",
+            "kind",
+            "field",
+            "source_value",
+            "imported_value",
+            "reason",
+        ],
+    )
+    write(
+        args.out,
+        "redirects.csv",
+        redirects_a + redirects_b,
+        ["legacy_path", "new_path"],
+    )
 
     write_load_sql(args.out, counts)
     write_report(args.out, report, people, counts)
 
     print(f"\n  distinct people            {len(people.rows)}")
     print(f"  duplicates collapsed       {people.duplicates_collapsed}")
-    print(f"  flagged needs_review       {report.counts.get('people flagged needs_review', 0)}")
-    print(f"  organizations with no city {report.counts.get('organizations with no city', 0)}")
+    print(
+        f"  flagged needs_review       {report.counts.get('people flagged needs_review', 0)}"
+    )
+    print(
+        f"  organizations with no city {report.counts.get('organizations with no city', 0)}"
+    )
     print(f"  exceptions                 {len(report.exceptions)}")
 
     empty_arrays = report.counts.get("donor rows with an empty quantity array", 0)
     if empty_arrays:
-        print(f"\n  ATTENTION: {empty_arrays} donor rows carry an empty quantity array. "
-              f"{report.counts.get('pledge lines defaulted to quantity 1', 0)} pledge lines "
-              f"defaulted to quantity 1,\n             which understates claimed quantities on "
-              f"those items. See migration-exceptions.csv.")
+        print(
+            f"\n  ATTENTION: {empty_arrays} donor rows carry an empty quantity array. "
+            f"{report.counts.get('pledge lines defaulted to quantity 1', 0)} pledge lines "
+            f"defaulted to quantity 1,\n             which understates claimed quantities on "
+            f"those items. See migration-exceptions.csv."
+        )
     raised = report.counts.get("items where claimed exceeded requested", 0)
     if raised:
-        print(f"  {raised} items had quantity_requested raised to match a larger claimed total.")
+        print(
+            f"  {raised} items had quantity_requested raised to match a larger claimed total."
+        )
 
     missing_email = report.counts.get("people excluded missing email", 0)
     if missing_email:
-        print(f"\n  *** ATTENTION: {missing_email} source record(s) had no email address. ***")
+        print(
+            f"\n  *** ATTENTION: {missing_email} source record(s) had no email address. ***"
+        )
         print("              TE8 says the CMS export has zero of these; any occurrence")
         print("              deserves a second look. See migration-exceptions.csv.")
 
-    print("\n  Next: psql \"$DATABASE_URL\" -f load.sql\n")
+    print('\n  Next: psql "$DATABASE_URL" -f load.sql\n')
 
 
 if __name__ == "__main__":

@@ -1,0 +1,1 @@
+export PROD_URL='postgresql://neondb_owner:npg_qWIvxy17JrnA@ep-rapid-sound-arpzgfjb.c-4.us-west-2.aws.neon.tech/neondb?sslmode=require'

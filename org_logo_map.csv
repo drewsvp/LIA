@@ -1,0 +1,52 @@
+org_id,org_name,org_slug,local_file,confidence,needs_review
+176d1da5-1f6e-5de7-b696-e82afe561258,The Alliance,the-alliance,,no candidate,YES
+ee8472e8-e8d1-5c57-aa4c-ad641e1e34f6,Stanford Sierra Youth & Families,stanford-sierra-youth-families,stanford-sierra-youth-families.png,exact slug,no
+777aae08-36fa-55e0-9fbc-a3488e61949f,Children's Hope Foster Family Agency,children-s-hope-foster-family-agency,children-s-hope-foster-family-agency.jpg,exact slug,no
+3cccec96-663b-5c4b-a2a5-6230467e93dd,"xHope, Inc.",xhope-inc,x-hope-inc.png,fuzzy,YES
+7f7256cb-59e9-53c6-b41c-b38ec399a452,Capital Stars,capital-stars,,no candidate,YES
+d9190731-9a1e-5e72-8749-1dfb39987bba,Compassion Planet,compassion-planet,compassion-planet.png,exact slug,no
+26d04f74-197d-5031-9664-4f2ee6627083,Acres of Hope,acres-of-hope,acres-of-hope.jpg,exact slug,no
+cb73e374-239a-57f6-9f80-9fc328c0c4fd,Joni and Friends Central California,joni-and-friends-central-california,joni-and-friends-central-california.png,exact slug,no
+cd6ac9ab-4881-590f-b159-1406d9c94c00,Heart Behind The Badge-Sac County,heart-behind-the-badge-sac-county,heart-behind-the-badge.png,fuzzy,YES
+129b10d6-abe6-5327-bcc5-964fb7db3cb1,ASPIREKids,aspirekids,aspire-kids.jpg,fuzzy,YES
+4dc11a43-7c56-5783-889f-368ecc7990d3,Hearts Landing Ranch,hearts-landing-ranch,hearts-landing-ranch.png,exact slug,no
+c7002787-c961-551b-80d5-b39eee18f2d0,Purple Paws For Peace,purple-paws-for-peace,purple-paws-for-peace.png,exact slug,no
+3ff48020-e373-5d87-a5f4-e6e6ba321960,REACh,reach,reach.png,exact slug,no
+6e07e71a-c74a-5114-a1da-aa3940044c73,Team Scott Equestrian Foundation,team-scott-equestrian-foundation,team-scott-equestrian-foundation.png,exact slug,no
+a5a8435c-9eaf-572a-84be-ef469df78a80,Roseville Police Activities Leauge,roseville-police-activities-leauge,roseville-police-activities-league.png,fuzzy,YES
+1b8ab6d8-3b88-5f28-8478-f04e78e38eba,Unity Care,unity-care,unity-care.png,exact slug,no
+add15249-df4a-5fd6-8715-a0b01a12e2dc,World Relief,world-relief,world-relief-sacramento.png,containment,YES
+3c5a3c81-2aeb-55a3-8283-b99ef39714c6,Single Mom Strong,single-mom-strong,single-mom-strong.png,exact slug,no
+76a8c12e-a42e-5433-b697-6713c61f56fc,New Morning Youth & Family Services,new-morning-youth-family-services,new-morning-youth-family-services.png,exact slug,no
+85d5e1aa-4aea-5918-98e5-86b112e6a698,Dignity Health Medical Foundation,dignity-health-medical-foundation,dignity-health-medical-foundation.png,exact slug,no
+8a1fd055-9384-552a-9dc0-7d7a97f75c6b,Liberty Towers Church,liberty-towers-church,liberty-towers-church.png,exact slug,no
+6558f6ae-725c-5bf5-83c1-0c8d1b8173c5,All Clutter Aside,all-clutter-aside,all-clutter-aside.png,exact slug,no
+fe00906f-0ec3-5143-ad3f-f1c76e9f9ab1,City of Refuge Sacramento,city-of-refuge-sacramento,city-of-refuge-sacramento.png,exact slug,no
+91be9fba-c62c-5bdf-863c-e258a1ba6618,Capital Community Athletics,capital-community-athletics,capital-community-athletics.png,exact slug,no
+93a67643-557d-513f-aeaf-32efb953f2d3,Crater Works,crater-works,,no candidate,YES
+72f1ad47-246d-5a60-bbf8-420608f3df91,Lost But Not Forgotten,lost-but-not-forgotten,lost-but-not-forgotten.png,exact slug,no
+7304a10b-fb9f-5db9-b47f-772164f6e2f1,International Christian Adoptions,international-christian-adoptions,institute-for-children-s-aid-international-christian-adoptions.png,containment,YES
+4f1ba423-2890-51c3-92e1-bb2f127412b3,MISI,misi,misi-community-solutions.png,containment,YES
+ae46b6dd-180f-5b0c-b3ea-676da2cfa4d2,Christian Encounter,christian-encounter,christian-encounter-ministries.png,fuzzy,YES
+d6c9b729-b98a-519f-b4be-87bd06af458d,California Alliance of Caregivers,california-alliance-of-caregivers,california-alliance-of-caregivers.jpg,exact slug,no
+def28d4b-9fe8-5598-9057-c8bee749ed31,Kingdom Roar Ministries,kingdom-roar-ministries,,no candidate,YES
+81cca01e-0381-5e23-b495-6670b621e95d,CASA El Dorado,casa-el-dorado,,no candidate,YES
+250b0978-c397-56c6-bb9a-d35873deb3ca,Teams and Dreams Foundation,teams-and-dreams-foundation,teams-and-dreams-foundation.png,exact slug,no
+c241a1d8-44d7-5591-ba63-745e3fae08c2,Golden Sierra Life Skills,golden-sierra-life-skills,golden-sierra-life-skills-father-and-family-center.png,containment,YES
+7766df0b-3d5f-5232-b607-4ab92115fef2,EveryONE Matters Ministries,everyone-matters-ministries,everyone-matters-ministries.png,exact slug,no
+988b3a3c-a4ca-5ed9-be2b-864a03a336dc,Traveling Handyman Inc.,traveling-handyman-inc,,no candidate,YES
+90cb89ec-dd03-5e28-9b55-c20481ba590f,"CASA Placer, Yuba & Sutter",casa-placer-yuba-sutter,casa-of-placer-yuba-sutter.png,fuzzy,YES
+8748bf4c-be13-577a-95e0-b52f203f0399,The Gathering Inn,the-gathering-inn,the-gathering-inn.jpg,exact slug,no
+ca9c05db-2a1a-5d45-b964-d9f6c1808704,Children's Hope Family Foundation,children-s-hope-family-foundation,children-s-hope-family-foundation.png,exact slug,no
+c929ea33-f902-5380-995f-0b071d26c7b0,Jessup University,jessup-university,jessup-university-onramp-program.png,containment,YES
+27879187-6851-59b8-a342-b9befd61dbb0,Embrace Grace/PHCM,embrace-grace-phcm,,no candidate,YES
+7e8e1b16-5d45-5e93-a1fe-165a02ef89c1,Keaton's Child Cancer Alliance,keaton-s-child-cancer-alliance,keaton-s-child-cancer-alliance.png,exact slug,no
+11fe44fa-7640-5964-9dcb-d08499c72fc3,Justice Advocates Battling Exploitation & Lies,justice-advocates-battling-exploitation-lies,justice-advocates-battling-exploitation-lies-jabel.png,fuzzy,YES
+065c6ea2-cc21-5731-87b1-b259d6d492fa,Lighthouse Counseling and Family Resource Center,lighthouse-counseling-and-family-resource-center,lighthouse-counseling-family-resource-center.png,fuzzy,YES
+1f486f63-cc4d-5490-a05d-92b76e3f3431,Sierra College-Connections Consultants,sierra-college-connections-consultants,,no candidate,YES
+8bbb406c-c753-5b7a-9d61-47ecb0810799,Building Careers Foundation,building-careers-foundation,,no candidate,YES
+b087aa66-3dda-50f4-bb20-e1962c160d73,Powerhouse Ministries,powerhouse-ministries,powerhouse-ministries.png,exact slug,no
+267d327b-21a9-5a91-b771-c5428d1166e2,Redemption Youth Ranch,redemption-youth-ranch,redemption-youth-ranch.png,exact slug,no
+67096ba8-4ee2-5ca9-b2a7-c7296412e765,Wayfinder Family Services,wayfinder-family-services,wayfinder-family-services.png,exact slug,no
+3b05c3c8-173f-58a6-bfa0-e0deea6c6731,Koinonia Family Services,koinonia-family-services,koinonia-family-services.png,exact slug,no
+17287873-bea6-5bb9-ab21-d620121b18de,Placer Justice Foundation,placer-justice-foundation,placer-justice-foundation.png,exact slug,no

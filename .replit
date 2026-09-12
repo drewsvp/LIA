@@ -130,7 +130,7 @@ localPort = 5000
 externalPort = 80
 
 [objectStorage]
-defaultBucketID = "replit-objstore-78fe5153-2524-4ba6-b9a4-13ff9d3bb310"
+defaultBucketID = "replit-objstore-afe67027-933a-486e-b4cd-504535d537c4"
 
 [postMerge]
 path = "scripts/post-merge.sh"
