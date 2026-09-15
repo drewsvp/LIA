@@ -1,10 +1,15 @@
 ---
-name: Production testing logins
-description: Go-live decision for the four seeded quick-login roles in production.
+name: Production quick logins
+description: Production must not expose the seeded quick-login roles.
 ---
 
-Production quick login is intentionally enabled for pre-go-live testing of all four seeded roles: staff admin, staff approver, org owner, and supporter.
+Production quick login is disabled. The seeded roles may remain for development
+and migration compatibility, but production must not set
+`QUICK_LOGIN_ENABLED=true`.
 
-**Why:** The owner explicitly wants the testing logins present and working in production as the final step before full go-live; do not propose disabling them or frame their presence as a gap.
+**Why:** The owner explicitly ended pre-go-live production testing and requested
+that Quick Logins be removed from production.
 
-**How to apply:** Preserve `QUICK_LOGIN_ENABLED = "true"` in the production environment and keep migration `0046_seed_quick_login_supporter.sql` intact unless the owner changes this decision.
+**How to apply:** Keep the production environment override absent. Do not delete
+development fixtures or historical migrations. Restore production quick login
+only after new explicit approval.

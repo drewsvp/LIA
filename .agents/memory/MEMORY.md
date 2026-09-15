@@ -32,7 +32,7 @@
 - [Post-commit asset cleanup](post-commit-asset-cleanup.md) — never let cleanup failure re-enter failed-save rollback; queue old assets durably and protect newly committed URLs.
 - [Out-of-band need photos](managed-openai-availability.md) — externally produced photos still go through prompt builder + storage adapter + DAL write; pick rows by null image URL, never by gen status.
 - [Email brand settings](email-brand-settings.md) — singleton table (CHECK id=1), updated_by must be uuid not text; _brand module cache in render.ts; merge brandTokenVars() before template.render(), template vars win on collision.
-- [Production testing logins](production-testing-logins.md) — four seeded quick-login roles are intentionally enabled for final pre-go-live testing; don't treat them as a gap.
+- [Production quick logins](production-testing-logins.md) — production quick login is disabled; keep the development fixtures, but never restore the production override without explicit approval.
 - [Profile email changes](profile-email-changes.md) — require mailbox confirmation before moving login identity; keep the old address active and finalize both identity stores atomically.
 - [Account email identity](account-email-identity.md) — email, not name, is account identity; linked person/provider emails must match, and account-bearing merges or edits never change it implicitly.
 - [Organization-context lifecycle](organization-context-lifecycle.md) — server contexts expire durably and are revoked atomically when an organization becomes ineligible; lazy request checks are only defense in depth.
