@@ -1,15 +1,13 @@
 ---
-name: Production quick logins
-description: Production must not expose the seeded quick-login roles.
+name: Production testing logins
+description: Current owner decision for seeded quick-login roles in production.
 ---
 
-Production quick login is disabled. The seeded roles may remain for development
-and migration compatibility, but production must not set
-`QUICK_LOGIN_ENABLED=true`.
+Production quick login is intentionally enabled for the seeded testing roles.
+Keep `QUICK_LOGIN_ENABLED=true` in the production environment.
 
-**Why:** The owner explicitly ended pre-go-live production testing and requested
-that Quick Logins be removed from production.
+**Why:** After briefly removing the production override, the owner explicitly
+requested that the Quick Login buttons be restored in production.
 
-**How to apply:** Keep the production environment override absent. Do not delete
-development fixtures or historical migrations. Restore production quick login
-only after new explicit approval.
+**How to apply:** Preserve the production override and the development fixtures.
+Remove production quick login only after another explicit owner instruction.
