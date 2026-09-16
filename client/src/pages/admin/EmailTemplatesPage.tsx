@@ -72,12 +72,37 @@ type BrandSettings = {
 };
 type ListResponse = { templates: TemplateRow[] };
 type PreviewResponse = { subject: string; html: string; text: string };
+type TestSendResponse = {
+  ok: boolean;
+  sentCount: number;
+  failedCount: number;
+  results: Array<{ email: string; outcome: "sent" | "failed" | "duplicate"; emailLogId?: string; error?: string }>;
+};
 
 type BrandResponse = { settings: BrandSettings };
 const LIST_KEY = "/api/admin/email-templates";
 
 const BRAND_KEY = "/api/admin/email-brand";
 const SAVE_FAILURE = "That did not save. Nothing was changed.";
+const MAX_TEST_RECIPIENTS = 10;
+const TEST_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function parseTestRecipients(raw: string): { emails: string[]; errors: string[] } {
+  const emails = [...new Set(
+    raw
+      .split(/[\s,;]+/)
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  const errors: string[] = [];
+  if (emails.length === 0) errors.push("Enter at least one test email address.");
+  if (emails.length > MAX_TEST_RECIPIENTS) {
+    errors.push(`You can send a test to at most ${MAX_TEST_RECIPIENTS} addresses at once.`);
+  }
+  const invalid = emails.filter((email) => !TEST_EMAIL_RE.test(email));
+  invalid.forEach((email) => errors.push(`"${email}" is not a valid email address.`));
+  return { emails, errors };
+}
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -196,6 +221,9 @@ export function EmailTemplatesPage(): ReactElement {
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [testRecipients, setTestRecipients] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<TestSendResponse | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState<Schedule | null>(null);
   const [oneTimeDate, setOneTimeDate] = useState("");
   const [oneTimeTime, setOneTimeTime] = useState("");
@@ -216,6 +244,7 @@ export function EmailTemplatesPage(): ReactElement {
 
   const templates = data?.templates ?? [];
   const selected = templates.find((t) => t.key === selectedKey) ?? null;
+  const parsedTestRecipients = parseTestRecipients(testRecipients);
 
   // True when the draft copy or recipients differ from what is stored on the selected template.
   const isDirty =
@@ -236,6 +265,7 @@ export function EmailTemplatesPage(): ReactElement {
     setErrors([]);
     setPreview(null);
     setPreviewing(false);
+    setTestResult(null);
     setConfirmToggleKey(null);
     if (!selected) {
       setDraft(null);
@@ -382,6 +412,50 @@ export function EmailTemplatesPage(): ReactElement {
     }
   }
 
+  async function sendTestEmail(): Promise<void> {
+    if (!selected || !draft || sendingTest) return;
+    if (parsedTestRecipients.errors.length > 0) {
+      setErrors(parsedTestRecipients.errors);
+      setTestResult(null);
+      return;
+    }
+    setSendingTest(true);
+    setTestResult(null);
+    setMessage(null);
+    setErrors([]);
+    try {
+      const { ok, data: body } = await postJson(`/api/admin/email-templates/${selected.key}/test`, {
+        // Send a canonical comma-separated list. The API also accepts the
+        // original separators, but normalising here makes the request and
+        // result order unambiguous for staff.
+        emails: parsedTestRecipients.emails.join(","),
+        copy: selected.authInfrastructure ? undefined : draft,
+      });
+      const response = body as TestSendResponse | { message?: string; errors?: string[] } | null;
+      if (!ok) {
+        setErrors(response && "errors" in response && response.errors
+          ? response.errors
+          : [response && "message" in response && response.message ? response.message : "The test email was not sent."]);
+        return;
+      }
+      const result = response as TestSendResponse;
+      setTestResult(result);
+      const duplicateCount = result.results.filter((recipient) => recipient.outcome === "duplicate").length;
+      const failedCount = result.results.filter((recipient) => recipient.outcome === "failed").length;
+      setMessage(
+        [
+          result.sentCount > 0 ? `Sent to ${result.sentCount} ${result.sentCount === 1 ? "address" : "addresses"}` : "",
+          failedCount > 0 ? `${failedCount} failed` : "",
+          duplicateCount > 0 ? `${duplicateCount} already sent` : "",
+        ].filter(Boolean).join("; ") + ".",
+      );
+    } catch {
+      setErrors(["The test email could not be sent. Check your connection and try again."]);
+    } finally {
+      setSendingTest(false);
+    }
+  }
+
   async function toggleEnabled(row: TemplateRow): Promise<void> {
     setMessage(null);
     setConfirmToggleKey(null);
@@ -501,14 +575,11 @@ export function EmailTemplatesPage(): ReactElement {
                 <tr
                   key={row.key}
                   ref={(el) => { rowRefs.current[row.key] = el; }}
-                  className={[
+                    className={[
                     row.key === selectedKey ? "adm-row-selected" : "",
-                    row.authInfrastructure ? "adm-row-fixed" : "adm-row-clickable",
+                      "adm-row-clickable",
                   ].filter(Boolean).join(" ") || undefined}
-                  onClick={() => {
-                    if (row.authInfrastructure) return;
-                    handleRowClick(row.key);
-                  }}
+                    onClick={() => handleRowClick(row.key)}
                 >
                   <td>
                     <span className="adm-email-name-cell">
@@ -522,9 +593,7 @@ export function EmailTemplatesPage(): ReactElement {
                           </div>
                         )}
                       </span>
-                      {!row.authInfrastructure && (
-                        <span className="adm-row-chevron" aria-hidden="true">›</span>
-                      )}
+                      <span className="adm-row-chevron" aria-hidden="true">›</span>
                     </span>
                   </td>
                   <td>{row.deliveryType === "scheduled" ? `Scheduled — ${row.trigger}` : `Event-triggered — ${row.trigger}`}</td>
@@ -732,6 +801,62 @@ export function EmailTemplatesPage(): ReactElement {
                 </div>
               </>
             )}
+
+            <section className="adm-test-email" aria-label="Send test email">
+              <h3 className="adm-subheading">Send a test</h3>
+              <p className="adm-sub-note">
+                Sends this sample immediately to only the addresses below. It does not use the normal audience,
+                change the template status, or start a scheduled send.
+              </p>
+              {!selected.enabled && !selected.authInfrastructure && (
+                <p className="adm-sub-note"><strong>This template is disabled.</strong> A test can still be sent.</p>
+              )}
+              <label className="adm-filter">
+                Test email addresses (comma, semicolon, or line separated; maximum 10)
+                <textarea
+                  id="test-email-recipients"
+                  aria-describedby="test-email-help"
+                  aria-invalid={testRecipients.trim() !== "" && parsedTestRecipients.errors.length > 0}
+                  value={testRecipients}
+                  rows={3}
+                  placeholder="name@example.org"
+                  onChange={(event) => setTestRecipients(event.target.value)}
+                />
+              </label>
+              <p id="test-email-help" className="adm-sub-note adm-test-email-help">
+                {parsedTestRecipients.emails.length > 0
+                  ? `${parsedTestRecipients.emails.length} unique ${parsedTestRecipients.emails.length === 1 ? "address" : "addresses"} entered.`
+                  : "Use one address per line, or separate addresses with commas or semicolons."}
+              </p>
+              {testRecipients.trim() !== "" && parsedTestRecipients.errors.length > 0 && (
+                <ul className="adm-error-text" role="alert">
+                  {parsedTestRecipients.errors.map((error) => <li key={error}>{error}</li>)}
+                </ul>
+              )}
+              <button
+                type="button"
+                className="adm-btn"
+                disabled={sendingTest || parsedTestRecipients.errors.length > 0}
+                aria-busy={sendingTest}
+                onClick={() => void sendTestEmail()}
+              >
+                {sendingTest ? "Sending test…" : "Send test email"}
+              </button>
+              {testResult && (
+                <ul className="adm-test-email-results" aria-label="Per-recipient test email results">
+                  {testResult.results.map((result) => (
+                    <li key={result.email} className={`adm-test-email-result adm-test-email-result--${result.outcome}`}>
+                      <strong>{result.email}</strong>:{" "}
+                      {result.outcome === "sent"
+                        ? "Sent"
+                        : result.outcome === "duplicate"
+                          ? "Already sent; not sent again"
+                          : `Failed${result.error ? ` — ${result.error}` : ""}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
 
             {preview && (
               <>

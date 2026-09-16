@@ -18,6 +18,9 @@
  *      (toggle on/off) receives a 404.
  *   8. org_owner calling POST /api/admin/email-templates/:key/enabled receives
  *      a 404.
+ *   9. staff_admin test-send validation rejects malformed/oversized recipient
+ *      lists before any email_log row or provider call can be created.
+ *  10. staff_admin can expand auth_magic_link and sees the same test-send panel.
  *
  * Usage:
  *   npm run test:email-admin-guard
@@ -143,6 +146,7 @@ async function main(): Promise<void> {
   // don't burst the per-IP limiter simultaneously.
   const approverCookie = await quickLoginCookie("staff_approver");
   const ownerCookie = await quickLoginCookie("org_owner");
+  const adminCookie = await quickLoginCookie("staff_admin");
 
   try {
     // ── Case 1: staff_approver is denied the page in the browser ──────────
@@ -222,6 +226,22 @@ async function main(): Promise<void> {
             "staff_approver API call returns 404",
             response.status(),
           );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    await runCase(
+      "staff_approver cannot call the test-email endpoint",
+      async () => {
+        const ctx = await newCtx(browser, approverCookie);
+        try {
+          const response = await ctx.request.post(
+            `${BASE}/api/admin/email-templates/auth_magic_link/test`,
+            { data: { emails: "blocked@example.org" } },
+          );
+          assert(response.status() === 404, "test-email endpoint returns the indistinguishable 404", response.status());
         } finally {
           await ctx.close();
         }
@@ -344,6 +364,70 @@ async function main(): Promise<void> {
             "org_owner POST email template /enabled returns 404",
             response.status(),
           );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    await runCase(
+      "staff_admin test-email recipient validation blocks invalid and oversized lists",
+      async () => {
+        const ctx = await newCtx(browser, adminCookie);
+        try {
+          const invalid = await ctx.request.post(
+            `${BASE}/api/admin/email-templates/auth_magic_link/test`,
+            { data: { emails: "not-an-email" } },
+          );
+          assert(invalid.status() === 400, "invalid test recipient returns 400", invalid.status());
+          const invalidBody = await invalid.json() as { errors?: string[] };
+          assert(
+            invalidBody.errors?.some((error) => error.includes("not a valid email address")),
+            "invalid recipient response explains the error",
+            invalidBody,
+          );
+
+          const tooMany = await ctx.request.post(
+            `${BASE}/api/admin/email-templates/auth_magic_link/test`,
+            {
+              data: {
+                emails: Array.from({ length: 11 }, (_, index) => `test-${index}@example.org`).join(","),
+              },
+            },
+          );
+          assert(tooMany.status() === 400, "more than 10 unique recipients returns 400", tooMany.status());
+          const tooManyBody = await tooMany.json() as { errors?: string[] };
+          assert(
+            tooManyBody.errors?.some((error) => error.includes("at most 10")),
+            "oversized recipient response explains the limit",
+            tooManyBody,
+          );
+        } finally {
+          await ctx.close();
+        }
+      },
+    );
+
+    await runCase(
+      "staff_admin can open the sign-in-link template test-send panel",
+      async () => {
+        const ctx = await newCtx(browser, adminCookie);
+        try {
+          const page = await ctx.newPage();
+          await page.goto(`${BASE}/admin/emails`, { waitUntil: "networkidle" });
+          const authRow = page.getByRole("row", { name: /Login link/ });
+          await authRow.click();
+          const section = page.getByRole("region", { name: "Send test email" });
+          await section.waitFor({ state: "visible", timeout: 5_000 });
+          assert(
+            await section.getByRole("button", { name: "Send test email" }).isVisible(),
+            "sign-in-link template exposes the test-send button",
+          );
+          assert(
+            await page.getByText("its copy is not editable here", { exact: false }).isVisible(),
+            "authentication template copy remains view-only",
+          );
+          await page.screenshot({ path: "/tmp/test-email-panel.png", fullPage: true });
         } finally {
           await ctx.close();
         }

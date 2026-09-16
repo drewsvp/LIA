@@ -19,7 +19,15 @@ import { storeImage, deleteImage, StorageError } from "../storage/object-storage
 import { PRODUCT_TEMPLATES, isProductTemplateKey, type ProductTemplateKey } from "../email/templates";
 import { renderMagicLinkEmail } from "../email/templates/auth-magic-link";
 import { copyPlaceholders, finalizeHtml, brandTokenVars, getBrand, type TemplateCopy } from "../email/render";
-import { absoluteUrl, headerImageDataUri } from "../email/send";
+import {
+  absoluteUrl,
+  EMAIL_HEADER_CID_URL,
+  getEmailHeaderAttachment,
+  headerImageDataUri,
+  leftoverPlaceholders,
+  sendEmail,
+  unresolvedVariables,
+} from "../email/send";
 import { effectiveCopy, envStaffRecipients, parseRecipientOverride, sanitizeCopy, validateCopy } from "../email/overrides";
 import { templateDisplayName } from "../../shared/email-templates";
 import { SCHEDULABLE_TEMPLATE_KEYS } from "../digest-schedule";
@@ -112,6 +120,7 @@ function parseCopyBody(raw: unknown): { ok: true; copy: TemplateCopy | null } | 
 }
 
 const EMAILISH_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_TEST_RECIPIENTS = 10;
 const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Basic CSS colour validation: hex (#rgb / #rrggbb) or rgb(r,g,b). */
 const COLOR_RE = /^(#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))$/;
@@ -135,6 +144,35 @@ function isValidColor(value: string): boolean {
 function previewHeaderSrc(): string {
   const url = getBrand().headerImageUrl;
   return url && url.trim() !== "" ? url : headerImageDataUri();
+}
+
+function parseTestRecipients(raw: unknown):
+  | { ok: true; emails: string[] }
+  | { ok: false; errors: string[] } {
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/[\s,;]+/)
+      : [];
+  if (values.some((value) => typeof value !== "string")) {
+    return { ok: false, errors: ["Test recipients must be email addresses."] };
+  }
+  const emails = [...new Set(
+    (values as string[])
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  if (emails.length === 0) {
+    return { ok: false, errors: ["Enter at least one test email address."] };
+  }
+  if (emails.length > MAX_TEST_RECIPIENTS) {
+    return { ok: false, errors: [`You can send a test to at most ${MAX_TEST_RECIPIENTS} addresses at once.`] };
+  }
+  const invalid = emails.filter((email) => !EMAILISH_RE.test(email));
+  if (invalid.length > 0) {
+    return { ok: false, errors: invalid.map((email) => `"${email}" is not a valid email address.`) };
+  }
+  return { ok: true, emails };
 }
 
 export function registerEmailTemplateAdminRoutes(app: Express): void {
@@ -457,6 +495,111 @@ export function registerEmailTemplateAdminRoutes(app: Express): void {
       });
     } catch (err) {
       next(err);
+    }
+  });
+
+  // ---- Send a rendered sample to explicit staff-entered addresses. This
+  // bypasses template enabled state by design, but never resolves a production
+  // audience and never uses an entity-bound once-only key.
+  app.post("/api/admin/email-templates/:key/test", requireStaffAdmin, async (req: Request, res: Response) => {
+    const key = req.params.key ?? "";
+    if (key !== "auth_magic_link" && !isProductTemplateKey(key)) {
+      sendNotFound(res);
+      return;
+    }
+    const recipients = parseTestRecipients(req.body?.emails);
+    if (!recipients.ok) {
+      res.status(400).json({ message: "The test email was not sent.", errors: recipients.errors });
+      return;
+    }
+
+    try {
+      let rendered: { subject: string; html: string; text: string };
+      let sampleVars: Record<string, unknown>;
+      if (key === "auth_magic_link") {
+        sampleVars = { firstName: "Maria", url: absoluteUrl("/login") };
+        rendered = renderMagicLinkEmail(sampleVars as { firstName: string; url: string });
+      } else {
+        const template = PRODUCT_TEMPLATES[key];
+        let copy: TemplateCopy | undefined;
+        if (req.body?.copy !== undefined) {
+          const parsed = parseCopyBody(req.body.copy);
+          if (!parsed.ok) {
+            res.status(400).json({ message: "The test email was not sent.", errors: ["The copy payload is malformed."] });
+            return;
+          }
+          if (parsed.copy) {
+            parsed.copy = sanitizeCopy(parsed.copy);
+            const errors = validateCopy(key, parsed.copy);
+            if (errors.length > 0) {
+              res.status(400).json({ message: "The test email was not sent.", errors });
+              return;
+            }
+            copy = parsed.copy;
+          }
+        } else {
+          const override = await dal.emailTemplateOverrides.getOverride(staffCtx(req), key);
+          copy = effectiveCopy(key, override);
+        }
+        sampleVars = { ...brandTokenVars(), ...(template.sample as Record<string, unknown>) };
+        const missing = unresolvedVariables(template.required, sampleVars);
+        if (missing.length > 0) {
+          res.status(400).json({
+            message: "The test email was not sent.",
+            errors: [`Sample data is missing required variables: ${missing.join(", ")}.`],
+          });
+          return;
+        }
+        rendered = template.render(sampleVars as never, copy);
+        const leftovers = leftoverPlaceholders(sampleVars, rendered);
+        if (leftovers.length > 0) {
+          res.status(400).json({
+            message: "The test email was not sent.",
+            errors: [`Rendered copy still contains unresolved placeholders: ${leftovers.join(", ")}.`],
+          });
+          return;
+        }
+      }
+
+      const html = finalizeHtml(rendered.html, EMAIL_HEADER_CID_URL);
+      const attachment = await getEmailHeaderAttachment();
+      const results = [];
+      for (const email of recipients.emails) {
+        try {
+          const result = await sendEmail({
+            templateKey: key,
+            toEmail: email,
+            entityType: null,
+            entityId: null,
+            payload: { test: true, vars: sampleVars },
+            subject: rendered.subject,
+            html,
+            text: rendered.text,
+            attachments: [attachment],
+          });
+          results.push({
+            email,
+            outcome: result.outcome,
+            ...(result.outcome === "sent" ? { emailLogId: result.emailLogId } : {}),
+          });
+        } catch (err) {
+          results.push({
+            email,
+            outcome: "failed",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      const sentCount = results.filter((result) => result.outcome === "sent").length;
+      res.json({
+        ok: sentCount === results.length,
+        sentCount,
+        failedCount: results.length - sentCount,
+        results,
+      });
+    } catch (err) {
+      console.error(`[admin] test email render/send failed (${key}):`, err);
+      res.status(500).json({ message: "The test email was not sent.", errors: [err instanceof Error ? err.message : String(err)] });
     }
   });
 

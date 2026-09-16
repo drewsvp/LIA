@@ -2994,6 +2994,38 @@ a.site-nav-btn {
 }
 
 .adm-upcoming-digest { margin-bottom: 2rem; }
+.adm-test-email {
+  margin: 24px 0;
+  padding: 18px;
+  border: 1px solid #c8d3de;
+  border-radius: 6px;
+  background: #f7f9fb;
+}
+.adm-test-email .adm-filter { align-items: stretch; }
+.adm-test-email textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+}
+.adm-test-email-help {
+  margin: 6px 0 12px;
+}
+.adm-test-email-results {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 12px 16px 12px 34px;
+  border: 1px solid #d4dde5;
+  border-radius: 4px;
+  background: #ffffff;
+}
+.adm-test-email-result--sent { color: #1d6f42; }
+.adm-test-email-result--failed { color: #9a201a; }
+.adm-test-email-result--duplicate { color: #7a5c00; }
+@media (max-width: 600px) {
+  .adm-test-email { padding: 14px; }
+  .adm-test-email .adm-btn { width: 100%; }
+}
 
 .adm-nav-alert {
   display: block;
