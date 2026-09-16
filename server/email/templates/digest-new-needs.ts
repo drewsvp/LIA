@@ -66,6 +66,21 @@ function needsText(needs: DigestNeed[]): string[] {
   return lines;
 }
 
+function unsubscribeHtml(vars: DigestNewNeedsVars): string {
+  const brand = getBrand();
+  return para(
+    `<span style="font-size:13px;">You are receiving this because you subscribed to the ${escapeHtml(brand.programName)} weekly digest. ` +
+      `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${brand.primaryColor};text-decoration:underline;">Unsubscribe</a></span>`,
+  );
+}
+
+function unsubscribeText(vars: DigestNewNeedsVars): string[] {
+  return [
+    `You are receiving this because you subscribed to the ${getBrand().programName} weekly digest.`,
+    `Unsubscribe: ${vars.unsubscribeUrl}`,
+  ];
+}
+
 const DEFAULT_COPY: TemplateCopy = {
   subject: "New Needs from {programName}",
   heading: "New Needs This Week",
@@ -85,17 +100,8 @@ const SECTIONS: TemplateSectionDef<DigestNewNeedsVars>[] = [
   {
     name: "unsubscribe",
     label: "Unsubscribe link",
-    renderHtml: (vars) => {
-      const color = getBrand().primaryColor;
-      return para(
-        `<span style="font-size:13px;">You are receiving this because you subscribed to the {programName} weekly digest. ` +
-          `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${color};text-decoration:underline;">Unsubscribe</a></span>`,
-      );
-    },
-    renderText: (vars) => [
-      "You are receiving this because you subscribed to the Love in Action weekly digest.",
-      `Unsubscribe: ${vars.unsubscribeUrl}`,
-    ],
+    renderHtml: unsubscribeHtml,
+    renderText: unsubscribeText,
   },
 ];
 
@@ -137,17 +143,13 @@ export const digestNewNeeds: ProductTemplate<DigestNewNeedsVars> = {
   },
   render(vars, copy = DEFAULT_COPY) {
     const subject = fillText(copy.subject, vars);
-    const color = getBrand().primaryColor;
     const bodyHtml = copy.bodyBlocks?.length
       ? renderBodyBlocksHtml(copy.bodyBlocks, vars, SECTIONS)
       : [
           copyPara(copy.paragraphs[0] ?? "", vars),
           ...vars.needs.map(needCardHtml),
           copyPara(copy.paragraphs[1] ?? "", vars),
-          para(
-            `<span style="font-size:13px;">You are receiving this because you subscribed to the {programName} weekly digest. ` +
-              `<a href="${escapeHtml(vars.unsubscribeUrl)}" style="color:${color};text-decoration:underline;">Unsubscribe</a></span>`,
-          ),
+          unsubscribeHtml(vars),
         ]
           .filter(Boolean)
           .join("\n");
@@ -159,10 +161,7 @@ export const digestNewNeeds: ProductTemplate<DigestNewNeedsVars> = {
           copyText(copy.paragraphs[0] ?? "", vars),
           needsText(vars.needs),
           copyText(copy.paragraphs[1] ?? "", vars),
-          [
-            "You are receiving this because you subscribed to the Love in Action weekly digest.",
-            `Unsubscribe: ${vars.unsubscribeUrl}`,
-          ],
+          unsubscribeText(vars),
         );
     return { subject, html, text };
   },

@@ -55,6 +55,11 @@ function assertDigestOutput(): void {
   const textUrlsPresent =
     rendered.text.includes("https://example.org/items/10432") &&
     rendered.text.includes("https://example.org/volunteer/10433");
+  const footerProgramNameResolved =
+    rendered.html.includes("subscribed to the Love in Action weekly digest") &&
+    rendered.text.includes("subscribed to the Love in Action weekly digest") &&
+    !rendered.html.includes("{programName}") &&
+    !rendered.text.includes("{programName}");
   const noImageVars: DigestNewNeedsVars = {
     needs: [{
       name: "Legacy Need Without Image",
@@ -70,6 +75,7 @@ function assertDigestOutput(): void {
   const ok =
     expected.every((fragment) => rendered.html.includes(fragment)) &&
     textUrlsPresent &&
+    footerProgramNameResolved &&
     noBrokenImage &&
     noImage.html.includes('href="https://example.org/items/legacy"') &&
     noImage.text.includes("https://example.org/items/legacy");
