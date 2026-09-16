@@ -67,6 +67,16 @@ async function main(): Promise<void> {
     const rendered = tpl.render(tpl.sample);
     check("template renders subject/html/text", rendered.subject.length > 0 && rendered.html.includes(HEADER_IMAGE_MARKER) && rendered.text.includes("Unsubscribe:"));
     check("template lists sample needs", rendered.html.includes("Winter Warmth Drive") && rendered.text.includes("Meal Service Volunteers"));
+    check("template shows both posted need images", tpl.sample.needs.every((n) => n.imageUrl !== null && rendered.html.includes(`src="${n.imageUrl!.replace(/&/g, "&amp;")}"`)));
+    check("template links item button to public detail page", rendered.html.includes('href="https://example.org/items/10432"') && rendered.html.includes(">View Item Need</a>"));
+    check("template links volunteer button to public detail page", rendered.html.includes('href="https://example.org/volunteer/10433"') && rendered.html.includes(">View Volunteer Need</a>"));
+    check("plain text includes both public detail URLs", rendered.text.includes("https://example.org/items/10432") && rendered.text.includes("https://example.org/volunteer/10433"));
+    const legacyNoImage = tpl.render({
+      needs: [{ name: "Legacy Need", organizationName: "Legacy Org", typeLabel: "Item need", url: "https://example.org/items/legacy", imageUrl: null }],
+      unsubscribeUrl: "https://example.org/unsubscribe/legacy",
+    });
+    check("legacy need without image omits broken image markup", !legacyNoImage.html.includes('alt="Legacy Need"'));
+    check("legacy need still has its public detail button and text URL", legacyNoImage.html.includes('href="https://example.org/items/legacy"') && legacyNoImage.html.includes(">View Item Need</a>") && legacyNoImage.text.includes("https://example.org/items/legacy"));
 
     // 2/3. claim / resume / complete / watermark
     const first = await dal.digestRuns.claimOrResume(SYSTEM, T1);

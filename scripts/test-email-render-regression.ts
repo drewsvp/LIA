@@ -12,6 +12,7 @@
  */
 
 import { PRODUCT_TEMPLATES } from "../server/email/templates/index";
+import type { DigestNewNeedsVars } from "../server/email/templates/digest-new-needs";
 
 let passed = 0;
 let failed = 0;
@@ -37,6 +38,48 @@ function diffPreview(a: string, b: string, label: string): void {
       console.error(`        blocks: ${(bLines[i] ?? "<missing>").substring(0, 120)}`);
       shown++;
     }
+  }
+}
+
+function assertDigestOutput(): void {
+  const template = PRODUCT_TEMPLATES.digest_new_needs;
+  const rendered = template.render(template.sample);
+  const expected = [
+    'src="https://images.unsplash.com/photo-1609139003551-ee40f5f73ec0?auto=format&amp;fit=crop&amp;w=560&amp;q=80"',
+    'src="https://images.unsplash.com/photo-1559027615-cd4628902d4a?auto=format&amp;fit=crop&amp;w=560&amp;q=80"',
+    'href="https://example.org/items/10432"',
+    'href="https://example.org/volunteer/10433"',
+    ">View Item Need</a>",
+    ">View Volunteer Need</a>",
+  ];
+  const textUrlsPresent =
+    rendered.text.includes("https://example.org/items/10432") &&
+    rendered.text.includes("https://example.org/volunteer/10433");
+  const noImageVars: DigestNewNeedsVars = {
+    needs: [{
+      name: "Legacy Need Without Image",
+      organizationName: "Legacy Organization",
+      typeLabel: "Item need",
+      url: "https://example.org/items/legacy",
+      imageUrl: null,
+    }],
+    unsubscribeUrl: "https://example.org/unsubscribe/legacy",
+  };
+  const noImage = template.render(noImageVars);
+  const noBrokenImage = !noImage.html.includes('alt="Legacy Need Without Image"');
+  const ok =
+    expected.every((fragment) => rendered.html.includes(fragment)) &&
+    textUrlsPresent &&
+    noBrokenImage &&
+    noImage.html.includes('href="https://example.org/items/legacy"') &&
+    noImage.text.includes("https://example.org/items/legacy");
+
+  if (ok) {
+    console.log("  PASS  digest_new_needs output details");
+    passed++;
+  } else {
+    console.error("  FAIL  digest_new_needs output details");
+    failed++;
   }
 }
 
@@ -79,6 +122,8 @@ async function main() {
       failed++;
     }
   }
+
+  assertDigestOutput();
 
   console.log(`\nResults: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

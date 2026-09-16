@@ -11,6 +11,7 @@ import {
   para,
   escapeHtml,
   link,
+  button,
   textBody,
   fillText,
   copyPara,
@@ -42,6 +43,7 @@ export type DigestNewNeedsVars = {
 
 function needCardHtml(n: DigestNeed): string {
   const color = getBrand().primaryColor;
+  const buttonLabel = n.typeLabel === "Volunteer need" ? "View Volunteer Need" : "View Item Need";
   const image =
     n.imageUrl == null || n.imageUrl.trim() === ""
       ? ""
@@ -51,6 +53,7 @@ function needCardHtml(n: DigestNeed): string {
 ${image}        <div style="font-size:16px;font-weight:700;line-height:1.5;">${link(n.url, n.name)}</div>
         <div style="font-size:15px;line-height:1.6;color:${color};">Organization: ${escapeHtml(n.organizationName)}</div>
         <div style="font-size:15px;line-height:1.6;color:${color};">Type: ${escapeHtml(n.typeLabel)}</div>
+${button(buttonLabel, n.url)}
       </div>`;
 }
 
@@ -120,14 +123,14 @@ export const digestNewNeeds: ProductTemplate<DigestNewNeedsVars> = {
         organizationName: "Hope Community Center",
         typeLabel: "Item need",
         url: "https://example.org/items/10432",
-        imageUrl: null,
+        imageUrl: "https://images.unsplash.com/photo-1609139003551-ee40f5f73ec0?auto=format&fit=crop&w=560&q=80",
       },
       {
         name: "Meal Service Volunteers",
         organizationName: "Neighbors Table",
         typeLabel: "Volunteer need",
         url: "https://example.org/volunteer/10433",
-        imageUrl: null,
+        imageUrl: "https://images.unsplash.com/photo-1559027615-cd4628902d4a?auto=format&fit=crop&w=560&q=80",
       },
     ],
     unsubscribeUrl: "https://example.org/unsubscribe/00000000-0000-0000-0000-000000000000",
