@@ -274,8 +274,8 @@ const QUICK_LOGIN_ACCOUNTS: Record<string, { email: string; label: string }> = {
   supporter: { email: "supporter@example.org", label: "Supporter (Alex)" },
 };
 
-function isQuickLoginEnabled(): boolean {
-  return process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true";
+export function isQuickLoginEnabled(): boolean {
+  return process.env.NODE_ENV === "development";
 }
 
 /**
@@ -392,10 +392,9 @@ export function registerRoutes(app: Express): void {
 
   // ---- Quick Login (seeded test accounts only — see module-level allowlist).
   //
-  // Disabled by default. Enabled when NODE_ENV=development OR the deployer has
-  // explicitly set QUICK_LOGIN_ENABLED=true. When disabled every request to
+  // Available only when NODE_ENV=development. When disabled every request to
   // these routes returns the standard unknown-API 404 so the surface is
-  // invisible to anyone who has not opted in.
+  // invisible outside development.
   //
   // Token generation bypasses the email-send path entirely: a one-off
   // verification row is written directly to the DB (same schema Better Auth

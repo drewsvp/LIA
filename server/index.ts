@@ -5,7 +5,7 @@
 import http from "node:http";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cookieParser from "cookie-parser";
-import { registerRoutes, checkQuickLoginSeed } from "./routes/index";
+import { registerRoutes, checkQuickLoginSeed, isQuickLoginEnabled } from "./routes/index";
 import { appBaseUrl, authTrustedOrigins } from "./auth/auth";
 import { startExpiryScheduler } from "./jobs/expiry";
 import { startEmailSweep } from "./jobs/email-sweep";
@@ -126,7 +126,7 @@ async function start(): Promise<void> {
   startImageSweep();
 
   // Startup check: warn if quick login is enabled but seed accounts are missing.
-  if (process.env.NODE_ENV === "development" || process.env.QUICK_LOGIN_ENABLED === "true") {
+  if (isQuickLoginEnabled()) {
     checkQuickLoginSeed()
       .then(({ seeded, missing }) => {
         if (!seeded) {

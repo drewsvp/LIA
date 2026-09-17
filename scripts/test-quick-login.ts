@@ -528,7 +528,7 @@ async function main(): Promise<void> {
 
   if (statusRes.status !== 200) {
     console.error(`Quick login is disabled (status ${statusRes.status}).`);
-    console.error("Set NODE_ENV=development or QUICK_LOGIN_ENABLED=true and restart.");
+    console.error("Start the development server with npm run dev, then retry.");
     process.exit(1);
   }
 

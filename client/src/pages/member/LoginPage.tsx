@@ -51,8 +51,7 @@ export function LoginPage(): ReactElement | null {
 
   useEffect(() => {
     // Ask the server whether quick login is available. The endpoint returns 404
-    // when disabled (not development and QUICK_LOGIN_ENABLED !== true), so the
-    // UI section only appears when the server has opted in.
+    // outside development, so the UI section only appears on a development server.
     fetch("/api/login/quick/status", { credentials: "include" })
       .then(async (r) => {
         if (!r.ok) {
