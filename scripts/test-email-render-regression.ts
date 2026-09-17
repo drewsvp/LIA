@@ -51,6 +51,11 @@ function assertDigestOutput(): void {
     'href="https://example.org/volunteer/10433"',
     ">View Item Need</a>",
     ">View Volunteer Need</a>",
+    'width="132" height="132"',
+    "text-align:center",
+    "border-radius:999px",
+    "Help local families stay warm",
+    "Join a welcoming team",
   ];
   const textUrlsPresent =
     rendered.text.includes("https://example.org/items/10432") &&
@@ -63,6 +68,7 @@ function assertDigestOutput(): void {
   const noImageVars: DigestNewNeedsVars = {
     needs: [{
       name: "Legacy Need Without Image",
+      description: "<strong>Safe &amp; readable</strong> " + "description ".repeat(30) + "<script>alert('no')</script>",
       organizationName: "Legacy Organization",
       typeLabel: "Item need",
       url: "https://example.org/items/legacy",
@@ -72,11 +78,19 @@ function assertDigestOutput(): void {
   };
   const noImage = template.render(noImageVars);
   const noBrokenImage = !noImage.html.includes('alt="Legacy Need Without Image"');
+  const safeExcerpt =
+    noImage.html.includes("Safe &amp; readable description") &&
+    noImage.text.includes("Safe & readable description") &&
+    noImage.html.includes("…") &&
+    !noImage.html.includes("&lt;strong&gt;") &&
+    !noImage.html.includes("<script>") &&
+    !noImage.text.includes("alert(");
   const ok =
     expected.every((fragment) => rendered.html.includes(fragment)) &&
     textUrlsPresent &&
     footerProgramNameResolved &&
     noBrokenImage &&
+    safeExcerpt &&
     noImage.html.includes('href="https://example.org/items/legacy"') &&
     noImage.text.includes("https://example.org/items/legacy");
 

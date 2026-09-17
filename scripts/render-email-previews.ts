@@ -23,6 +23,7 @@ import { orgNewItemDonation } from "../server/email/templates/org-new-item-donat
 import { orgNewVolunteer } from "../server/email/templates/org-new-volunteer";
 import { donorItemConfirmation } from "../server/email/templates/donor-item-confirmation";
 import { donorVolunteerConfirmation } from "../server/email/templates/donor-volunteer-confirmation";
+import { digestNewNeeds } from "../server/email/templates/digest-new-needs";
 import type { Rendered } from "../server/email/render";
 
 const OUT_DIR = path.join("docs", "email", "previews");
@@ -43,6 +44,12 @@ function deadlineLabel(t: string): string {
 function need<T>(value: T | undefined | null, what: string): T {
   if (value == null) throw new Error(`preview needs seeded data: ${what}`);
   return value;
+}
+
+function previewImageUrl(value: string | null, fallback: string | null): string | null {
+  const imageUrl = value == null || value.trim() === "" ? fallback : value;
+  if (imageUrl == null) return null;
+  return /^https?:\/\//.test(imageUrl) ? imageUrl : absoluteUrl(imageUrl);
 }
 
 async function main(): Promise<void> {
@@ -77,6 +84,7 @@ async function main(): Promise<void> {
     id: string;
     title: string;
     description: string | null;
+    imageUrl: string | null;
     dropoffLocation: string | null;
     deadlineType: string;
     deadlineDate: string | null;
@@ -86,7 +94,7 @@ async function main(): Promise<void> {
     contactPhone: string | null;
   }>(
     SYSTEM,
-    `select ir.id, ir.title, ir.description, ir.dropoff_location as "dropoffLocation",
+    `select ir.id, ir.title, ir.description, ir.image_url as "imageUrl", ir.dropoff_location as "dropoffLocation",
             ir.deadline_type as "deadlineType", ir.deadline_date::text as "deadlineDate",
             o.name as "orgName",
             cp.first_name || ' ' || cp.last_name as "contactName", cp.email as "contactEmail", cp.phone as "contactPhone"
@@ -111,6 +119,7 @@ async function main(): Promise<void> {
     id: string;
     title: string;
     description: string | null;
+    imageUrl: string | null;
     details: string | null;
     deadlineType: string;
     orgName: string;
@@ -119,7 +128,7 @@ async function main(): Promise<void> {
     contactPhone: string | null;
   }>(
     SYSTEM,
-    `select vr.id, vr.title, vr.description, vr.details, vr.deadline_type as "deadlineType",
+    `select vr.id, vr.title, vr.description, vr.image_url as "imageUrl", vr.details, vr.deadline_type as "deadlineType",
             o.name as "orgName",
             cp.first_name || ' ' || cp.last_name as "contactName", cp.email as "contactEmail", cp.phone as "contactPhone"
        from volunteer_requests vr
@@ -367,6 +376,27 @@ async function main(): Promise<void> {
       requestUrl: absoluteUrl(`/volunteer/${signup.requestId}`),
       roles: signupRoles.map((r) => r.name),
       followUpWindow: "1-3 business days",
+    }),
+    digest_new_needs: digestNewNeeds.render({
+      needs: [
+        {
+          name: itemReq.title,
+          description: itemReq.description,
+          organizationName: itemReq.orgName,
+          typeLabel: "Item need",
+          url: absoluteUrl(`/items/${itemReq.id}`),
+          imageUrl: previewImageUrl(itemReq.imageUrl, digestNewNeeds.sample.needs[0]?.imageUrl ?? null),
+        },
+        {
+          name: volReq.title,
+          description: volReq.description,
+          organizationName: volReq.orgName,
+          typeLabel: "Volunteer need",
+          url: absoluteUrl(`/volunteer/${volReq.id}`),
+          imageUrl: previewImageUrl(volReq.imageUrl, digestNewNeeds.sample.needs[1]?.imageUrl ?? null),
+        },
+      ],
+      unsubscribeUrl: absoluteUrl("/unsubscribe/preview"),
     }),
   };
 

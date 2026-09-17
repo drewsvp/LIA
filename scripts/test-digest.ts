@@ -68,11 +68,14 @@ async function main(): Promise<void> {
     check("template renders subject/html/text", rendered.subject.length > 0 && rendered.html.includes(HEADER_IMAGE_MARKER) && rendered.text.includes("Unsubscribe:"));
     check("template lists sample needs", rendered.html.includes("Winter Warmth Drive") && rendered.text.includes("Meal Service Volunteers"));
     check("template shows both posted need images", tpl.sample.needs.every((n) => n.imageUrl !== null && rendered.html.includes(`src="${n.imageUrl!.replace(/&/g, "&amp;")}"`)));
+    check("template renders square side-by-side thumbnails", (rendered.html.match(/width="132" height="132"/g) ?? []).length === 2 && rendered.html.includes('role="presentation" width="100%"'));
+    check("template matches compact reference styling", rendered.html.includes("text-align:center") && rendered.html.includes("border-radius:999px") && !rendered.html.includes(`border:1px solid`));
+    check("template includes abbreviated descriptions in html and text", tpl.sample.needs.every((n) => n.description !== null && rendered.html.includes(n.description) && rendered.text.includes(n.description)));
     check("template links item button to public detail page", rendered.html.includes('href="https://example.org/items/10432"') && rendered.html.includes(">View Item Need</a>"));
     check("template links volunteer button to public detail page", rendered.html.includes('href="https://example.org/volunteer/10433"') && rendered.html.includes(">View Volunteer Need</a>"));
     check("plain text includes both public detail URLs", rendered.text.includes("https://example.org/items/10432") && rendered.text.includes("https://example.org/volunteer/10433"));
     const legacyNoImage = tpl.render({
-      needs: [{ name: "Legacy Need", organizationName: "Legacy Org", typeLabel: "Item need", url: "https://example.org/items/legacy", imageUrl: null }],
+      needs: [{ name: "Legacy Need", description: "Readable without an image.", organizationName: "Legacy Org", typeLabel: "Item need", url: "https://example.org/items/legacy", imageUrl: null }],
       unsubscribeUrl: "https://example.org/unsubscribe/legacy",
     });
     check("legacy need without image omits broken image markup", !legacyNoImage.html.includes('alt="Legacy Need"'));
@@ -98,14 +101,14 @@ async function main(): Promise<void> {
     // 4. selection
     const all = await dal.digestRuns.newActiveNeeds(SYSTEM, "1970-01-01", new Date().toISOString());
     check("full-history window finds active needs", all.length > 0, `found ${all.length}`);
-    const shapes = all.every((n) => (n.type === "item" || n.type === "volunteer") && n.name.length > 0 && n.orgName.length > 0);
-    check("need rows carry type/name/orgName", shapes);
+    const shapes = all.every((n) => (n.type === "item" || n.type === "volunteer") && n.name.length > 0 && n.orgName.length > 0 && (n.description === null || typeof n.description === "string"));
+    check("need rows carry type/name/description/orgName", shapes);
     const empty = await dal.digestRuns.newActiveNeeds(SYSTEM, "2099-01-01", "2099-01-02");
     check("empty window finds nothing", empty.length === 0);
 
     // 5. fan-out dedup on the once-only index
     if (second) {
-      const original = [{ name: "Original Need", organizationName: "Org A", typeLabel: "Item need", url: "https://example.org/items/1", imageUrl: null }];
+      const original = [{ name: "Original Need", description: "Original description", organizationName: "Org A", typeLabel: "Item need", url: "https://example.org/items/1", imageUrl: null }];
       const vars = { needs: original, unsubscribeUrl: "https://example.org/unsubscribe/x" };
       const q1 = await queueProductEmail(SYSTEM, { key: "digest_new_needs", entityId: second.run.id, toEmail: FIXTURE_EMAIL, vars });
       const q2 = await queueProductEmail(SYSTEM, { key: "digest_new_needs", entityId: second.run.id, toEmail: FIXTURE_EMAIL, vars });
@@ -118,7 +121,7 @@ async function main(): Promise<void> {
       // content gets the ORIGINAL snapshot back, so recipient #2 is enqueued
       // with content identical to recipient #1 even if needs changed/archived
       // between the crash and the restart.
-      const changed = [{ name: "Different Need", organizationName: "Org B", typeLabel: "Volunteer need", url: "https://example.org/items/2", imageUrl: null }];
+      const changed = [{ name: "Different Need", description: "Changed description", organizationName: "Org B", typeLabel: "Volunteer need", url: "https://example.org/items/2", imageUrl: null }];
       const stored1 = await dal.digestRuns.setNeedsSnapshotOnce(SYSTEM, second.run.id, original);
       const stored2 = await dal.digestRuns.setNeedsSnapshotOnce(SYSTEM, second.run.id, changed);
       check("snapshot is write-once (resume keeps original content)", canon(stored2) === canon(original));
@@ -159,7 +162,7 @@ async function main(): Promise<void> {
     const SUB_A = { email: "zz.digest.a@example.com", personId: null, unsubscribeToken: "00000000-0000-0000-0000-00000000000a" };
     const SUB_B = { email: "zz.digest.b@example.com", personId: null, unsubscribeToken: "00000000-0000-0000-0000-00000000000b" };
     const deps = { listSubscribers: async () => [SUB_A, SUB_B], dispatch: async () => [] };
-    const crashNeeds = [{ name: "Crash Week Need", organizationName: "Org C", typeLabel: "Item need", url: "https://example.org/items/9", imageUrl: null }];
+    const crashNeeds = [{ name: "Crash Week Need", description: "Snapshot description", organizationName: "Org C", typeLabel: "Item need", url: "https://example.org/items/9", imageUrl: null }];
     const crashed = await dal.digestRuns.claimOrResume(SYSTEM, T3);
     if (!crashed) throw new Error("could not claim T3");
     await dal.digestRuns.setNeedsSnapshotOnce(SYSTEM, crashed.run.id, crashNeeds);

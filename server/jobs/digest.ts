@@ -90,6 +90,7 @@ function needToVars(n: dal.digestRuns.NewNeed): DigestNeed {
         : absoluteUrl(n.imageUrl);
   return {
     name: n.name,
+    description: n.description,
     organizationName: n.orgName,
     typeLabel: n.type === "item" ? "Item need" : "Volunteer need",
     url: absoluteUrl(path),
