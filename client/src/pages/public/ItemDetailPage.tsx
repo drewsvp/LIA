@@ -10,6 +10,7 @@ import {
   organizationPath,
 } from "@shared/share-copy";
 import { beginEngagementLifecycle, reportEngagement } from "../../lib/engagement";
+import { resolveItemDropoffLocation } from "./item-detail-location";
 
 /**
  * PB-02 — Item request detail and claim (docs/specs/PB-02.md).
@@ -43,6 +44,7 @@ type DetailPayload = {
   organization: {
     name: string;
     slug: string;
+    city: string | null;
     websiteUrl: string | null;
     mission: string | null;
     populations: string[];
@@ -285,10 +287,9 @@ export function ItemDetailPage(): ReactElement {
                   <span className="pub-label">Requesting Organization:</span>{" "}
                   <Link href={organizationPath(data.organization.slug)}>{data.organization.name}</Link>
                 </p>
-                {/* Confirmed: label renders even when the value is blank (§7). */}
                 <p style={{ margin: "0 0 10px" }}>
                   <span className="pub-label">Item Dropoff Location:</span>{" "}
-                  {data.request.dropoffLocation ?? ""}
+                  {resolveItemDropoffLocation(data.request.dropoffLocation, data.organization.city)}
                 </p>
                 <p style={{ margin: "0 0 10px" }}>
                   <span className="pub-label">Deadline Type:</span>{" "}

@@ -171,6 +171,7 @@ export type PublicItemRequestDetailPayload = {
   organization: {
     name: string;
     slug: string;
+    city: string | null;
     websiteUrl: string | null;
     mission: string | null;
     populations: string[];
@@ -477,6 +478,7 @@ export function registerPublicRoutes(app: Express): void {
         organization: {
           name: org.name,
           slug: org.slug,
+          city: org.city,
           websiteUrl: org.websiteUrl,
           mission: org.mission,
           populations: populations.map((p) => p.name),

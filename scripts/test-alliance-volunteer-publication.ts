@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { pool, SYSTEM } from "../server/db/client";
 import * as dal from "../server/dal";
+import { resolveItemDropoffLocation } from "../client/src/pages/public/item-detail-location";
 
 const BASE = process.env.TEST_BASE_URL ?? "http://127.0.0.1:5000";
 const runId = `${process.pid}-${Date.now()}`;
@@ -392,10 +393,46 @@ async function main(): Promise<void> {
 
     itemBrowse = await request("/api/public/item-requests");
     profile = await request(`/api/public/organizations/${alliance.slug}`);
-    const itemDetail = await request(`/api/public/item-requests/${itemRequestId}`);
+    let itemDetail = await request(`/api/public/item-requests/${itemRequestId}`);
     check(hasRequest(itemBrowse.body, "requests", itemRequestId), "physical need appears in item browse");
     check(hasRequest(profile.body, "itemRequests", itemRequestId), "physical need appears on the Alliance profile");
     check(itemDetail.response.status === 200, "public physical-need detail loads");
+    check(
+      (itemDetail.body.request as { dropoffLocation?: string | null } | undefined)?.dropoffLocation === "Roseville" &&
+        (itemDetail.body.organization as { city?: string | null } | undefined)?.city === alliance.city,
+      "public physical-need detail exposes the explicit dropoff location and nonprofit city",
+      itemDetail.body,
+    );
+    check(
+      resolveItemDropoffLocation("Specific loading dock", "Alliance City") === "Specific loading dock",
+      "item detail displays an explicit dropoff location before the nonprofit city",
+    );
+    await pool.query(`update item_requests set dropoff_location = '   ' where id = $1`, [itemRequestId]);
+    itemDetail = await request(`/api/public/item-requests/${itemRequestId}`);
+    check(
+      (itemDetail.body.request as { dropoffLocation?: string | null } | undefined)?.dropoffLocation === "   " &&
+        (itemDetail.body.organization as { city?: string | null } | undefined)?.city === alliance.city,
+      "public physical-need detail provides the nonprofit city when dropoff location is blank",
+      itemDetail.body,
+    );
+    check(
+      resolveItemDropoffLocation("   ", "Alliance City") === "Alliance City",
+      "item detail displays the nonprofit city when dropoff location is blank",
+    );
+    await pool.query(`update organizations set city = null where id = $1`, [alliance.id]);
+    itemDetail = await request(`/api/public/item-requests/${itemRequestId}`);
+    check(
+      (itemDetail.body.request as { dropoffLocation?: string | null } | undefined)?.dropoffLocation === "   " &&
+        (itemDetail.body.organization as { city?: string | null } | undefined)?.city === null,
+      "public physical-need detail keeps both location values empty when neither exists",
+      itemDetail.body,
+    );
+    check(
+      resolveItemDropoffLocation(null, "   ") === "",
+      "item detail keeps a blank value when neither location exists",
+    );
+    await pool.query(`update organizations set city = $1 where id = $2`, [alliance.city, alliance.id]);
+    await pool.query(`update item_requests set dropoff_location = 'Roseville' where id = $1`, [itemRequestId]);
     const itemShareResponse = await fetch(`${BASE}/items/${itemRequestId}`);
     check(
       itemShareResponse.status === 200 && (await itemShareResponse.text()).includes(itemTitle),
