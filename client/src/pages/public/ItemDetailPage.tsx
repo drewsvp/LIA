@@ -76,6 +76,11 @@ type FieldErrors = {
 export function ItemDetailPage(): ReactElement {
   const params = useParams<{ id: string }>();
   const requestId = params.id ?? "";
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [requestId]);
+
   const { data, isLoading, isError, error } = useQuery<DetailPayload>({
     queryKey: [`/api/public/item-requests/${requestId}`],
     enabled: requestId !== "",

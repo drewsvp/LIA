@@ -77,6 +77,11 @@ export function VolunteerDetailPage(): ReactElement {
   const params = useParams<{ id: string }>();
   const requestId = params.id ?? "";
   const { settings: siteSettings } = useSiteSettings();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [requestId]);
+
   const { data, isLoading, isError, error } = useQuery<DetailPayload>({
     queryKey: [`/api/public/volunteer-requests/${requestId}`],
     enabled: requestId !== "",
