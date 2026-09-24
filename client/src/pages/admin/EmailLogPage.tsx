@@ -13,6 +13,7 @@ import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 import { EMAIL_TEMPLATE_NAMES, templateDisplayName } from "@shared/email-templates";
 import type { EmailFailureCategory } from "@shared/types";
+import { ListPagination, ListCount, ListSearch, SortableHeader, type SortDirection } from "@/components/admin/ListControls";
 
 type LogRow = {
   id: string;
@@ -40,7 +41,7 @@ type ResendAttempt = {
   sentAt: string | null;
 };
 
-type ListResponse = { rows: LogRow[]; failureCount: number; anyExist: boolean };
+type ListResponse = { rows: LogRow[]; failureCount: number; anyExist: boolean; total?: number };
 
 type PreviewResponse =
   | { subject: string; html: string; previewUnavailable?: never }
@@ -148,6 +149,10 @@ export function EmailLogPage(): ReactElement {
   const [resendMsg, setResendMsg] = useState<string | null>(null);
   const [resendOk, setResendOk] = useState<boolean | null>(null);
   const [resending, setResending] = useState(false);
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"createdAt" | "template" | "recipient" | "related" | "status">("createdAt");
+  const [direction, setDirection] = useState<SortDirection>("desc");
+  const [search, setSearch] = useState("");
 
   const listKey = useMemo(() => {
     const params = new URLSearchParams();
@@ -156,9 +161,11 @@ export function EmailLogPage(): ReactElement {
     if (filters.recipient.trim()) params.set("recipient", filters.recipient.trim());
     if (filters.from) params.set("from", filters.from);
     if (filters.to) params.set("to", filters.to);
+    if (search.trim()) params.set("search", search.trim());
+    params.set("page", String(page)); params.set("pageSize", "50"); params.set("sort", sort); params.set("direction", direction);
     const qs = params.toString();
     return qs ? `/api/admin/email?${qs}` : "/api/admin/email";
-  }, [filters]);
+  }, [filters, search, page, sort, direction]);
 
   const { data, isLoading } = useQuery<ListResponse>({ queryKey: [listKey] });
   const detailKey = selectedId ? `/api/admin/email/${selectedId}` : null;
@@ -184,6 +191,7 @@ export function EmailLogPage(): ReactElement {
 
   function showFailures(): void {
     setFilters({ template: "", status: "failed", recipient: "", from: laDate(7), to: "" });
+    setPage(1);
     setSelectedId(null);
   }
 
@@ -214,6 +222,8 @@ export function EmailLogPage(): ReactElement {
   }
 
   const rows = data?.rows ?? [];
+  const total = data?.total ?? rows.length;
+  function changeSort(column: typeof sort, next: SortDirection): void { setSort(column); setDirection(next); setPage(1); }
 
   return (
     <div className="adm-page">
@@ -226,11 +236,12 @@ export function EmailLogPage(): ReactElement {
       )}
 
       <div className="adm-filter-row">
+        <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} label="Search email log" onClear={() => { setSearch(""); setFilters({ template: "", status: "", recipient: "", from: laDate(7), to: "" }); setPage(1); }} />
         <label className="adm-filter">
           Template
           <select
             value={filters.template}
-            onChange={(e) => setFilters((f) => ({ ...f, template: e.target.value }))}
+             onChange={(e) => { setFilters((f) => ({ ...f, template: e.target.value })); setPage(1); }}
           >
             <option value="">All templates</option>
             {templateOptions.map(([key, name]) => (
@@ -242,7 +253,7 @@ export function EmailLogPage(): ReactElement {
         </label>
         <label className="adm-filter">
           Status
-          <select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
+          <select value={filters.status} onChange={(e) => { setFilters((f) => ({ ...f, status: e.target.value })); setPage(1); }}>
             <option value="">All statuses</option>
             <option value="queued">Queued</option>
             <option value="sending">Sending</option>
@@ -257,18 +268,19 @@ export function EmailLogPage(): ReactElement {
             type="text"
             value={filters.recipient}
             placeholder="Any part of an address"
-            onChange={(e) => setFilters((f) => ({ ...f, recipient: e.target.value }))}
+            onChange={(e) => { setFilters((f) => ({ ...f, recipient: e.target.value })); setPage(1); }}
           />
         </label>
         <label className="adm-filter">
           From
-          <input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} />
+          <input type="date" value={filters.from} onChange={(e) => { setFilters((f) => ({ ...f, from: e.target.value })); setPage(1); }} />
         </label>
         <label className="adm-filter">
           To
-          <input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} />
+          <input type="date" value={filters.to} onChange={(e) => { setFilters((f) => ({ ...f, to: e.target.value })); setPage(1); }} />
         </label>
       </div>
+      <ListCount count={total} noun="emails" />
 
       {resendMsg && (
         <p className={`adm-result${resendOk === false ? " adm-result-fail" : ""}`} role="status">
@@ -286,11 +298,11 @@ export function EmailLogPage(): ReactElement {
             <table className="adm-table">
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Template</th>
-                  <th>Recipient</th>
-                  <th>Related</th>
-                  <th>Status</th>
+                  <SortableHeader label="Time" column="createdAt" sort={sort} direction={direction} onSort={changeSort} />
+                  <SortableHeader label="Template" column="template" sort={sort} direction={direction} onSort={changeSort} />
+                  <SortableHeader label="Recipient" column="recipient" sort={sort} direction={direction} onSort={changeSort} />
+                  <SortableHeader label="Related" column="related" sort={sort} direction={direction} onSort={changeSort} />
+                  <SortableHeader label="Status" column="status" sort={sort} direction={direction} onSort={changeSort} />
                 </tr>
               </thead>
               <tbody>
@@ -559,6 +571,7 @@ export function EmailLogPage(): ReactElement {
           </aside>
         )}
       </div>
+      <ListPagination page={page} pageSize={50} total={total} onPage={setPage} />
     </div>
   );
 }

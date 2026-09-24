@@ -26,6 +26,8 @@ export type ParticipationFilters = {
   to?: string;
   snapshotAt?: string;
   participationId?: string;
+  sort?: "supporter" | "notes" | "organization" | "request" | "date" | "details" | "status";
+  direction?: "asc" | "desc";
 };
 
 export type AdminParticipationResult =
@@ -56,6 +58,13 @@ function filterSql(
       or coalesce(p.phone, '') like ${p}
       or lower(o.name) like lower(${p})
       or lower(${requestAlias}.title) like lower(${p})
+      or lower(coalesce(${tableAlias}.notes, '')) like lower(${p})
+      or lower(coalesce(${tableAlias}.status, '')) like lower(${p})
+      or lower(coalesce(${tableAlias}.cancellation_reason, '')) like lower(${p})
+      or to_char(${tableAlias}.created_at, 'Mon DD, YYYY') ilike ${p}
+      or ${tableAlias === "ip"
+        ? `exists (select 1 from item_pledge_lines sl join items si on si.id = sl.item_id where sl.item_pledge_id = ${tableAlias}.id and lower(si.name) like lower(${p}))`
+        : `exists (select 1 from volunteer_signup_roles sr join volunteer_roles sv on sv.id = sr.volunteer_role_id where sr.volunteer_signup_id = ${tableAlias}.id and lower(sv.name) like lower(${p}))`}
     )`);
   }
   if (supporterText) {
@@ -121,6 +130,27 @@ async function list(
     const snapshotAt = snapshotRows[0]?.snapshotAt;
     if (!snapshotAt) throw new Error("admin participation snapshot query returned no row");
     const effectiveFilters = { ...filters, snapshotAt };
+    const sortColumns = kind === "item"
+      ? {
+          supporter: "lower(concat_ws(' ', p.last_name, p.first_name))",
+          notes: "lower(coalesce(ip.notes, ''))",
+          organization: "lower(o.name)",
+          request: "lower(r.title)",
+          date: "ip.created_at",
+          details: "(select min(lower(i2.name)) from item_pledge_lines l2 join items i2 on i2.id = l2.item_id where l2.item_pledge_id = ip.id)",
+          status: "ip.status",
+        }
+      : {
+          supporter: "lower(concat_ws(' ', p.last_name, p.first_name))",
+          notes: "lower(coalesce(vs.notes, ''))",
+          organization: "lower(o.name)",
+          request: "lower(r.title)",
+          date: "vs.created_at",
+          details: "(select min(lower(vr2.name)) from volunteer_signup_roles sr2 join volunteer_roles vr2 on vr2.id = sr2.volunteer_role_id where sr2.volunteer_signup_id = vs.id)",
+          status: "vs.status",
+        };
+    const sort = sortColumns[filters.sort ?? "date"] ?? sortColumns.date;
+    const direction = filters.direction === "asc" ? "asc" : "desc";
     const countParams: unknown[] = [];
     const where = filterSql(effectiveFilters, tableAlias, "r", countParams);
     const countRows = await q<{ total: number }>(
@@ -152,7 +182,7 @@ async function list(
               left join users cu on cu.id = ip.cancelled_by
               left join people cp on cp.id = cu.person_id
               where true ${rowWhere}
-              order by ip.created_at desc, ip.id desc
+              order by ${sort} ${direction} nulls last, ip.id desc
               limit $${rowParams.length - 1} offset $${rowParams.length}`,
             rowParams,
           )
@@ -171,7 +201,7 @@ async function list(
               left join users cu on cu.id = vs.cancelled_by
               left join people cp on cp.id = cu.person_id
               where true ${rowWhere}
-              order by vs.created_at desc, vs.id desc
+              order by ${sort} ${direction} nulls last, vs.id desc
               limit $${rowParams.length - 1} offset $${rowParams.length}`,
             rowParams,
           );

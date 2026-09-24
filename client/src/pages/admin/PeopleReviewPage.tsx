@@ -18,6 +18,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
 
 type Person = {
   id: string;
@@ -241,6 +242,9 @@ export function PeopleReviewPage() {
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [reviewStatus, setReviewStatus] = useState<"all" | "review" | "clear">("all");
+  const [sort, setSort] = useState<"name" | "email" | "review" | "attached">("name");
+  const [direction, setDirection] = useState<SortDirection>("asc");
   const [confirmClear, setConfirmClear] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -256,10 +260,11 @@ export function PeopleReviewPage() {
   }, [selectedId]);
 
   const listKey = useMemo(() => {
-    const params = new URLSearchParams({ page: String(page), pageSize: "25" });
+    const params = new URLSearchParams({ page: String(page), pageSize: "25", sort, direction });
     if (search) params.set("search", search);
+    if (reviewStatus !== "all") params.set("reviewStatus", reviewStatus);
     return `/api/admin/people?${params.toString()}`;
-  }, [page, search]);
+  }, [page, search, reviewStatus, sort, direction]);
   const listQuery = useQuery<{ people: QueueRow[]; total: number; page: number; pageSize: number }>({
     queryKey: [listKey],
   });
@@ -357,31 +362,15 @@ export function PeopleReviewPage() {
         <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>
       )}
 
-      <form
-        className="adm-contacts-search"
-        role="search"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setSearch(searchDraft.trim());
-          setPage(1);
-          setSelectedId(null);
-          setResult(null);
-        }}
-      >
-        <label className="adm-filter">
-          Search by name, email, or phone
-          <input value={searchDraft} maxLength={100} onChange={(event) => setSearchDraft(event.target.value)} />
+      <ListSearch value={searchDraft} label="Search by name, email, or phone" onChange={setSearchDraft}
+        onClear={() => { setSearch(""); setSearchDraft(""); setReviewStatus("all"); setPage(1); setSelectedId(null); }}>
+        <button type="button" className="adm-btn" onClick={() => { setSearch(searchDraft.trim()); setPage(1); setSelectedId(null); }}>Search</button>
+        <label className="adm-filter">Review status
+          <select value={reviewStatus} onChange={(e) => { setReviewStatus(e.target.value as typeof reviewStatus); setPage(1); }}>
+            <option value="all">All</option><option value="review">Needs review</option><option value="clear">No review needed</option>
+          </select>
         </label>
-        <button type="submit" className="adm-btn">Search</button>
-        {search ? (
-          <button type="button" className="adm-btn adm-btn-outline" onClick={() => {
-            setSearch("");
-            setSearchDraft("");
-            setPage(1);
-            setSelectedId(null);
-          }}>Clear</button>
-        ) : null}
-      </form>
+      </ListSearch>
 
       {listQuery.isError ? (
         <p className="adm-alert">{LIST_ERROR}</p>
@@ -393,10 +382,10 @@ export function PeopleReviewPage() {
         <div className="adm-table-wrap"><table className="adm-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Review status</th>
-              <th>Attached</th>
+               <SortableHeader label="Name" column="name" sort={sort} direction={direction} onSort={(c, d) => { setSort(c); setDirection(d); setPage(1); }} />
+               <SortableHeader label="Email" column="email" sort={sort} direction={direction} onSort={(c, d) => { setSort(c); setDirection(d); setPage(1); }} />
+               <SortableHeader label="Review status" column="review" sort={sort} direction={direction} onSort={(c, d) => { setSort(c); setDirection(d); setPage(1); }} />
+               <SortableHeader label="Attached" column="attached" sort={sort} direction={direction} onSort={(c, d) => { setSort(c); setDirection(d); setPage(1); }} />
             </tr>
           </thead>
           <tbody>
@@ -423,13 +412,8 @@ export function PeopleReviewPage() {
           </tbody>
         </table></div>
       )}
-      {total > pageSize && (
-        <div className="adm-contacts-pagination" aria-label="Contact pages">
-          <button className="adm-btn adm-btn-outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button>
-          <span>Page {page} of {pageCount} ({total} contacts)</span>
-          <button className="adm-btn adm-btn-outline" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next</button>
-        </div>
-      )}
+      {!listQuery.isLoading && <ListCount count={total} noun="contacts" />}
+      {total > pageSize && <ListPagination page={page} pageSize={pageSize} total={total} onPage={setPage} />}
 
       {selectedId !== null && (
         <div className="adm-detail" ref={detailRef}>

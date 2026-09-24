@@ -191,6 +191,12 @@ function parseParticipationFilters(req: Request): dal.adminParticipation.Partici
   ) {
     return null;
   }
+  const sortValues = ["supporter", "notes", "organization", "request", "date", "details", "status"] as const;
+  const sort = typeof query.sort === "string" && sortValues.includes(query.sort as typeof sortValues[number])
+    ? query.sort as typeof sortValues[number]
+    : query.sort === undefined ? undefined : null;
+  const direction = query.direction === undefined ? undefined : query.direction === "asc" || query.direction === "desc" ? query.direction : null;
+  if (sort === null || direction === null) return null;
   return {
     page,
     pageSize,
@@ -203,6 +209,8 @@ function parseParticipationFilters(req: Request): dal.adminParticipation.Partici
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     ...(snapshotAt ? { snapshotAt } : {}),
+    ...(sort ? { sort } : {}),
+    ...(direction ? { direction } : {}),
   };
 }
 
@@ -659,11 +667,24 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: "Choose a valid page and page size." });
         return;
       }
+      const sortValues = ["name", "email", "lastLogin", "donations", "volunteer"] as const;
+      const sort = typeof req.query.sort === "string" && sortValues.includes(req.query.sort as typeof sortValues[number])
+        ? req.query.sort as typeof sortValues[number]
+        : req.query.sort === undefined ? "name" : null;
+      const direction = req.query.direction === undefined
+        ? "asc"
+        : req.query.direction === "asc" || req.query.direction === "desc" ? req.query.direction : null;
+      if (sort === null || direction === null) {
+        res.status(400).json({ message: "Invalid supporter sort." });
+        return;
+      }
       const result = await dal.adminSupporters.list(staffCtx(req), {
         status,
         search,
         page,
         pageSize,
+        sort,
+        direction,
       });
       res.json({ ...result, pagination: { total: result.total, page: result.page, pageSize: result.pageSize } });
     } catch (err) {
@@ -899,11 +920,19 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: "Unknown status filter." });
         return;
       }
-      const organizations = await dal.organizations.listByStatusWithContact(
+      const allowedSort = new Set(["name", "city", "contact", "createdAt"]);
+      if (req.query.sort !== undefined && (typeof req.query.sort !== "string" || !allowedSort.has(req.query.sort)) ||
+          req.query.direction !== undefined && req.query.direction !== "asc" && req.query.direction !== "desc") {
+        res.status(400).json({ message: "Invalid sort." }); return;
+      }
+      const sort = (req.query.sort ?? "createdAt") as "name" | "city" | "contact" | "createdAt";
+      const options = { search: typeof req.query.search === "string" ? req.query.search : "", sort, direction: req.query.direction === "desc" ? "desc" as const : "asc" as const, page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 25 };
+      const result = await dal.organizations.listByStatusWithContact(
         staffCtx(req),
         status as "pending" | "approved" | "disabled",
+        options,
       );
-      res.json({ organizations });
+      res.json({ organizations: result.rows, total: result.total });
     } catch (err) {
       next(err);
     }
@@ -1127,11 +1156,34 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: "Unknown status filter." });
         return;
       }
-      const requests =
+       const allowedSort = new Set(["type", "title", "organization", "status", "submittedAt", "returnedAt", "expiration", "childCount"]);
+       const sort = typeof req.query.sort === "string" ? req.query.sort : undefined;
+       if (sort && !allowedSort.has(sort)) {
+         res.status(400).json({ message: "Unknown sort field." });
+         return;
+       }
+       const direction = typeof req.query.direction === "string" ? req.query.direction : undefined;
+       if (direction && direction !== "asc" && direction !== "desc") {
+         res.status(400).json({ message: "Unknown sort direction." });
+         return;
+       }
+       const type = typeof req.query.type === "string" ? req.query.type : "all";
+       if (type !== "all" && type !== "item" && type !== "volunteer") {
+         res.status(400).json({ message: "Unknown request type filter." });
+         return;
+       }
+       const options = { search: typeof req.query.search === "string" ? req.query.search : "", orgId: typeof req.query.orgId === "string" ? req.query.orgId : "", type: type as "all" | "item" | "volunteer", sort: sort as any, direction: direction as "asc" | "desc" | undefined, page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 25 };
+       const [result, organizations] = await Promise.all([
         status === "returned"
-          ? await dal.adminRequests.listReturnedDrafts(staffCtx(req))
-          : await dal.adminRequests.listByStatus(staffCtx(req), status as "pending" | "active" | "archived");
-      res.json({ requests });
+           ? await dal.adminRequests.listReturnedDrafts(staffCtx(req), options)
+           : await dal.adminRequests.listByStatus(staffCtx(req), status as "pending" | "active" | "archived", options),
+         dal.organizations.listAll(staffCtx(req)),
+       ]);
+       res.json({
+         requests: result.rows,
+         total: result.total,
+         organizations: organizations.filter(org => org.kind === "member_org").map(org => ({ id: org.id, name: org.name, status: org.status })),
+       });
     } catch (err) {
       next(err);
     }
@@ -1979,8 +2031,18 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: "Unknown status filter." });
         return;
       }
-      const members = await dal.memberships.listForAdminQueue(staffCtx(req), status);
-      res.json({ members });
+       const allowedSort = new Set(["name", "email", "organization", "role", "inviter", "createdAt"]);
+       if (req.query.sort !== undefined && (typeof req.query.sort !== "string" || !allowedSort.has(req.query.sort)) ||
+           req.query.direction !== undefined && req.query.direction !== "asc" && req.query.direction !== "desc") {
+         res.status(400).json({ message: "Invalid sort." }); return;
+       }
+       const sort = (req.query.sort ?? "createdAt") as "name" | "email" | "organization" | "role" | "inviter" | "createdAt";
+       const options = { search: typeof req.query.search === "string" ? req.query.search : "", orgId: typeof req.query.orgId === "string" ? req.query.orgId : "", sort, direction: req.query.direction === "desc" ? "desc" as const : "asc" as const, page: Number(req.query.page) || 1, pageSize: Number(req.query.pageSize) || 25 };
+       const [result, organizations] = await Promise.all([
+         dal.memberships.listForAdminQueue(staffCtx(req), status, options),
+         dal.organizations.listAll(staffCtx(req)),
+       ]);
+       res.json({ members: result.rows, total: result.total, organizations: organizations.filter(o => o.kind === "member_org").map(o => ({ id: o.id, name: o.name, status: o.status })) });
     } catch (err) {
       next(err);
     }
@@ -2140,13 +2202,22 @@ export function registerAdminRoutes(app: Express): void {
   // review so the merge decision remains available from either entry point.
   app.get("/api/admin/people", requireStaffAdmin, async (req: Request, res: Response, next) => {
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const reviewStatus = req.query.reviewStatus === "review" || req.query.reviewStatus === "clear" ? req.query.reviewStatus : "all";
+    const requestedSort = req.query.sort === undefined ? "name" : String(req.query.sort);
+    const requestedDirection = req.query.direction === undefined ? "asc" : String(req.query.direction);
+    if (!["name", "email", "review", "attached"].includes(requestedSort) || !["asc", "desc"].includes(requestedDirection)) {
+      res.status(400).json({ message: "Choose a valid sort column and direction." });
+      return;
+    }
+    const sort = requestedSort as "name" | "email" | "review" | "attached";
+    const direction = requestedDirection as "asc" | "desc";
     const page = Number(req.query.page ?? 1);
     const pageSize = Number(req.query.pageSize ?? 25);
     if (search.length > 100 || !Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
       res.status(400).json({ message: "Choose a valid search, page, and page size." });
       return;
     }
-    try { res.json(await dal.adminContacts.list(staffCtx(req), { search, page, pageSize })); } catch (err) { next(err); }
+    try { res.json(await dal.adminContacts.list(staffCtx(req), { search, reviewStatus, sort, direction, page, pageSize })); } catch (err) { next(err); }
   });
 
   app.get("/api/admin/people/:id", requireStaffAdmin, async (req: Request, res: Response, next) => {
@@ -2644,6 +2715,8 @@ export function registerAdminRoutes(app: Express): void {
     const rawMatchingAlerts = stringParam("matchingAlerts", "all");
     const rawPage = stringParam("page", "1");
     const rawPageSize = stringParam("pageSize", "25");
+    const rawSort = stringParam("sort", "name");
+    const rawDirection = stringParam("direction", "asc");
     if (
       rawSearch === null ||
       rawCategoryState === null ||
@@ -2651,6 +2724,7 @@ export function registerAdminRoutes(app: Express): void {
       rawMatchingAlerts === null ||
       rawPage === null ||
       rawPageSize === null
+      || rawSort === null || rawDirection === null
     ) {
       res.status(400).json({ message: "Report filters must be single values." });
       return;
@@ -2658,6 +2732,7 @@ export function registerAdminRoutes(app: Express): void {
     const categoryStateValues = new Set(["all", "active", "inactive"]);
     const accountStateValues = new Set(["all", "invited", "active", "disabled"]);
     const matchingAlertValues = new Set(["all", "on", "off"]);
+    const sortValues = new Set(["name", "email", "interests", "accountState", "matchingAlerts"]);
     const page = Number(rawPage);
     const pageSize = Number(rawPageSize);
     if (rawSearch.trim().length > 200) {
@@ -2672,8 +2747,8 @@ export function registerAdminRoutes(app: Express): void {
       page < 1 ||
       page > 1_000_000 ||
       !Number.isSafeInteger(pageSize) ||
-      pageSize < 1 ||
-      pageSize > 100
+      pageSize < 1 || pageSize > 100 ||
+      !sortValues.has(rawSort) || (rawDirection !== "asc" && rawDirection !== "desc")
     ) {
       res.status(400).json({ message: "One or more report filters are invalid." });
       return;
@@ -2719,6 +2794,8 @@ export function registerAdminRoutes(app: Express): void {
         matchingAlerts: rawMatchingAlerts as "all" | "on" | "off",
         page,
         pageSize,
+        sort: rawSort as "name" | "email" | "interests" | "accountState" | "matchingAlerts",
+        direction: rawDirection as "asc" | "desc",
       });
       res.json(report);
     } catch (err) {
@@ -2841,6 +2918,7 @@ export function registerAdminRoutes(app: Express): void {
       const ctx = staffCtx(req);
       const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
       const status = str(req.query.status);
+      const search = str(req.query.search);
       if (
         status !== undefined &&
         status !== "queued" &&
@@ -2859,13 +2937,23 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: "Dates must be YYYY-MM-DD." });
         return;
       }
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
+      const sort = str(req.query.sort);
+      const rawDirection = str(req.query.direction);
+      if (rawDirection !== undefined && rawDirection !== "asc" && rawDirection !== "desc") { res.status(400).json({ message: "Unknown sort direction." }); return; }
+      const direction = rawDirection === "asc" ? "asc" : "desc";
+      const allowedSort = ["createdAt", "template", "recipient", "related", "status"] as const;
+      if (sort && !(allowedSort as readonly string[]).includes(sort)) { res.status(400).json({ message: "Unknown sort key." }); return; }
+      if (req.query.direction !== undefined && req.query.direction !== "asc" && req.query.direction !== "desc") { res.status(400).json({ message: "Unknown sort direction." }); return; }
       const rows = await dal.emailLog.listWithFilters(ctx, {
+        search,
         status,
         templateKey: str(req.query.template),
         toEmailContains: str(req.query.recipient),
         createdFrom: from,
         createdTo: to,
-        limit: 200,
+        limit: pageSize, offset: (page - 1) * pageSize, sort: (sort as (typeof allowedSort)[number]) ?? "createdAt", direction,
       });
       const refs = rows
         .filter((r) => r.entityType && r.entityId)
@@ -2876,6 +2964,7 @@ export function registerAdminRoutes(app: Express): void {
       res.json({
         failureCount,
         anyExist,
+        total: Number((rows[0] as (typeof rows[number] & { __total?: string }) | undefined)?.__total ?? 0),
         rows: rows.map((r) => ({
           id: r.id,
           createdAt: r.createdAt,
@@ -3131,6 +3220,7 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       const actor = str(req.query.actor);
+      const search = str(req.query.search);
       if (actor !== undefined && actor !== "automated" && !UUID_RE.test(actor)) {
         res.status(400).json({ message: "Unknown actor filter." });
         return;
@@ -3158,14 +3248,23 @@ export function registerAdminRoutes(app: Express): void {
         sendNotFound(res);
         return;
       }
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
+      const sort = str(req.query.sort);
+      const rawDirection = str(req.query.direction);
+      if (rawDirection !== undefined && rawDirection !== "asc" && rawDirection !== "desc") { res.status(400).json({ message: "Unknown sort direction." }); return; }
+      const direction = rawDirection === "asc" ? "asc" : "desc";
+      const allowedSort = ["createdAt", "type", "entity", "transition", "actor", "organization", "note"] as const;
+      if (sort && !(allowedSort as readonly string[]).includes(sort)) { res.status(400).json({ message: "Unknown sort key." }); return; }
       const rows = await dal.approvalEvents.listWithFilters(ctx, {
+        search,
         entityType: entityType ?? type,
         automated: actor === "automated",
         actorUserId: actor !== undefined && actor !== "automated" ? actor : undefined,
         entityId,
         createdFrom: from,
         createdTo: to,
-        limit: 300,
+        limit: pageSize, offset: (page - 1) * pageSize, sort: (sort as (typeof allowedSort)[number]) ?? "createdAt", direction,
       });
       const refs = rows.map((r) => ({ type: r.entityType, id: r.entityId }));
       const entities = await dal.emailResendData.resolveEntityRefs(ctx, refs);
@@ -3176,6 +3275,7 @@ export function registerAdminRoutes(app: Express): void {
         anyExist,
         actors,
         hasAutomated,
+        total: Number((rows[0] as (typeof rows[number] & { __total?: string }) | undefined)?.__total ?? 0),
         rows: rows.map((r) => ({
           id: r.id,
           createdAt: r.createdAt,
@@ -3222,7 +3322,7 @@ export function registerAdminRoutes(app: Express): void {
     }
     return {
       ok: true,
-      f: { status, emailContains: str(req.query.email), subscribedFrom: from, subscribedTo: to },
+      f: { status, emailContains: str(req.query.email), search: str(req.query.search), subscribedFrom: from, subscribedTo: to },
     };
   };
 
@@ -3234,8 +3334,16 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: parsed.message });
         return;
       }
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
+      const sort = typeof req.query.sort === "string" ? req.query.sort : "subscribedAt";
+      const rawDirection = typeof req.query.direction === "string" ? req.query.direction : undefined;
+      if (rawDirection !== undefined && rawDirection !== "asc" && rawDirection !== "desc") { res.status(400).json({ message: "Unknown sort direction." }); return; }
+      const direction = rawDirection === "asc" ? "asc" : "desc";
+      const allowedSort = ["subscribedAt", "email", "status", "firstName", "lastName", "unsubscribedAt", "source", "personName"] as const;
+      if (!(allowedSort as readonly string[]).includes(sort)) { res.status(400).json({ message: "Unknown sort key." }); return; }
       const [rows, counts, lastRun] = await Promise.all([
-        dal.digestSubscribers.listWithFilters(ctx, parsed.f),
+        dal.digestSubscribers.listWithFilters(ctx, { ...parsed.f, limit: pageSize, offset: (page - 1) * pageSize, sort: sort as (typeof allowedSort)[number], direction }),
         dal.digestSubscribers.counts(ctx),
         dal.digestRuns.latest(ctx),
       ]);
@@ -3246,7 +3354,7 @@ export function registerAdminRoutes(app: Express): void {
       const anyExist = counts.subscribed + counts.unsubscribed + counts.bounced > 0;
       // lastRun makes the digest job's last decision visible here — including
       // the skipped_empty weeks, which send nothing but are never silent.
-       res.json({ rows, counts, anyExist, lastRun, schedule: scheduleWithNext });
+       res.json({ rows, total: Number((rows[0] as (typeof rows[number] & { __total?: string }) | undefined)?.__total ?? 0), counts, anyExist, lastRun, schedule: scheduleWithNext });
     } catch (err) {
       next(err);
     }
@@ -3263,7 +3371,7 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: parsed.message });
         return;
       }
-      const rows = await dal.digestSubscribers.listWithFilters(ctx, parsed.f);
+      const rows = await dal.digestSubscribers.listWithFilters(ctx, { ...parsed.f, limit: 0 });
       const laDay = (v: string | Date | null): string =>
         v === null ? "" : new Date(v).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
       // CSV-quote AND neutralize spreadsheet formula injection: a leading

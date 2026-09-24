@@ -20,6 +20,8 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OrganizationLoginAsControls } from "../../components/OrganizationContext";
 import { useSession } from "../../hooks/useSession";
+import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
+import { invalidateAdminList } from "../../components/admin/invalidateAdminList";
 
 type Tab = "pending" | "active" | "removed";
 
@@ -107,6 +109,11 @@ export function MembersPage() {
   const [rejectNote, setRejectNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [search, setSearch] = useState("");
+  const [orgId, setOrgId] = useState("");
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"name" | "email" | "organization" | "role" | "inviter" | "createdAt">("createdAt");
+  const [direction, setDirection] = useState<SortDirection>("asc");
   const detailRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -115,8 +122,8 @@ export function MembersPage() {
     }
   }, [selectedId]);
 
-  const listQuery = useQuery<{ members: QueueRow[] }>({
-    queryKey: [`/api/admin/members?status=${tab}`],
+  const listQuery = useQuery<{ members: QueueRow[]; total: number; organizations: { id: string; name: string; status: string }[] }>({
+    queryKey: [`/api/admin/members?status=${tab}&search=${encodeURIComponent(search)}&orgId=${encodeURIComponent(orgId)}&sort=${sort}&direction=${direction}&page=${page}&pageSize=25`],
   });
   const detailQuery = useQuery<Detail>({
     queryKey: [`/api/admin/members/${selectedId}`],
@@ -129,13 +136,12 @@ export function MembersPage() {
     setConfirm(null);
     setRejectNote("");
     setResult(null);
+    setPage(1);
   }
 
   async function refreshAfterAction() {
     await queryClient.invalidateQueries({ queryKey: ["/api/admin/nav-counts"] });
-    for (const status of ["pending", "active", "removed"]) {
-      await queryClient.invalidateQueries({ queryKey: [`/api/admin/members?status=${status}`] });
-    }
+    await invalidateAdminList(queryClient, "/api/admin/members");
     if (selectedId) {
       await queryClient.invalidateQueries({ queryKey: [`/api/admin/members/${selectedId}`] });
     }
@@ -160,6 +166,8 @@ export function MembersPage() {
   }
 
   const rows = listQuery.data?.members ?? [];
+  const total = listQuery.data?.total ?? rows.length;
+  const onSort = (column: typeof sort, next: SortDirection) => { setSort(column); setDirection(next); setPage(1); };
   const detail = detailQuery.data ?? null;
   const person = detail?.person ?? null;
   const personName = person ? `${person.firstName} ${person.lastName}`.trim() : "";
@@ -192,23 +200,32 @@ export function MembersPage() {
           </button>
         ))}
       </div>
+      <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} onClear={() => { setSearch(""); setOrgId(""); setPage(1); }}>
+        <label className="adm-filter">Organization
+          <select className="adm-select" value={orgId} onChange={e => { setOrgId(e.target.value); setPage(1); }}>
+            <option value="">All organizations</option>
+            {(listQuery.data?.organizations ?? []).map(org => <option key={org.id} value={org.id}>{org.name} ({org.status})</option>)}
+          </select>
+        </label>
+      </ListSearch>
+      <ListCount count={total} noun="members" />
 
       {listQuery.isError ? (
         <p className="adm-alert">{LIST_ERROR}</p>
       ) : listQuery.isLoading ? (
         <p className="adm-muted">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="adm-muted">{emptyLine}</p>
+        <p className="adm-muted">{search || orgId ? "No members match your filters." : emptyLine}</p>
       ) : (
         <table className="adm-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Organization</th>
-              <th>Role</th>
-              <th>Invited by</th>
-              <th>Invited</th>
+              <SortableHeader label="Name" column="name" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Email" column="email" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Organization" column="organization" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Role" column="role" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Invited by" column="inviter" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Invited" column="createdAt" sort={sort} direction={direction} onSort={onSort} />
             </tr>
           </thead>
           <tbody>
@@ -234,6 +251,7 @@ export function MembersPage() {
           </tbody>
         </table>
       )}
+      <ListPagination page={page} pageSize={25} total={total} onPage={setPage} />
 
       {selectedId !== null && (
         <div className="adm-detail" ref={detailRef}>

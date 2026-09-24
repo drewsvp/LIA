@@ -519,19 +519,28 @@ export type AdminMemberDetail = AdminMemberRow & {
   phone: string | null;
   needsReview: boolean;
 };
+export type AdminMemberListOptions = { search?: string; orgId?: string; sort?: "name" | "email" | "organization" | "role" | "inviter" | "createdAt"; direction?: "asc" | "desc"; page?: number; pageSize?: number };
 
 /** Queue rows for one status tab, oldest invite first. */
 export async function listForAdminQueue(
   ctx: DbContext,
   status: "pending" | "active" | "removed",
-): Promise<AdminMemberRow[]> {
+  options: AdminMemberListOptions = {},
+): Promise<{ rows: AdminMemberRow[]; total: number }> {
   const rolePredicate = status === "active" ? "true" : "m.role <> 'owner'";
+  const sortColumns = { name: "concat_ws(' ', p.first_name, p.last_name)", email: "p.email", organization: "o.name", role: "m.role", inviter: "concat_ws(' ', ip.first_name, ip.last_name)", createdAt: "m.created_at" } as const;
+  const sortColumn = sortColumns[options.sort ?? "createdAt"] ?? sortColumns.createdAt;
+  const direction = options.direction === "desc" ? "desc" : "asc";
+  const search = (options.search ?? "").trim();
+  const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
+  const offset = Math.max(0, ((options.page ?? 1) - 1) * pageSize);
   return withDbContext(ctx, (c) =>
     q<AdminMemberRow>(
       c,
       `select ${COLS}, p.first_name as "firstName", p.last_name as "lastName", p.email,
               o.name as "orgName", o.status as "orgStatus",
-              ip.first_name as "inviterFirstName", ip.last_name as "inviterLastName"
+               ip.first_name as "inviterFirstName", ip.last_name as "inviterLastName",
+               count(*) over()::int as "total"
          from org_memberships m
          join organizations o on o.id = m.org_id
          join users u on u.id = m.user_id
@@ -539,10 +548,13 @@ export async function listForAdminQueue(
          left join users iu on iu.id = m.invited_by
          left join people ip on ip.id = iu.person_id
          where m.status = $1 and ${MEMBER_ORG_PREDICATE} and ${rolePredicate}
-        order by m.created_at asc`,
-      [status],
+           and ($2 = '' or concat_ws(' ', p.first_name, p.last_name, p.email, o.name, m.role, ip.first_name, ip.last_name, to_char(m.created_at, 'Mon DD, YYYY'), to_char(m.created_at, 'MM/DD/YYYY')) ilike '%' || $2 || '%')
+           and ($3 = '' or o.id::text = $3)
+         order by ${sortColumn} ${direction} nulls last, m.id
+         limit $4 offset $5`,
+      [status, search, options.orgId ?? "", pageSize, offset],
     ),
-  );
+  ).then(rows => ({ rows, total: Number((rows[0] as AdminMemberRow & { total?: number })?.total ?? 0) }));
 }
 
 /**

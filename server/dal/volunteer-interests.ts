@@ -40,6 +40,8 @@ export type VolunteerInterestReportFilters = {
   matchingAlerts?: "all" | "on" | "off";
   page: number;
   pageSize: number;
+  sort?: "name" | "email" | "interests" | "accountState" | "matchingAlerts";
+  direction?: "asc" | "desc";
 };
 
 export type VolunteerInterestReport = {
@@ -201,6 +203,17 @@ export async function listInterestReport(
   const categoryIdsFilter = categoryIds.length > 0 ? categoryIds : null;
   const categoryStateFilter = categoryState === "all" ? null : categoryStateActive;
   const offset = (filters.page - 1) * filters.pageSize;
+  const sortExpressions: Record<NonNullable<VolunteerInterestReportFilters["sort"]>, string> = {
+    name: "lower(p.last_name), lower(p.first_name)",
+    email: "lower(p.email)",
+    interests: "lower(coalesce((select string_agg(vc_sort.name, ', ' order by lower(vc_sort.name)) from person_volunteer_interests pvi_sort join volunteer_categories vc_sort on vc_sort.id = pvi_sort.category_id where pvi_sort.person_id = u.person_id), ''))",
+    accountState: "u.status",
+    matchingAlerts: "coalesce(vap.enabled, false)",
+  };
+  const direction = filters.direction === "desc" ? "desc" : "asc";
+  const sort = (filters.sort ?? "name") === "name"
+    ? `lower(p.last_name) ${direction} nulls last, lower(p.first_name) ${direction} nulls last`
+    : `${sortExpressions[filters.sort ?? "name"]} ${direction} nulls last`;
 
   return withDbContext(ctx, async (c) => {
     const whereParams = [
@@ -219,6 +232,16 @@ export async function listInterestReport(
         or position(lower($1) in lower(concat_ws(' ', p.first_name, p.last_name))) > 0
         or position(lower($1) in lower(p.email)) > 0
         or position(lower($1) in lower(coalesce(p.phone, ''))) > 0
+        or position(lower($1) in lower(coalesce(u.status, ''))) > 0
+        or position(lower($1) in case when coalesce(vap.enabled, false) then 'on enabled true' else 'off disabled false' end) > 0
+        or exists (
+          select 1 from person_volunteer_interests pvi_search
+          join volunteer_categories vc_search on vc_search.id = pvi_search.category_id
+          where pvi_search.person_id = u.person_id
+            and position(lower($1) in lower(concat_ws(' ', vc_search.name, case when vc_search.is_active then 'active' else 'inactive' end))) > 0
+        )
+        or (position(lower($1) in 'no volunteer interests') > 0
+            and not exists (select 1 from person_volunteer_interests pvi_none where pvi_none.person_id = u.person_id))
       )
       and (
         ($2::uuid[] is null and $3::boolean is null)
@@ -272,7 +295,7 @@ export async function listInterestReport(
          join people p on p.id = u.person_id
          left join volunteer_alert_preferences vap on vap.user_id = u.id
         where ${where}
-        order by lower(p.last_name), lower(p.first_name), lower(p.email), u.id
+        order by ${sort}, u.id
         limit $6 offset $7`,
       [...whereParams, filters.pageSize, offset],
     );

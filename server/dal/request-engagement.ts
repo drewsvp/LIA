@@ -194,6 +194,9 @@ export type AnalyticsFilters = {
   to: string;
   kind: RequestKind | null;
   orgId: string | null;
+  search?: string;
+  sort?: "name" | "email" | "request" | "type" | "organization" | "lastViewed";
+  direction?: "asc" | "desc";
 };
 
 export type RequestPerformanceRow = {
@@ -398,7 +401,19 @@ export async function listUnconvertedViewers(
   pageSize: number,
 ): Promise<{ rows: AudienceRow[]; total: number }> {
   return withDbContext(ctx, async (client) => {
-    const params = [...analyticsParams(filters), pageSize, (page - 1) * pageSize];
+    const params = [...analyticsParams(filters), filters.search?.trim() ?? "", pageSize, (page - 1) * pageSize];
+    const sortExpressions: Record<NonNullable<AnalyticsFilters["sort"]>, string> = {
+      name: "lower(last_name), lower(first_name)",
+      email: "lower(email)",
+      request: "lower(title)",
+      type: "request_kind",
+      organization: "lower(org_name)",
+      lastViewed: "last_viewed_at",
+    };
+    const direction = filters.direction === "asc" ? "asc" : "desc";
+    const sort = filters.sort === "name"
+      ? `lower(last_name) ${direction} nulls last, lower(first_name) ${direction} nulls last`
+      : `${sortExpressions[filters.sort ?? "lastViewed"]} ${direction} nulls last`;
     const base = `
       with ${REQUESTS_CTE},
       viewed as (
@@ -435,6 +450,10 @@ export async function listUnconvertedViewers(
                 where vs.person_id = u.person_id and vs.volunteer_request_id = v.request_id and vs.status = 'active'
              ))
            )
+      ),
+      searched as (
+        select * from eligible
+         where ($5 = '' or position(lower($5) in lower(concat_ws(' ', first_name, last_name, email, title, org_name, request_kind, last_viewed_at::text))) > 0)
       )`;
     const rows = await q<AudienceRow>(
       client,
@@ -443,15 +462,15 @@ export async function listUnconvertedViewers(
               email, request_kind as "requestKind", request_id as "requestId",
               title as "requestTitle", org_name as "orgName",
               last_viewed_at as "lastViewedAt"
-         from eligible
-        order by last_viewed_at desc, user_id
-        limit $5 offset $6`,
+         from searched
+        order by ${sort}, user_id, request_kind, request_id
+        limit $6 offset $7`,
       params,
     );
     const totals = await q<{ total: number }>(
       client,
-      `${base} select count(*)::int as total from eligible`,
-      analyticsParams(filters),
+      `${base} select count(*)::int as total from searched`,
+      [...analyticsParams(filters), filters.search?.trim() ?? ""],
     );
     return { rows, total: totals[0]?.total ?? 0 };
   });

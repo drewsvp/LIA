@@ -10,6 +10,12 @@
   --radius-card: 5px;
 }
 
+.adm-list-controls, .adm-list-pages { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.adm-list-pages { align-items: center; }
+.adm-sort-header { font: inherit; font-weight: 700; color: inherit; border: 0; background: transparent; cursor: pointer; padding: 4px; text-align: left; }
+.adm-sort-header:hover { text-decoration: underline; }
+.adm-sort-header:focus-visible { outline: 2px solid var(--color-teal); outline-offset: 2px; }
+
 * {
   box-sizing: border-box;
 }

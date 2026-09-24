@@ -14,6 +14,7 @@ import type {
   AdminParticipationPage,
   AdminVolunteerRow,
 } from "@shared/types";
+import { ListCount, ListPagination, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
 
 type Tab = "donations" | "volunteers";
 type Filters = {
@@ -24,6 +25,7 @@ type Filters = {
   from: string;
   to: string;
 };
+type SortColumn = "supporter" | "notes" | "organization" | "request" | "date" | "details" | "status";
 
 const PAGE_SIZE = 25;
 const EMPTY_FILTERS: Filters = {
@@ -48,12 +50,14 @@ function formatDateTime(iso: string): string {
   });
 }
 
-function buildUrl(tab: Tab, filters: Filters, page: number, snapshotAt: string | null): string {
+function buildUrl(tab: Tab, filters: Filters, page: number, snapshotAt: string | null, sort: SortColumn, direction: SortDirection): string {
   const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
   for (const [key, value] of Object.entries(filters)) {
     if (value.trim() !== "") params.set(key, value.trim());
   }
   if (snapshotAt) params.set("snapshotAt", snapshotAt);
+  params.set("sort", sort);
+  params.set("direction", direction);
   return `/api/admin/participation/${tab}?${params.toString()}`;
 }
 
@@ -88,54 +92,26 @@ function RequestCell({ row }: { row: { request: { id: string; type: "item" | "vo
   );
 }
 
-function Pagination({
-  page,
-  totalPages,
-  total,
-  onPage,
-}: {
-  page: number;
-  totalPages: number;
-  total: number;
-  onPage: (page: number) => void;
-}): ReactElement | null {
-  if (total === 0) return null;
-  return (
-    <div className="adm-participation-pagination" aria-label="Pagination">
-      <span>
-        Page {page} of {totalPages} ({total.toLocaleString("en-US")} total)
-      </span>
-      <div>
-        <button type="button" className="adm-btn adm-btn-outline" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-          Previous
-        </button>
-        <button
-          type="button"
-          className="adm-btn adm-btn-outline"
-          disabled={page >= totalPages}
-          onClick={() => onPage(page + 1)}
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function DonationsView({
   filters,
   page,
   onPage,
   snapshotAt,
   onSnapshot,
+  sort,
+  direction,
+  onSort,
 }: {
   filters: Filters;
   page: number;
   onPage: (page: number) => void;
   snapshotAt: string | null;
   onSnapshot: (snapshotAt: string) => void;
+  sort: SortColumn;
+  direction: SortDirection;
+  onSort: (column: SortColumn, direction: SortDirection) => void;
 }): ReactElement {
-  const url = useMemo(() => buildUrl("donations", filters, page, snapshotAt), [filters, page, snapshotAt]);
+  const url = useMemo(() => buildUrl("donations", filters, page, snapshotAt, sort, direction), [filters, page, snapshotAt, sort, direction]);
   const query = useQuery<AdminParticipationPage<AdminDonationRow>>({ queryKey: [url] });
   const rows = query.data?.rows ?? [];
   const hasFilters = Object.values(filters).some((value) => value.trim() !== "");
@@ -162,13 +138,13 @@ function DonationsView({
           <table className="adm-table adm-participation-table">
             <thead>
               <tr>
-                <th>Supporter</th>
-                <th>Notes</th>
-                <th>Organization</th>
-                <th>Request</th>
-                <th>Date</th>
-                <th>Items and quantities</th>
-                <th>Status</th>
+                 <SortableHeader label="Supporter" column="supporter" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Notes" column="notes" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Organization" column="organization" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Request" column="request" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Date" column="date" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Items and quantities" column="details" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Status" column="status" sort={sort} direction={direction} onSort={onSort} />
                 <th>Actions</th>
               </tr>
             </thead>
@@ -202,7 +178,8 @@ function DonationsView({
           </table>
         </div>
       )}
-      <Pagination page={page} totalPages={query.data?.totalPages ?? 1} total={query.data?.total ?? 0} onPage={onPage} />
+       <ListCount count={query.data?.total ?? 0} noun="donations" />
+       <ListPagination page={page} pageSize={PAGE_SIZE} total={query.data?.total ?? 0} onPage={onPage} />
     </section>
   );
 }
@@ -213,14 +190,20 @@ function VolunteersView({
   onPage,
   snapshotAt,
   onSnapshot,
+  sort,
+  direction,
+  onSort,
 }: {
   filters: Filters;
   page: number;
   onPage: (page: number) => void;
   snapshotAt: string | null;
   onSnapshot: (snapshotAt: string) => void;
+  sort: SortColumn;
+  direction: SortDirection;
+  onSort: (column: SortColumn, direction: SortDirection) => void;
 }): ReactElement {
-  const url = useMemo(() => buildUrl("volunteers", filters, page, snapshotAt), [filters, page, snapshotAt]);
+  const url = useMemo(() => buildUrl("volunteers", filters, page, snapshotAt, sort, direction), [filters, page, snapshotAt, sort, direction]);
   const query = useQuery<AdminParticipationPage<AdminVolunteerRow>>({ queryKey: [url] });
   const rows = query.data?.rows ?? [];
   const hasFilters = Object.values(filters).some((value) => value.trim() !== "");
@@ -247,13 +230,13 @@ function VolunteersView({
           <table className="adm-table adm-participation-table">
             <thead>
               <tr>
-                <th>Supporter</th>
-                <th>Notes</th>
-                <th>Organization</th>
-                <th>Request</th>
-                <th>Date</th>
-                <th>Selected roles</th>
-                <th>Status</th>
+                 <SortableHeader label="Supporter" column="supporter" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Notes" column="notes" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Organization" column="organization" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Request" column="request" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Date" column="date" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Selected roles" column="details" sort={sort} direction={direction} onSort={onSort} />
+                 <SortableHeader label="Status" column="status" sort={sort} direction={direction} onSort={onSort} />
                 <th>Actions</th>
               </tr>
             </thead>
@@ -287,7 +270,8 @@ function VolunteersView({
           </table>
         </div>
       )}
-      <Pagination page={page} totalPages={query.data?.totalPages ?? 1} total={query.data?.total ?? 0} onPage={onPage} />
+       <ListCount count={query.data?.total ?? 0} noun="volunteers" />
+       <ListPagination page={page} pageSize={PAGE_SIZE} total={query.data?.total ?? 0} onPage={onPage} />
     </section>
   );
 }
@@ -297,6 +281,8 @@ export function ParticipationPage(): ReactElement {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [pages, setPages] = useState<Record<Tab, number>>({ donations: 1, volunteers: 1 });
   const [snapshots, setSnapshots] = useState<Record<Tab, string | null>>({ donations: null, volunteers: null });
+  const [sort, setSort] = useState<Record<Tab, SortColumn>>({ donations: "date", volunteers: "date" });
+  const [directions, setDirections] = useState<Record<Tab, SortDirection>>({ donations: "desc", volunteers: "desc" });
 
   function updateFilter(key: keyof Filters, value: string): void {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -311,6 +297,12 @@ export function ParticipationPage(): ReactElement {
   }
 
   const page = pages[tab];
+  function changeSort(column: SortColumn, direction: SortDirection): void {
+    setSort((current) => ({ ...current, [tab]: column }));
+    setDirections((current) => ({ ...current, [tab]: direction }));
+    setPages((current) => ({ ...current, [tab]: 1 }));
+    setSnapshots((current) => ({ ...current, [tab]: null }));
+  }
   return (
     <div className="adm-page adm-participation-page">
       <h1 className="adm-heading">Donations &amp; Volunteers</h1>
@@ -377,6 +369,7 @@ export function ParticipationPage(): ReactElement {
           snapshotAt={snapshots.donations}
           onSnapshot={(snapshotAt) => setSnapshots((current) => ({ ...current, donations: snapshotAt }))}
           onPage={(next) => setPages((current) => ({ ...current, donations: next }))}
+           sort={sort.donations} direction={directions.donations} onSort={changeSort}
         />
       ) : (
         <VolunteersView
@@ -385,6 +378,7 @@ export function ParticipationPage(): ReactElement {
           snapshotAt={snapshots.volunteers}
           onSnapshot={(snapshotAt) => setSnapshots((current) => ({ ...current, volunteers: snapshotAt }))}
           onPage={(next) => setPages((current) => ({ ...current, volunteers: next }))}
+           sort={sort.volunteers} direction={directions.volunteers} onSort={changeSort}
         />
       )}
     </div>

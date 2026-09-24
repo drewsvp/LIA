@@ -205,19 +205,25 @@ export function registerEngagementReportingRoutes(app: Express): void {
       }
       const rawPage = typeof req.query.page === "string" ? Number(req.query.page) : 1;
       const rawPageSize = typeof req.query.pageSize === "string" ? Number(req.query.pageSize) : 25;
+      const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+      const sortRaw = typeof req.query.sort === "string" ? req.query.sort : "lastViewed";
+      const directionRaw = typeof req.query.direction === "string" ? req.query.direction : "desc";
+      const sortKeys = new Set(["name", "email", "request", "type", "organization", "lastViewed"]);
       if (
         !Number.isInteger(rawPage) ||
         rawPage < 1 ||
         !Number.isInteger(rawPageSize) ||
-        rawPageSize < 1 ||
-        rawPageSize > 100
+        rawPageSize < 1 || rawPageSize > 100 ||
+        search.length > 200 ||
+        !sortKeys.has(sortRaw) ||
+        (directionRaw !== "asc" && directionRaw !== "desc")
       ) {
         res.status(400).json({ message: "Choose a valid page." });
         return;
       }
       const result = await dal.requestEngagement.listUnconvertedViewers(
         staffDbContext(req),
-        parsed.filters,
+        { ...parsed.filters, search, sort: sortRaw as dal.requestEngagement.AnalyticsFilters["sort"], direction: directionRaw as "asc" | "desc" },
         rawPage,
         rawPageSize,
       );

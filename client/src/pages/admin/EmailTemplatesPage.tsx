@@ -17,6 +17,7 @@ import { queryClient } from "@/lib/queryClient";
 import { useNavigationGuard } from "../../hooks/useNavigationGuard";
 import { EmailBodyEditor } from "@/components/EmailBodyEditor";
 import type { BodyBlock, SectionDef } from "@/components/EmailBodyEditor";
+import { ListCount, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "../../components/admin/ListControls";
 
 type Copy = {
   subject: string;
@@ -235,6 +236,10 @@ export function EmailTemplatesPage(): ReactElement {
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   // Incremented to force the EmailBodyEditor to remount (e.g. after restore-to-default).
   const [editorKey, setEditorKey] = useState(0);
+  const [listSearch, setListSearch] = useState("");
+  const [enabledFilter, setEnabledFilter] = useState<"all" | "enabled" | "disabled">("all");
+  const [listSort, setListSort] = useState<"name" | "trigger" | "recipients" | "status">("name");
+  const [listDirection, setListDirection] = useState<SortDirection>("asc");
   // Incremented each time the selected template changes so stale in-flight
   // responses from a previous selection are discarded on arrival.
   const previewGenRef = useRef(0);
@@ -243,6 +248,14 @@ export function EmailTemplatesPage(): ReactElement {
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   const templates = data?.templates ?? [];
+  const visibleTemplates = filterAndSort(
+    templates.filter((t) => enabledFilter === "all" || (enabledFilter === "enabled" ? t.enabled : !t.enabled)),
+    listSearch,
+    (t) => [t.name, t.trigger, t.deliveryType, t.recipients, ...(t.effectiveRecipients ?? []), t.enabled ? "enabled" : "disabled"],
+    (t) => t.key,
+    (t) => ({ name: t.name, trigger: t.trigger, recipients: t.recipients, status: t.enabled ? "Enabled" : "Disabled" }[listSort]),
+    listDirection,
+  );
   const selected = templates.find((t) => t.key === selectedKey) ?? null;
   const parsedTestRecipients = parseTestRecipients(testRecipients);
 
@@ -558,20 +571,24 @@ export function EmailTemplatesPage(): ReactElement {
       )}
 
       <div>
+        <ListSearch value={listSearch} onChange={setListSearch} label="Search automated emails">
+          <label className="adm-filter">Status<select value={enabledFilter} onChange={(e) => setEnabledFilter(e.target.value as typeof enabledFilter)}><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
+        </ListSearch>
+        <ListCount count={visibleTemplates.length} noun="automated emails" />
         {isLoading ? (
           <p className="adm-muted">Loading…</p>
         ) : (
           <table className="adm-table">
             <thead>
               <tr>
-                <th>Email</th>
-                <th>Sent when</th>
-                <th>Goes to</th>
-                <th>Status</th>
+                <SortableHeader label="Email" column="name" sort={listSort} direction={listDirection} onSort={(c,d) => { setListSort(c); setListDirection(d); }} />
+                <SortableHeader label="Sent when" column="trigger" sort={listSort} direction={listDirection} onSort={(c,d) => { setListSort(c); setListDirection(d); }} />
+                <SortableHeader label="Goes to" column="recipients" sort={listSort} direction={listDirection} onSort={(c,d) => { setListSort(c); setListDirection(d); }} />
+                <SortableHeader label="Status" column="status" sort={listSort} direction={listDirection} onSort={(c,d) => { setListSort(c); setListDirection(d); }} />
               </tr>
             </thead>
             <tbody>
-              {templates.map((row) => (
+              {visibleTemplates.map((row) => (
                 <tr
                   key={row.key}
                   ref={(el) => { rowRefs.current[row.key] = el; }}

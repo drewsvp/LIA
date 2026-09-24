@@ -20,6 +20,7 @@ import { productUrlProblem } from "@shared/item-product-url";
 import { useNavigationGuard } from "../../hooks/useNavigationGuard";
 import { ParticipationManager } from "../../components/admin/ParticipationManager";
 import { useSiteSettings } from "../../hooks/useSiteSettings";
+import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
 
 type RequestKind = "item" | "volunteer";
 type Tab = "pending" | "active" | "archived" | "returned";
@@ -599,6 +600,11 @@ export function RequestsPage() {
   const { settings: siteSettings } = useSiteSettings();
   const [tab, setTab] = useState<Tab>("pending");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [orgId, setOrgId] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"type" | "title" | "organization" | "status" | "submittedAt" | "returnedAt" | "expiration" | "childCount">("submittedAt");
+  const [direction, setDirection] = useState<SortDirection>("asc");
   const [selected, setSelected] = useState<{ type: RequestKind; id: string } | null>(null);
   const [confirm, setConfirm] = useState<PendingConfirm>(null);
   const [returning, setReturning] = useState(false);
@@ -670,8 +676,8 @@ export function RequestsPage() {
     ? "/api/admin/requests?status=returned"
     : `/api/admin/requests?status=${tab}`;
 
-  const listQuery = useQuery<{ requests: QueueRow[] }>({
-    queryKey: [listQueryKey],
+  const listQuery = useQuery<{ requests: QueueRow[]; total: number; organizations: { id: string; name: string; status: string }[] }>({
+    queryKey: [`${listQueryKey}&type=${typeFilter}&orgId=${encodeURIComponent(orgId)}&search=${encodeURIComponent(search)}&sort=${sort === "submittedAt" && tab === "returned" ? "returnedAt" : sort}&direction=${direction}&page=${page}&pageSize=25`],
   });
   const detailQuery = useQuery<Detail>({
     queryKey: [`/api/admin/requests/${selected?.type}/${selected?.id}`],
@@ -711,12 +717,9 @@ export function RequestsPage() {
 
   async function refreshAfterAction() {
     await queryClient.invalidateQueries({ queryKey: ["/api/admin/nav-counts"] });
-    for (const status of ["pending", "active", "archived", "returned"]) {
-      const key = status === "returned"
-        ? "/api/admin/requests?status=returned"
-        : `/api/admin/requests?status=${status}`;
-      await queryClient.invalidateQueries({ queryKey: [key] });
-    }
+    await queryClient.invalidateQueries({
+      predicate: query => typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("/api/admin/requests?"),
+    });
     if (selected) {
       await queryClient.invalidateQueries({ queryKey: [`/api/admin/requests/${selected.type}/${selected.id}`] });
       await queryClient.invalidateQueries({
@@ -895,7 +898,9 @@ export function RequestsPage() {
   }
 
   const rows = listQuery.data?.requests ?? [];
-  const visible = rows.filter((r) => typeFilter === "all" || r.type === typeFilter);
+  const visible = rows;
+  const total = listQuery.data?.total ?? rows.length;
+  const onSort = (column: typeof sort, next: SortDirection) => { setSort(column); setDirection(next); setPage(1); };
   const detail = detailQuery.data ?? null;
   const request = detail?.request ?? null;
 
@@ -994,12 +999,28 @@ export function RequestsPage() {
                 ? "ui-btn ui-btn-selected adm-filterbtn adm-filterbtn-on"
                 : "ui-btn ui-btn-secondary adm-filterbtn"
             }
-            onClick={() => setTypeFilter(f)}
+            onClick={() => { setTypeFilter(f); setPage(1); }}
           >
             {f === "all" ? "All" : f === "item" ? "Items" : "Volunteer"}
           </button>
         ))}
       </div>
+      <ListSearch
+        value={search}
+        onChange={value => { setSearch(value); setPage(1); }}
+        onClear={() => { setSearch(""); setOrgId(""); setTypeFilter("all"); setPage(1); }}
+      >
+        <label className="adm-filter">
+          Organization
+          <select className="adm-select" value={orgId} onChange={e => { setOrgId(e.target.value); setPage(1); }}>
+            <option value="">All organizations</option>
+            {(listQuery.data?.organizations ?? []).map(org => (
+              <option key={org.id} value={org.id}>{org.name} ({org.status})</option>
+            ))}
+          </select>
+        </label>
+      </ListSearch>
+      <ListCount count={total} noun="requests" />
 
       {listQuery.isError ? (
         <p className="adm-alert">{LIST_ERROR}</p>
@@ -1011,12 +1032,12 @@ export function RequestsPage() {
         <table className="adm-table">
           <thead>
             <tr>
-              <th>Type</th>
-              <th>Title</th>
-              <th>Organization</th>
-              <th>{tab === "returned" ? "Returned" : "Submitted"}</th>
-              <th>Expiration</th>
-              <th>{typeFilter === "volunteer" ? "Roles" : typeFilter === "item" ? "Items" : "Items / roles"}</th>
+              <SortableHeader label="Type" column="type" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Title" column="title" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Organization" column="organization" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label={tab === "returned" ? "Returned" : "Submitted"} column={tab === "returned" ? "returnedAt" : "submittedAt"} sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Expiration" column="expiration" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label={typeFilter === "volunteer" ? "Roles" : typeFilter === "item" ? "Items" : "Items / roles"} column="childCount" sort={sort} direction={direction} onSort={onSort} />
             </tr>
           </thead>
           <tbody>
@@ -1054,6 +1075,7 @@ export function RequestsPage() {
           </tbody>
         </table>
       )}
+      <ListPagination page={page} pageSize={25} total={total} onPage={setPage} />
 
       {/* Navigation-guard dialog — shown when the admin tries to leave an
           unsaved edit, either via the admin nav or by clicking another row. */}

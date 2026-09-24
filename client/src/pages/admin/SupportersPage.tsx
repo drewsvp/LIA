@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
+import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
 
 type Status = "active" | "disabled";
 
@@ -89,6 +90,8 @@ export function SupportersPage(): ReactElement {
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"name" | "email" | "lastLogin" | "donations" | "volunteer">("name");
+  const [direction, setDirection] = useState<SortDirection>("asc");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [busy, setBusy] = useState(false);
@@ -97,10 +100,10 @@ export function SupportersPage(): ReactElement {
   const [draft, setDraft] = useState({ firstName: "", lastName: "", email: "", phone: "" });
 
   const listKey = useMemo(() => {
-    const params = new URLSearchParams({ status, page: String(page), pageSize: "25" });
+    const params = new URLSearchParams({ status, page: String(page), pageSize: "25", sort, direction });
     if (search !== "") params.set("search", search);
     return `/api/admin/supporters?${params.toString()}`;
-  }, [status, search, page]);
+  }, [status, search, page, sort, direction]);
   const listQuery = useQuery<DirectoryResponse>({ queryKey: [listKey] });
   const detailKey = selectedId ? `/api/admin/supporters/${selectedId}` : "";
   const detailQuery = useQuery<ProfileResponse>({ queryKey: [detailKey], enabled: selectedId !== null });
@@ -199,7 +202,11 @@ export function SupportersPage(): ReactElement {
   const rows = listQuery.data?.supporters ?? [];
   const total = listQuery.data?.total ?? 0;
   const pageSize = listQuery.data?.pageSize ?? 25;
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  function changeSort(column: typeof sort, nextDirection: SortDirection): void {
+    setSort(column);
+    setDirection(nextDirection);
+    setPage(1);
+  }
 
   return (
     <main className="adm-page">
@@ -221,46 +228,28 @@ export function SupportersPage(): ReactElement {
         ))}
       </div>
 
-      <form
-        className="adm-supporter-search"
-        role="search"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setSearch(searchDraft.trim());
-          setPage(1);
-          setSelectedId(null);
-        }}
-      >
-        <label className="adm-filter">
-          Search by name or email
-          <input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} maxLength={100} />
-        </label>
-        <button type="submit" className="adm-btn">Search</button>
-        {search !== "" ? (
-          <button
-            type="button"
-            className="adm-btn adm-btn-outline"
-            onClick={() => {
-              setSearch("");
-              setSearchDraft("");
-              setPage(1);
-            }}
-          >
-            Clear
-          </button>
-        ) : null}
-      </form>
+      <ListSearch value={searchDraft} label="Search name, email, or phone" onChange={setSearchDraft}
+        onClear={() => { setSearchDraft(""); setSearch(""); setPage(1); setSelectedId(null); }}>
+        <button type="button" className="adm-btn" onClick={() => { setSearch(searchDraft.trim()); setPage(1); setSelectedId(null); }}>Search</button>
+      </ListSearch>
 
       {listQuery.isLoading ? <p className="adm-muted">Loading supporters…</p> : null}
       {listQuery.isError ? <p className="adm-alert" role="alert">Supporters could not be loaded. Refresh to try again.</p> : null}
       {!listQuery.isLoading && !listQuery.isError && rows.length === 0 ? (
         <p className="adm-muted">{search ? "No supporters match that search." : `No ${status} supporter accounts.`}</p>
       ) : null}
+      <ListCount count={total} noun="supporters" />
       {rows.length > 0 ? (
         <div className="adm-table-wrap">
           <table className="adm-table">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Last login</th><th>Donations</th><th>Volunteer</th></tr>
+               <tr>
+                 <SortableHeader label="Name" column="name" sort={sort} direction={direction} onSort={changeSort} />
+                 <SortableHeader label="Email" column="email" sort={sort} direction={direction} onSort={changeSort} />
+                 <SortableHeader label="Last login" column="lastLogin" sort={sort} direction={direction} onSort={changeSort} />
+                 <SortableHeader label="Donations" column="donations" sort={sort} direction={direction} onSort={changeSort} />
+                 <SortableHeader label="Volunteer" column="volunteer" sort={sort} direction={direction} onSort={changeSort} />
+               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
@@ -285,13 +274,7 @@ export function SupportersPage(): ReactElement {
         </div>
       ) : null}
 
-      {total > pageSize ? (
-        <div className="adm-supporter-pagination" aria-label="Supporter pages">
-          <button className="adm-btn adm-btn-outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button>
-          <span>Page {page} of {pageCount}</span>
-          <button className="adm-btn adm-btn-outline" disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)}>Next</button>
-        </div>
-      ) : null}
+      {total > pageSize ? <ListPagination page={page} pageSize={pageSize} total={total} onPage={setPage} /> : null}
 
       {selectedId ? (
         <section className="adm-detail adm-supporter-detail" ref={detailRef} aria-label="Supporter profile">

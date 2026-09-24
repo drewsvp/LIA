@@ -62,6 +62,8 @@ function supporterWhere(status: "active" | "disabled", search: string): { sql: s
     params.push(`%${search.toLowerCase()}%`);
     terms.push(`(
       lower(p.email) like $${params.length}
+      or coalesce(p.phone, '') like $${params.length}
+      or coalesce(to_char(u.last_login_at, 'Mon DD, YYYY'), '') ilike $${params.length}
       or lower(p.first_name || ' ' || p.last_name) like $${params.length}
       or lower(p.last_name || ' ' || p.first_name) like $${params.length}
     )`);
@@ -71,12 +73,23 @@ function supporterWhere(status: "active" | "disabled", search: string): { sql: s
 
 export async function list(
   ctx: DbContext,
-  input: { status: "active" | "disabled"; search?: string; page?: number; pageSize?: number },
+  input: { status: "active" | "disabled"; search?: string; page?: number; pageSize?: number; sort?: "name" | "email" | "lastLogin" | "donations" | "volunteer"; direction?: "asc" | "desc" },
 ): Promise<{ supporters: SupporterDirectoryRow[]; total: number; page: number; pageSize: number }> {
   const page = Math.max(1, Math.floor(input.page ?? 1));
   const pageSize = Math.min(100, Math.max(1, Math.floor(input.pageSize ?? 25)));
   const search = (input.search ?? "").trim();
   const where = supporterWhere(input.status, search);
+  const sortColumns = {
+    name: "lower(p.last_name), lower(p.first_name)",
+    email: "lower(p.email)",
+    lastLogin: "u.last_login_at",
+    donations: `(select count(*) from item_pledges ip2 where ip2.person_id = u.person_id and ip2.status = 'active')`,
+    volunteer: `(select count(*) from volunteer_signups vs2 where vs2.person_id = u.person_id and vs2.status = 'active')`,
+  } as const;
+  const direction = input.direction === "desc" ? "desc" : "asc";
+  const sort = (input.sort ?? "name") === "name"
+    ? `lower(p.last_name) ${direction} nulls last, lower(p.first_name) ${direction} nulls last`
+    : `${sortColumns[input.sort ?? "name"] ?? sortColumns.name} ${direction} nulls last`;
   const params = [...where.params, pageSize, (page - 1) * pageSize];
   return withDbContext(ctx, async (client) => {
     const rows = await q<SupporterDirectoryRow & { total: number }>(
@@ -85,15 +98,15 @@ export async function list(
               p.last_name as "lastName", p.email, p.phone, u.status,
               u.last_login_at as "lastLoginAt", u.created_at as "createdAt",
               coalesce(vap.enabled, false) as "alertsEnabled",
-              (select count(*)::int from item_pledges ip where ip.person_id = u.person_id and ip.status = 'active') as "pledgeCount",
-              (select count(*)::int from volunteer_signups vs where vs.person_id = u.person_id and vs.status = 'active') as "signupCount",
+               (select count(*)::int from item_pledges ip where ip.person_id = u.person_id and ip.status = 'active') as "pledgeCount",
+               (select count(*)::int from volunteer_signups vs where vs.person_id = u.person_id and vs.status = 'active') as "signupCount",
               (select count(*)::int from request_engagement_events re where re.user_id = u.id) as "viewCount",
               count(*) over()::int as total
          from users u
          join people p on p.id = u.person_id
          left join volunteer_alert_preferences vap on vap.user_id = u.id
         where ${where.sql}
-        order by lower(p.last_name), lower(p.first_name), u.id
+         order by ${sort}, u.id
         limit $${params.length - 1} offset $${params.length}`,
       params,
     );

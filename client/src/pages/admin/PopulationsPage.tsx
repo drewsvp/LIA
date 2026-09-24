@@ -18,6 +18,7 @@
  */
 import { Fragment, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ListCount, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "../../components/admin/ListControls";
 
 type PopulationRow = {
   id: string;
@@ -79,6 +80,12 @@ export function PopulationsPage() {
   const [promote, setPromote] = useState<{ groupKey: string; name: string; confirming: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [populationSearch, setPopulationSearch] = useState("");
+  const [otherSearch, setOtherSearch] = useState("");
+  const [populationSort, setPopulationSort] = useState<"order" | "name" | "slug" | "orgCount" | "state">("order");
+  const [populationDirection, setPopulationDirection] = useState<SortDirection>("asc");
+  const [otherSort, setOtherSort] = useState<"value" | "orgCount">("value");
+  const [otherDirection, setOtherDirection] = useState<SortDirection>("asc");
 
   const listQuery = useQuery<{ populations: PopulationRow[]; otherValues: OtherGroup[] }>({
     queryKey: ["/api/admin/populations"],
@@ -105,6 +112,12 @@ export function PopulationsPage() {
 
   const populations = listQuery.data?.populations ?? [];
   const otherValues = listQuery.data?.otherValues ?? [];
+  const visiblePopulations = filterAndSort(populations, populationSearch,
+    (p) => [p.name, p.slug, p.sortOrder, p.orgCount, p.isActive ? "active" : "inactive"], (p) => p.id,
+    (p) => ({ order: p.sortOrder, name: p.name, slug: p.slug, orgCount: p.orgCount, state: p.isActive ? "Active" : "Inactive" }[populationSort]), populationDirection);
+  const visibleOtherValues = filterAndSort(otherValues, otherSearch,
+    (g) => [g.value, g.orgCount, ...g.orgs.map((o) => o.name)], (g) => g.groupKey,
+    (g) => ({ value: g.value, orgCount: g.orgCount }[otherSort]), otherDirection);
 
   async function moveRow(index: number, delta: -1 | 1) {
     const target = index + delta;
@@ -132,20 +145,25 @@ export function PopulationsPage() {
           {populations.length === 0 ? (
             <p className="adm-muted">{LIST_EMPTY}</p>
           ) : (
+            <>
+            <ListSearch value={populationSearch} onChange={setPopulationSearch} label="Search populations" />
+            <ListCount count={visiblePopulations.length} noun="populations" />
             <div className="adm-table-wrap">
             <table className="adm-table">
               <thead>
                 <tr>
-                  <th>Order</th>
-                  <th>Name</th>
-                  <th>Slug</th>
-                  <th>Used by</th>
-                  <th>State</th>
+                  <SortableHeader label="Order" column="order" sort={populationSort} direction={populationDirection} onSort={(c,d) => { setPopulationSort(c); setPopulationDirection(d); }} />
+                   <SortableHeader label="Name" column="name" sort={populationSort} direction={populationDirection} onSort={(c,d) => { setPopulationSort(c); setPopulationDirection(d); }} />
+                   <SortableHeader label="Slug" column="slug" sort={populationSort} direction={populationDirection} onSort={(c,d) => { setPopulationSort(c); setPopulationDirection(d); }} />
+                   <SortableHeader label="Used by" column="orgCount" sort={populationSort} direction={populationDirection} onSort={(c,d) => { setPopulationSort(c); setPopulationDirection(d); }} />
+                   <SortableHeader label="State" column="state" sort={populationSort} direction={populationDirection} onSort={(c,d) => { setPopulationSort(c); setPopulationDirection(d); }} />
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {populations.map((p, i) => (
+                 {visiblePopulations.map((p) => {
+                   const i = populations.findIndex((original) => original.id === p.id);
+                   return (
                   <Fragment key={p.id}>
                     <tr className="adm-row">
                       <td>
@@ -293,10 +311,11 @@ export function PopulationsPage() {
                       </tr>
                     )}
                   </Fragment>
-                ))}
+                 );})}
               </tbody>
             </table>
             </div>
+            </>
           )}
 
           {/* §4 region 2 — add form. Slug generated, editable until save (D18). */}
@@ -344,11 +363,16 @@ export function PopulationsPage() {
 
           {/* §4 region 3 — the reason this surface exists. */}
           <h3 className="adm-subheading">Other values</h3>
-          {otherValues.length === 0 ? (
+          <ListSearch value={otherSearch} onChange={setOtherSearch} label="Search Other values" />
+          <div className="adm-btn-row">
+            <SortableHeader label="Value" column="value" sort={otherSort} direction={otherDirection} onSort={(c,d) => { setOtherSort(c); setOtherDirection(d); }} />
+          </div>
+          <ListCount count={visibleOtherValues.length} noun="Other values" />
+          {visibleOtherValues.length === 0 ? (
             /* §9: empty is the healthy state and reads as such. */
             <p className="adm-muted">{OTHER_EMPTY}</p>
           ) : (
-            otherValues.map((g) => {
+            visibleOtherValues.map((g) => {
               const isOpen = promote?.groupKey === g.groupKey;
               const orgNames = g.orgs.map((o) => o.name).join(", ");
               return (

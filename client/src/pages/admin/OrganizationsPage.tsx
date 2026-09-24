@@ -13,9 +13,11 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateAdminList } from "../../components/admin/invalidateAdminList";
 import { apiRequest } from "../../lib/queryClient";
 import { useSession } from "../../hooks/useSession";
 import { OrganizationEditForm } from "../../components/admin/OrganizationEditForm";
+import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
 
 type QueueRow = {
   id: string;
@@ -132,6 +134,10 @@ export function OrganizationsPage() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"name" | "city" | "contact" | "createdAt">("createdAt");
+  const [direction, setDirection] = useState<SortDirection>("asc");
   const detailRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -140,8 +146,8 @@ export function OrganizationsPage() {
     }
   }, [selectedId]);
 
-  const listQuery = useQuery<{ organizations: QueueRow[] }>({
-    queryKey: [`/api/admin/organizations?status=${tab}`],
+  const listQuery = useQuery<{ organizations: QueueRow[]; total: number }>({
+    queryKey: [`/api/admin/organizations?status=${tab}&search=${encodeURIComponent(search)}&sort=${sort}&direction=${direction}&page=${page}&pageSize=25`],
   });
   const detailQuery = useQuery<Detail>({
     queryKey: [`/api/admin/organizations/${selectedId}`],
@@ -154,6 +160,7 @@ export function OrganizationsPage() {
     setPendingAction(null);
     setResult(null);
     setEditing(false);
+    setPage(1);
   }
 
   function selectRow(id: string) {
@@ -178,13 +185,13 @@ export function OrganizationsPage() {
       setPendingAction(null);
       await queryClient.invalidateQueries({ queryKey: ["/api/admin/nav-counts"] });
       await queryClient.invalidateQueries({ queryKey: [`/api/admin/organizations/${selectedId}`] });
-      for (const status of ["pending", "approved", "disabled"]) {
-        await queryClient.invalidateQueries({ queryKey: [`/api/admin/organizations?status=${status}`] });
-      }
+      await invalidateAdminList(queryClient, "/api/admin/organizations");
     }
   }
 
   const rows = listQuery.data?.organizations ?? [];
+  const total = listQuery.data?.total ?? rows.length;
+  const onSort = (column: typeof sort, next: SortDirection) => { setSort(column); setDirection(next); setPage(1); };
   const detail = detailQuery.data ?? null;
   const org = detail?.organization ?? null;
   const contact = detail?.contact ?? null;
@@ -209,6 +216,8 @@ export function OrganizationsPage() {
           </button>
         ))}
       </div>
+      <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} onClear={() => { setSearch(""); setPage(1); }} />
+      <ListCount count={total} noun="organizations" />
 
       {listQuery.isLoading ? (
         <p className="adm-note">Loading…</p>
@@ -222,10 +231,10 @@ export function OrganizationsPage() {
         <table className="adm-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>City</th>
-              <th>Primary contact</th>
-              <th>Submitted</th>
+              <SortableHeader label="Name" column="name" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="City" column="city" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Primary contact" column="contact" sort={sort} direction={direction} onSort={onSort} />
+              <SortableHeader label="Submitted" column="createdAt" sort={sort} direction={direction} onSort={onSort} />
             </tr>
           </thead>
           <tbody>
@@ -247,6 +256,7 @@ export function OrganizationsPage() {
           </tbody>
         </table>
       )}
+      <ListPagination page={page} pageSize={25} total={total} onPage={setPage} />
 
       {selectedId !== null && (
         <section className="adm-detail" aria-label="Organization detail" ref={detailRef}>
@@ -276,9 +286,7 @@ export function OrganizationsPage() {
                     setEditing(false);
                     setResult({ kind: "ok", text: message });
                     await queryClient.invalidateQueries({ queryKey: [`/api/admin/organizations/${org.id}`] });
-                    for (const status of ["pending", "approved", "disabled"]) {
-                      await queryClient.invalidateQueries({ queryKey: [`/api/admin/organizations?status=${status}`] });
-                    }
+                    await invalidateAdminList(queryClient, "/api/admin/organizations");
                   }}
                 />
               ) : (

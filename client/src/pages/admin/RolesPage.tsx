@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
 import { OrganizationLoginAsControls } from "../../components/OrganizationContext";
+import { ListCount, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "../../components/admin/ListControls";
 
 type Row = {
   id: string;
@@ -89,6 +90,12 @@ export function RolesPage() {
   const queryClient = useQueryClient();
   const { session } = useSession();
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | Row["type"]>("all");
+  const [organizationFilter, setOrganizationFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | Row["status"]>("all");
+  const [roleFilter, setRoleFilter] = useState<"all" | Row["role"]>("all");
+  const [sort, setSort] = useState<"name" | "email" | "organization" | "type" | "status" | "role">("name");
+  const [direction, setDirection] = useState<SortDirection>("asc");
   const [pending, setPending] = useState<PendingChange | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -112,22 +119,13 @@ export function RolesPage() {
   const listQuery = useQuery<{ memberships: Row[] }>({ queryKey: ["/api/admin/roles"] });
   const rows = listQuery.data?.memberships ?? [];
 
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (needle === "") return rows;
-    return rows.filter((r) =>
-      [
-        `${r.firstName} ${r.lastName}`,
-        r.email,
-        r.orgName,
-        r.type,
-        ROLE_NAMES[r.role],
-        STATUS_NAMES[r.status],
-      ].some((v) =>
-        v.toLowerCase().includes(needle),
-      ),
-    );
-  }, [rows, search]);
+  const filtered = useMemo(() => filterAndSort(rows.filter((r) =>
+    (typeFilter === "all" || r.type === typeFilter) &&
+    (organizationFilter === "all" || r.orgId === organizationFilter) &&
+    (statusFilter === "all" || r.status === statusFilter) &&
+    (roleFilter === "all" || r.role === roleFilter),
+  ), search, (r) => [`${r.firstName} ${r.lastName}`, r.email, r.orgName, r.type, ROLE_NAMES[r.role], STATUS_NAMES[r.status]],
+  (r) => r.id, (r) => ({ name: `${r.firstName} ${r.lastName}`, email: r.email, organization: r.orgName, type: r.type, status: STATUS_NAMES[r.status], role: ROLE_NAMES[r.role] }[sort]), direction), [rows, search, typeFilter, organizationFilter, statusFilter, roleFilter, sort, direction]);
   const eligibleOrganizations = useMemo(
     () => Array.from(
       new Map(
@@ -306,14 +304,13 @@ export function RolesPage() {
         )}
       </div>
 
-      <input
-        className="adm-note"
-        type="search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by name, email, organization, type, status, or role"
-        aria-label="Search memberships"
-      />
+       <ListSearch value={search} onChange={setSearch} label="Search memberships">
+         <label className="adm-filter">Type<select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}><option value="all">All</option><option value="Staff">Staff</option><option value="Member">Member</option></select></label>
+         <label className="adm-filter">Organization<select value={organizationFilter} onChange={(e) => setOrganizationFilter(e.target.value)}><option value="all">All</option>{Array.from(new Map(rows.map(r => [r.orgId, r.orgName]))).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+         <label className="adm-filter">Organization status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}><option value="all">All</option>{(["pending","active","removed"] as const).map(s => <option key={s} value={s}>{STATUS_NAMES[s]}</option>)}</select></label>
+         <label className="adm-filter">Role<select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as typeof roleFilter)}><option value="all">All</option>{(Object.keys(ROLE_NAMES) as Row["role"][]).map(r => <option key={r} value={r}>{ROLE_NAMES[r]}</option>)}</select></label>
+       </ListSearch>
+       <ListCount count={filtered.length} noun="memberships" />
 
       {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}
 
@@ -327,12 +324,12 @@ export function RolesPage() {
         <table className="adm-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Organization</th>
-               <th>Type</th>
-              <th>Status</th>
-              <th>Role</th>
+               <SortableHeader label="Name" column="name" sort={sort} direction={direction} onSort={(c,d) => { setSort(c); setDirection(d); }} />
+              <SortableHeader label="Email" column="email" sort={sort} direction={direction} onSort={(c,d) => { setSort(c); setDirection(d); }} />
+               <SortableHeader label="Organization" column="organization" sort={sort} direction={direction} onSort={(c,d) => { setSort(c); setDirection(d); }} />
+               <SortableHeader label="Type" column="type" sort={sort} direction={direction} onSort={(c,d) => { setSort(c); setDirection(d); }} />
+               <SortableHeader label="Status" column="status" sort={sort} direction={direction} onSort={(c,d) => { setSort(c); setDirection(d); }} />
+               <SortableHeader label="Role" column="role" sort={sort} direction={direction} onSort={(c,d) => { setSort(c); setDirection(d); }} />
             </tr>
           </thead>
           <tbody>

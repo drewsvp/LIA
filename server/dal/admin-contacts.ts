@@ -32,21 +32,45 @@ const COUNTS = `(select count(*)::int from item_pledges x where x.person_id=p.id
  (select count(*)::int from org_memberships m join users u on u.id=m.user_id where u.person_id=p.id) as "membershipCount",
  (select count(*)::int from organizations o where o.primary_contact_person_id=p.id) as "primaryContactCount"`;
 
-export async function list(ctx: DbContext, input: { search?: string; page: number; pageSize: number }) {
+export async function list(ctx: DbContext, input: { search?: string; reviewStatus?: "all" | "review" | "clear"; page: number; pageSize: number; sort?: "name" | "email" | "review" | "attached"; direction?: "asc" | "desc" }) {
   const search = input.search?.trim().toLowerCase() ?? "";
   const params: unknown[] = [];
   let where = "";
   if (search) {
     params.push(`%${search}%`);
     where = `where (lower(p.email) like $1 or lower(p.first_name || ' ' || p.last_name) like $1
-      or lower(p.last_name || ' ' || p.first_name) like $1 or coalesce(p.phone, '') like $1)`;
+      or lower(p.last_name || ' ' || p.first_name) like $1 or coalesce(p.phone, '') like $1
+      or lower(coalesce(p.review_note, '')) like $1
+      or (select count(*)::text from item_pledges x where x.person_id=p.id) like $1
+      or (select count(*)::text from volunteer_signups x where x.person_id=p.id) like $1
+      or (select count(*)::text from org_memberships m join users u on u.id=m.user_id where u.person_id=p.id) like $1
+      or (select count(*)::text from organizations o where o.primary_contact_person_id=p.id) like $1)`;
   }
+  if (input.reviewStatus === "review" || input.reviewStatus === "clear") {
+    const clause = input.reviewStatus === "review" ? "p.needs_review = true" : "p.needs_review = false";
+    where += where ? ` and ${clause}` : `where ${clause}`;
+  }
+  const sortColumns = {
+    name: "lower(p.last_name), lower(p.first_name)",
+    email: "lower(p.email)",
+    review: "p.needs_review, lower(coalesce(p.review_note, ''))",
+    attached: `(select count(*) from item_pledges x where x.person_id=p.id)
+      + (select count(*) from volunteer_signups x where x.person_id=p.id)
+      + (select count(*) from org_memberships m join users u on u.id=m.user_id where u.person_id=p.id)
+      + (select count(*) from organizations o where o.primary_contact_person_id=p.id)`,
+  } as const;
+  const direction = input.direction === "desc" ? "desc" : "asc";
+  const order = input.sort === "review"
+    ? `p.needs_review ${direction}, lower(coalesce(p.review_note, '')) ${direction}`
+    : (input.sort ?? "name") === "name"
+      ? `lower(p.last_name) ${direction} nulls last, lower(p.first_name) ${direction} nulls last`
+      : `${sortColumns[input.sort ?? "name"] ?? sortColumns.name} ${direction}`;
   params.push(input.pageSize, (input.page - 1) * input.pageSize);
   return withDbContext(ctx, async (c) => {
     const rows = await q<ContactDirectoryRow & { total: number }>(c, `select ${COLS},
       exists(select 1 from users u where u.person_id=p.id) as "hasUser", ${COUNTS},
       count(*) over()::int as total from people p ${where}
-      order by lower(p.last_name), lower(p.first_name), p.id limit $${params.length - 1} offset $${params.length}`, params);
+       order by ${order}, p.id limit $${params.length - 1} offset $${params.length}`, params);
     return { people: rows.map(({ total: _total, ...person }) => person), total: rows[0]?.total ?? 0, page: input.page, pageSize: input.pageSize };
   });
 }

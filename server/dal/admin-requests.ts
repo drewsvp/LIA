@@ -27,73 +27,61 @@ export type AdminQueueRow = {
   childCount: number;
   returnedAt?: string;
 };
+export type AdminRequestListOptions = { search?: string; orgId?: string; type?: "item" | "volunteer" | "all"; sort?: "type" | "title" | "organization" | "status" | "submittedAt" | "returnedAt" | "expiration" | "childCount"; direction?: "asc" | "desc"; page?: number; pageSize?: number };
 
-export async function listByStatus(ctx: DbContext, status: RequestStatus): Promise<AdminQueueRow[]> {
-  return withDbContext(ctx, (c) =>
+export async function listByStatus(ctx: DbContext, status: RequestStatus, options: AdminRequestListOptions = {}): Promise<{ rows: AdminQueueRow[]; total: number }> {
+  return listQueue(ctx, status, false, options);
+}
+
+async function listQueue(ctx: DbContext, status: RequestStatus, returned: boolean, options: AdminRequestListOptions): Promise<{ rows: AdminQueueRow[]; total: number }> {
+  const sortColumns = { type: "type", title: "title", organization: `"orgName"`, status: "status", submittedAt: `"submittedAt"`, returnedAt: `"returnedAt"`, expiration: `case when "expiresOn" is null then "deadlineDate" when "deadlineDate" is null then "expiresOn" else least("expiresOn", "deadlineDate") end`, childCount: `"childCount"` } as const;
+  const sortColumn = sortColumns[options.sort ?? (returned ? "returnedAt" : "submittedAt")] ?? (returned ? sortColumns.returnedAt : sortColumns.submittedAt);
+  const direction = options.direction === "desc" ? "desc" : "asc";
+  const search = (options.search ?? "").trim();
+  const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
+  const offset = Math.max(0, ((options.page ?? 1) - 1) * pageSize);
+  const query = `select q.*, count(*) over()::int as total from (`;
+  const rows = await withDbContext(ctx, (c) =>
     q<AdminQueueRow>(
       c,
-       `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
+       `${query}select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
                r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
               o.id as "orgId", o.name as "orgName", o.city as "orgCity", o.status as "orgStatus",
-              (select count(*)::int from items i where i.item_request_id = r.id) as "childCount"
+               (select count(*)::int from items i where i.item_request_id = r.id) as "childCount",
+               ${returned ? `(select max(ae.created_at) from approval_events ae where ae.entity_type = 'item_request' and ae.entity_id = r.id and ae.from_status = 'pending' and ae.to_status = 'draft')` : "null::timestamptz"} as "returnedAt"
          from item_requests r
          join organizations o on o.id = r.org_id
-        where r.status = $1
+         where r.status = $1 ${returned ? `and exists (select 1 from approval_events ae where ae.entity_type = 'item_request' and ae.entity_id = r.id and ae.from_status = 'pending' and ae.to_status = 'draft')` : ""}
         union all
        select 'volunteer', v.id, v.title, v.status, v.submitted_at, v.created_at,
                v.deadline_type, v.deadline_date, v.expires_on,
               o.id, o.name, o.city, o.status,
-              (select count(*)::int from volunteer_roles vr where vr.volunteer_request_id = v.id)
+               (select count(*)::int from volunteer_roles vr where vr.volunteer_request_id = v.id),
+               ${returned ? `(select max(ae.created_at) from approval_events ae where ae.entity_type = 'volunteer_request' and ae.entity_id = v.id and ae.from_status = 'pending' and ae.to_status = 'draft')` : "null::timestamptz"}
          from volunteer_requests v
          join organizations o on o.id = v.org_id
-        where v.status = $1
-        order by "submittedAt" asc nulls last, "createdAt" asc`,
-      [status],
+         where v.status = $1 ${returned ? `and exists (select 1 from approval_events ae where ae.entity_type = 'volunteer_request' and ae.entity_id = v.id and ae.from_status = 'pending' and ae.to_status = 'draft')` : ""}
+       ) q
+       where ($2 = '' or concat_ws(' ', type, title, "orgName", "orgCity", status, "deadlineType", "deadlineDate", "expiresOn", "childCount",
+         case when "deadlineType" = 'until_fulfilled' then 'Until fulfilled' when "deadlineType" = 'ongoing' then 'Ongoing' end,
+         to_char("submittedAt" at time zone 'UTC', 'Mon DD, YYYY'),
+         to_char("submittedAt" at time zone 'UTC', 'MM/DD/YYYY'),
+         to_char("returnedAt" at time zone 'UTC', 'Mon DD, YYYY'),
+         to_char("returnedAt" at time zone 'UTC', 'MM/DD/YYYY')) ilike '%' || $2 || '%')
+         and ($3 = '' or "orgId"::text = $3)
+         and ($4 = 'all' or type = $4)
+       /* window count is added in the outer query so filtering is counted */
+       order by ${sortColumn} ${direction} nulls last, type, id
+       limit $5 offset $6`,
+        [returned ? "draft" : status, search, options.orgId ?? "", options.type ?? "all", pageSize, offset],
     ),
   );
+  return { rows, total: Number((rows[0] as AdminQueueRow & { total?: number })?.total ?? 0) };
 }
 
 /** Only submitted requests that staff actually returned, never ordinary organization drafts. */
-export async function listReturnedDrafts(ctx: DbContext): Promise<AdminQueueRow[]> {
-  return withDbContext(ctx, (c) =>
-    q<AdminQueueRow>(
-      c,
-       `select 'item' as type, r.id, r.title, r.status, r.submitted_at as "submittedAt", r.created_at as "createdAt",
-               r.deadline_type as "deadlineType", r.deadline_date as "deadlineDate", r.expires_on as "expiresOn",
-              o.id as "orgId", o.name as "orgName", o.city as "orgCity", o.status as "orgStatus",
-              (select count(*)::int from items i where i.item_request_id = r.id) as "childCount",
-              latest.created_at as "returnedAt"
-         from item_requests r
-         join organizations o on o.id = r.org_id
-         join lateral (
-           select ae.created_at
-             from approval_events ae
-            where ae.entity_type = 'item_request' and ae.entity_id = r.id
-              and ae.from_status = 'pending' and ae.to_status = 'draft'
-            order by ae.created_at desc
-            limit 1
-         ) latest on true
-        where r.status = 'draft'
-        union all
-       select 'volunteer', v.id, v.title, v.status, v.submitted_at, v.created_at,
-               v.deadline_type, v.deadline_date, v.expires_on,
-              o.id, o.name, o.city, o.status,
-              (select count(*)::int from volunteer_roles vr where vr.volunteer_request_id = v.id),
-              latest.created_at
-         from volunteer_requests v
-         join organizations o on o.id = v.org_id
-         join lateral (
-           select ae.created_at
-             from approval_events ae
-            where ae.entity_type = 'volunteer_request' and ae.entity_id = v.id
-              and ae.from_status = 'pending' and ae.to_status = 'draft'
-            order by ae.created_at desc
-            limit 1
-         ) latest on true
-        where v.status = 'draft'
-        order by "returnedAt" asc, "createdAt" asc`,
-    ),
-  );
+export async function listReturnedDrafts(ctx: DbContext, options: AdminRequestListOptions = {}): Promise<{ rows: AdminQueueRow[]; total: number }> {
+  return listQueue(ctx, "draft" as RequestStatus, true, options);
 }
 
 export type LatestReturn = { note: string | null; createdAt: string };

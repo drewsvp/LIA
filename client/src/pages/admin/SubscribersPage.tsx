@@ -12,6 +12,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
+import { ListPagination, SortableHeader, ListCount, ListSearch, filterAndSort, type SortDirection } from "@/components/admin/ListControls";
 
 type SubRow = {
   id: string;
@@ -46,6 +47,7 @@ type ListResponse = {
     oneTimeAt: string | null;
     nextSendAt: string | null;
   } | null;
+  total?: number;
 };
 
 type UpcomingNeed = {
@@ -134,6 +136,10 @@ function UpcomingDigestSection(): ReactElement {
 
   const included = data?.needs.filter((n) => !n.excluded) ?? [];
   const excluded = data?.needs.filter((n) => n.excluded) ?? [];
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<"name" | "orgName" | "type" | "excluded">("name");
+  const [direction, setDirection] = useState<SortDirection>("asc");
+  const visibleNeeds = filterAndSort(data?.needs ?? [], search, n => [n.name, n.orgName, n.type, n.excluded ? "excluded" : "included"], n => n.id, n => n[sort], direction);
 
   return (
     <section className="adm-upcoming-digest">
@@ -146,6 +152,12 @@ function UpcomingDigestSection(): ReactElement {
 
       {data && (
         <>
+          <ListSearch value={search} onChange={setSearch} label="Search upcoming needs" onClear={() => setSearch("")}>
+            <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} aria-label="Sort upcoming needs">
+              <option value="name">Need</option><option value="orgName">Organization</option><option value="type">Type</option><option value="excluded">Status</option>
+            </select>
+            <button type="button" className="adm-btn adm-btn-outline" onClick={() => setDirection(d => d === "asc" ? "desc" : "asc")}> {direction === "asc" ? "Ascending" : "Descending"}</button>
+          </ListSearch>
           <p className="adm-sub-note">
             Window: {fmtDateTime(data.window.windowStart)} – {fmtDateTime(data.window.windowEnd)} (LA time).{" "}
             {included.length === 0
@@ -170,7 +182,7 @@ function UpcomingDigestSection(): ReactElement {
                 </tr>
               </thead>
               <tbody>
-                {data.needs.map((n) => {
+                {visibleNeeds.map((n) => {
                   const key = `${n.type}/${n.id}`;
                   return (
                     <tr key={key} style={n.excluded ? { opacity: 0.55 } : undefined}>
@@ -211,6 +223,10 @@ export function SubscribersPage(): ReactElement {
   const [filters, setFilters] = useState<Filters>({ status: "subscribed", email: "", from: "", to: "" });
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"subscribedAt" | "email" | "status" | "firstName" | "lastName" | "unsubscribedAt" | "source" | "personName">("subscribedAt");
+  const [direction, setDirection] = useState<SortDirection>("desc");
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -218,12 +234,16 @@ export function SubscribersPage(): ReactElement {
     if (filters.email.trim()) params.set("email", filters.email.trim());
     if (filters.from) params.set("from", filters.from);
     if (filters.to) params.set("to", filters.to);
+    if (search.trim()) params.set("search", search.trim());
+    params.set("page", String(page)); params.set("pageSize", "50"); params.set("sort", sort); params.set("direction", direction);
     return params.toString();
-  }, [filters]);
+  }, [filters, search, page, sort, direction]);
 
   const listKey = queryString ? `/api/admin/subscribers?${queryString}` : "/api/admin/subscribers";
   const { data, isLoading, isError } = useQuery<ListResponse>({ queryKey: [listKey] });
   const rows = data?.rows ?? [];
+  const total = data?.total ?? rows.length;
+  function changeSort(column: typeof sort, next: SortDirection): void { setSort(column); setDirection(next); setPage(1); }
 
   async function unsubscribe(row: SubRow): Promise<void> {
     const confirmed = window.confirm(`Unsubscribe ${row.email}? They will not be notified.`);
@@ -298,9 +318,10 @@ export function SubscribersPage(): ReactElement {
       <h2 className="adm-subheading">Subscriber list</h2>
 
       <div className="adm-filter-row">
+        <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} label="Search list" onClear={() => { setSearch(""); setFilters({ status: "subscribed", email: "", from: "", to: "" }); setPage(1); }} />
         <label className="adm-filter">
           Status
-          <select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
+          <select value={filters.status} onChange={(e) => { setFilters((f) => ({ ...f, status: e.target.value })); setPage(1); }}>
             <option value="">All statuses</option>
             <option value="subscribed">Subscribed</option>
             <option value="unsubscribed">Unsubscribed</option>
@@ -312,7 +333,7 @@ export function SubscribersPage(): ReactElement {
           <input
             type="text"
             value={filters.email}
-            onChange={(e) => setFilters((f) => ({ ...f, email: e.target.value }))}
+            onChange={(e) => { setFilters((f) => ({ ...f, email: e.target.value })); setPage(1); }}
             placeholder="Contains…"
           />
         </label>
@@ -321,12 +342,12 @@ export function SubscribersPage(): ReactElement {
           <input
             type="date"
             value={filters.from}
-            onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))}
+            onChange={(e) => { setFilters((f) => ({ ...f, from: e.target.value })); setPage(1); }}
           />
         </label>
         <label className="adm-filter">
           To
-          <input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} />
+          <input type="date" value={filters.to} onChange={(e) => { setFilters((f) => ({ ...f, to: e.target.value })); setPage(1); }} />
         </label>
         <button className="adm-btn" type="button" onClick={() => void exportCsv()} disabled={busy || rows.length === 0}>
           Export
@@ -347,13 +368,13 @@ export function SubscribersPage(): ReactElement {
         <table className="adm-act-table">
           <thead>
             <tr>
-              <th>Email</th>
-              <th>First name</th>
-              <th>Last name</th>
-              <th>Status</th>
-              <th>Subscribed</th>
-              <th>Unsubscribed</th>
-              <th>Source</th>
+              <SortableHeader label="Email" column="email" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="First name" column="firstName" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Last name" column="lastName" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Status" column="status" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Subscribed" column="subscribedAt" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Unsubscribed" column="unsubscribedAt" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Source" column="source" sort={sort} direction={direction} onSort={changeSort} />
               <th></th>
             </tr>
           </thead>
@@ -382,6 +403,7 @@ export function SubscribersPage(): ReactElement {
           </tbody>
         </table>
       )}
+      <ListPagination page={page} pageSize={50} total={total} onPage={setPage} />
     </div>
   );
 }

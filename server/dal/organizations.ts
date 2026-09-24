@@ -196,6 +196,7 @@ export type OrganizationWithContact = Organization & {
   contactEmail: string | null;
   contactPhone: string | null;
 };
+export type AdminOrganizationListOptions = { search?: string; sort?: "name" | "city" | "contact" | "createdAt"; direction?: "asc" | "desc"; page?: number; pageSize?: number };
 
 /**
  * ADMIN-01 queue rows: member organizations by status, joined to the primary
@@ -206,7 +207,8 @@ export type OrganizationWithContact = Organization & {
 export async function listByStatusWithContact(
   ctx: DbContext,
   status: OrganizationStatus,
-): Promise<OrganizationWithContact[]> {
+  options: AdminOrganizationListOptions = {},
+): Promise<{ rows: OrganizationWithContact[]; total: number }> {
   // COLS is unqualified (single-table queries); this join needs o.-prefixed
   // columns or `id` is ambiguous against people.
   const oCols = `o.id, o.legacy_wix_id as "legacyWixId", o.kind, o.name, o.slug, o.website_url as "websiteUrl",
@@ -215,18 +217,28 @@ export async function listByStatusWithContact(
     o.postal_code as "postalCode", o.address_formatted as "addressFormatted",
     o.primary_contact_person_id as "primaryContactPersonId", o.status, o.approved_at as "approvedAt",
     o.approved_by as "approvedBy", o.created_at as "createdAt", o.updated_at as "updatedAt"`;
+  const sortColumns = { name: "o.name", city: "o.city", contact: "concat_ws(' ', p.first_name, p.last_name)", createdAt: "o.created_at" } as const;
+  const sortColumn = sortColumns[options.sort ?? "createdAt"] ?? sortColumns.createdAt;
+  const direction = options.direction === "desc" ? "desc" : "asc";
+  const search = (options.search ?? "").trim();
+  const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
+  const offset = Math.max(0, ((options.page ?? 1) - 1) * pageSize);
   return withDbContext(ctx, (c) =>
     q<OrganizationWithContact>(
       c,
       `select ${oCols}, p.first_name as "contactFirstName", p.last_name as "contactLastName",
-              p.email as "contactEmail", p.phone as "contactPhone"
+               p.email as "contactEmail", p.phone as "contactPhone", count(*) over()::int as "total"
          from organizations o
          left join people p on p.id = o.primary_contact_person_id
-        where o.status = $1 and o.kind = 'member_org'
-        order by o.created_at asc, o.name asc`,
-      [status],
+         where o.status = $1 and o.kind = 'member_org'
+           and ($2 = '' or concat_ws(' ', o.name, o.city, o.state, p.first_name, p.last_name, p.email,
+             to_char(o.created_at at time zone 'UTC', 'Mon DD, YYYY'),
+             to_char(o.created_at at time zone 'UTC', 'MM/DD/YYYY')) ilike '%' || $2 || '%')
+         order by ${sortColumn} ${direction} nulls last, o.id
+         limit $3 offset $4`,
+       [status, search, pageSize, offset],
     ),
-  );
+   ).then(rows => ({ rows, total: Number((rows[0] as OrganizationWithContact & { total?: number })?.total ?? 0) }));
 }
 
 /** Disable an organization; writes the event in the same transaction. */

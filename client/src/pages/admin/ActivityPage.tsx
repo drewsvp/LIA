@@ -8,6 +8,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ENTITY_TYPE_NAMES, entityTypeName, transitionLabel } from "@shared/transitions";
+import { ListPagination, ListCount, ListSearch, SortableHeader, type SortDirection } from "@/components/admin/ListControls";
 
 type ActRow = {
   id: string;
@@ -28,6 +29,7 @@ type ListResponse = {
   actors: Array<{ userId: string; name: string }>;
   hasAutomated: boolean;
   anyExist: boolean;
+  total?: number;
 };
 
 function laDate(daysAgo: number): string {
@@ -72,6 +74,10 @@ function initialFilters(): Filters {
 export function ActivityPage(): ReactElement {
   const [filters, setFilters] = useState(initialFilters);
   const entityMode = filters.entityType !== "" && filters.entityId !== "";
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"createdAt" | "type" | "entity" | "transition" | "actor" | "organization" | "note">("createdAt");
+  const [direction, setDirection] = useState<SortDirection>("desc");
+  const [search, setSearch] = useState("");
 
   const listKey = useMemo(() => {
     const params = new URLSearchParams();
@@ -83,15 +89,20 @@ export function ActivityPage(): ReactElement {
     if (filters.actor) params.set("actor", filters.actor);
     if (filters.from) params.set("from", filters.from);
     if (filters.to) params.set("to", filters.to);
+    if (search.trim()) params.set("search", search.trim());
+    params.set("page", String(page)); params.set("pageSize", "50"); params.set("sort", sort); params.set("direction", direction);
     const qs = params.toString();
     return qs ? `/api/admin/activity?${qs}` : "/api/admin/activity";
-  }, [filters, entityMode]);
+  }, [filters, search, entityMode, page, sort, direction]);
 
   const { data, isLoading, isError } = useQuery<ListResponse>({ queryKey: [listKey] });
   const rows = data?.rows ?? [];
+  const total = data?.total ?? rows.length;
+  function changeSort(column: typeof sort, next: SortDirection): void { setSort(column); setDirection(next); setPage(1); }
 
   function showAll(): void {
     setFilters({ type: "", actor: "", from: laDate(30), to: "", entityType: "", entityId: "" });
+    setPage(1);
   }
 
   return (
@@ -108,9 +119,10 @@ export function ActivityPage(): ReactElement {
       )}
 
       <div className="adm-filter-row">
+        <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} label="Search activity" onClear={() => { setSearch(""); showAll(); }} />
         <label className="adm-filter">
           Type
-          <select value={filters.type} onChange={(e) => setFilters((f) => ({ ...f, type: e.target.value }))}>
+          <select value={filters.type} onChange={(e) => { setFilters((f) => ({ ...f, type: e.target.value })); setPage(1); }}>
             <option value="">All types</option>
             {Object.entries(ENTITY_TYPE_NAMES).map(([key, name]) => (
               <option key={key} value={key}>
@@ -121,7 +133,7 @@ export function ActivityPage(): ReactElement {
         </label>
         <label className="adm-filter">
           Actor
-          <select value={filters.actor} onChange={(e) => setFilters((f) => ({ ...f, actor: e.target.value }))}>
+          <select value={filters.actor} onChange={(e) => { setFilters((f) => ({ ...f, actor: e.target.value })); setPage(1); }}>
             <option value="">All actors</option>
             <option value="automated">Automated</option>
             {(data?.actors ?? []).map((a) => (
@@ -136,14 +148,15 @@ export function ActivityPage(): ReactElement {
           <input
             type="date"
             value={filters.from}
-            onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))}
+            onChange={(e) => { setFilters((f) => ({ ...f, from: e.target.value })); setPage(1); }}
           />
         </label>
         <label className="adm-filter">
           To
-          <input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} />
+          <input type="date" value={filters.to} onChange={(e) => { setFilters((f) => ({ ...f, to: e.target.value })); setPage(1); }} />
         </label>
       </div>
+      <ListCount count={total} noun="activity events" />
 
       {isError && <p className="adm-error-text">Activity could not be loaded. Refresh to try again.</p>}
       {isLoading && !isError && <p>Loading…</p>}
@@ -156,13 +169,13 @@ export function ActivityPage(): ReactElement {
         <table className="adm-act-table">
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Type</th>
-              <th>Entity</th>
-              <th>Transition</th>
-              <th>Actor</th>
-              <th>Organization context</th>
-              <th>Note</th>
+              <SortableHeader label="Time" column="createdAt" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Type" column="type" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Entity" column="entity" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Transition" column="transition" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Actor" column="actor" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Organization context" column="organization" sort={sort} direction={direction} onSort={changeSort} />
+              <SortableHeader label="Note" column="note" sort={sort} direction={direction} onSort={changeSort} />
             </tr>
           </thead>
           <tbody>
@@ -192,6 +205,7 @@ export function ActivityPage(): ReactElement {
           </tbody>
         </table>
       )}
+      <ListPagination page={page} pageSize={50} total={total} onPage={setPage} />
     </div>
   );
 }

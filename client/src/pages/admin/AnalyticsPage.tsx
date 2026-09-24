@@ -7,6 +7,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { EngagementReport } from "@/components/analytics/EngagementReport";
+import { ListPagination, ListSearch, SortableHeader, type SortDirection } from "@/components/admin/ListControls";
 
 // ── Audience types ─────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ type AudienceResponse = {
   total: number;
   totalPages: number;
 };
+type AudienceFilters = { kind: "" | "item" | "volunteer"; orgId: string };
 
 type OutreachAction = "email" | "export";
 type OutreachPreview = {
@@ -61,6 +63,11 @@ function fmtTimestamp(iso: string): string {
 
 function AudienceTable(): ReactElement {
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<"name" | "email" | "request" | "type" | "organization" | "lastViewed">("lastViewed");
+  const [direction, setDirection] = useState<SortDirection>("desc");
+  const [kind, setKind] = useState<AudienceFilters["kind"]>("");
+  const [orgId, setOrgId] = useState("");
   const [selected, setSelected] = useState<{
     requestKind: "item" | "volunteer";
     requestId: string;
@@ -77,11 +84,21 @@ function AudienceTable(): ReactElement {
   const PAGE_SIZE = 25;
 
   const url = useMemo(() => {
-    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), search, sort, direction });
+    if (kind) params.set("kind", kind);
+    if (orgId) params.set("orgId", orgId);
     return `/api/admin/analytics/audience?${params.toString()}`;
-  }, [page]);
+  }, [page, search, sort, direction, kind, orgId]);
 
   const { data, isLoading, isError, refetch } = useQuery<AudienceResponse>({ queryKey: [url] });
+  const { data: analyticsData } = useQuery<{ organizations?: Array<{ id: string; name: string }> }>({
+    queryKey: ["/api/admin/analytics/audience/organizations"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/analytics");
+      if (!response.ok) throw new Error("Unable to load organizations");
+      return response.json();
+    },
+  });
 
   const rows = data?.rows ?? [];
   const totalPages = data?.totalPages ?? 1;
@@ -211,6 +228,21 @@ function AudienceTable(): ReactElement {
         </p>
       )}
 
+      <div className="adm-report-filters">
+        <ListSearch value={search} label="Search audience" onChange={(value) => { setSearch(value); setPage(1); setSelected(null); setPreview(null); }} />
+        <label className="adm-filter">Request type
+          <select value={kind} onChange={(event) => { setKind(event.target.value as AudienceFilters["kind"]); setPage(1); setSelected(null); setPreview(null); }}>
+            <option value="">All request types</option><option value="item">Item</option><option value="volunteer">Volunteer</option>
+          </select>
+        </label>
+        <label className="adm-filter">Organization
+          <select value={orgId} onChange={(event) => { setOrgId(event.target.value); setPage(1); setSelected(null); setPreview(null); }}>
+            <option value="">All organizations</option>
+            {(analyticsData?.organizations ?? []).map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
+          </select>
+        </label>
+      </div>
+
       {isLoading && !isError && (
         <div className="adm-loading-list" aria-busy="true" aria-label="Loading audience data">
           <span /><span /><span />
@@ -241,12 +273,12 @@ function AudienceTable(): ReactElement {
               <thead>
                 <tr>
                   <th scope="col"><span className="sr-only">Select</span></th>
-                  <th scope="col">Name</th>
-                  <th scope="col">Email</th>
-                  <th scope="col">Request</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Organization</th>
-                  <th scope="col">Last Viewed</th>
+                   <SortableHeader label="Name" column="name" sort={sort} direction={direction} onSort={(column, next) => { setSort(column); setDirection(next); setPage(1); setSelected(null); setPreview(null); }} />
+                   <SortableHeader label="Email" column="email" sort={sort} direction={direction} onSort={(column, next) => { setSort(column); setDirection(next); setPage(1); setSelected(null); setPreview(null); }} />
+                   <SortableHeader label="Request" column="request" sort={sort} direction={direction} onSort={(column, next) => { setSort(column); setDirection(next); setPage(1); setSelected(null); setPreview(null); }} />
+                   <SortableHeader label="Type" column="type" sort={sort} direction={direction} onSort={(column, next) => { setSort(column); setDirection(next); setPage(1); setSelected(null); setPreview(null); }} />
+                   <SortableHeader label="Organization" column="organization" sort={sort} direction={direction} onSort={(column, next) => { setSort(column); setDirection(next); setPage(1); setSelected(null); setPreview(null); }} />
+                   <SortableHeader label="Last Viewed" column="lastViewed" sort={sort} direction={direction} onSort={(column, next) => { setSort(column); setDirection(next); setPage(1); setSelected(null); setPreview(null); }} />
                 </tr>
               </thead>
               <tbody>
@@ -374,31 +406,7 @@ function AudienceTable(): ReactElement {
           )}
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="anl-pagination" role="navigation" aria-label="Audience table pagination">
-              <button
-                type="button"
-                className="adm-btn adm-btn-outline anl-page-btn"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                aria-label="Previous page"
-              >
-                ← Prev
-              </button>
-              <span className="anl-page-info" aria-live="polite" aria-atomic="true">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                type="button"
-                className="adm-btn adm-btn-outline anl-page-btn"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                aria-label="Next page"
-              >
-                Next →
-              </button>
-            </div>
-          )}
+          {totalPages > 1 && <ListPagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />}
         </>
       )}
     </section>

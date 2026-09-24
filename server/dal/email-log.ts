@@ -380,6 +380,7 @@ export async function markFailedIfStatus(
 }
 
 export type EmailLogFilters = {
+  search?: string;
   status?: EmailStatus;
   templateKey?: string;
   toEmail?: string;
@@ -394,12 +395,33 @@ export type EmailLogFilters = {
   entityId?: string;
   limit?: number;
   offset?: number;
+  sort?: "createdAt" | "template" | "recipient" | "related" | "status";
+  direction?: "asc" | "desc";
 };
 
 /** Filterable log listing, newest first (ADMIN-06). */
 export async function listWithFilters(ctx: DbContext, filters: EmailLogFilters = {}): Promise<EmailLogEntry[]> {
   const where: string[] = [];
   const params: unknown[] = [];
+  if (filters.search) {
+    params.push(`%${filters.search.toLowerCase()}%`);
+    const n = params.length;
+    where.push(`(to_char(created_at at time zone 'America/Los_Angeles','Mon FMDD, YYYY HH12:MI AM') ilike $${n} or lower(to_email) like $${n} or lower(template_key) like $${n} or lower(case template_key
+      when 'staff_new_org' then 'New organization, staff notice' when 'staff_new_item_request' then 'New item request, staff notice'
+      when 'staff_new_volunteer_request' then 'New volunteer request, staff notice' when 'staff_new_user' then 'New member, staff notice'
+      when 'org_approved' then 'Organization approved' when 'org_request_received' then 'Request received'
+      when 'org_request_approved' then 'Request approved' when 'org_member_approved' then 'Member approved, login information'
+      when 'org_new_item_donation' then 'New item donation, organization notice' when 'org_new_volunteer' then 'New volunteer, organization notice'
+      when 'donor_item_confirmation' then 'Donation confirmation, donor' when 'donor_volunteer_confirmation' then 'Volunteer confirmation, supporter'
+      when 'digest_new_needs' then 'Weekly New Needs digest' when 'supporter_volunteer_match' then 'Matching volunteer opportunity, supporter'
+      when 'staff_invited' then 'Staff invitation' when 'auth_magic_link' then 'Login link' else template_key end) like $${n}
+      or lower(coalesce(status,'')) like $${n} or lower(coalesce(entity_type,'')) like $${n} or lower(coalesce(entity_id::text,'')) like $${n} or lower(coalesce(error,'')) like $${n}
+      or exists (select 1 from organizations o where email_log.entity_type = 'organization' and o.id = email_log.entity_id::uuid and lower(o.name) like $${n})
+      or exists (select 1 from people p where email_log.entity_type = 'person' and p.id = email_log.entity_id::uuid and lower(trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,''))) like $${n})
+      or exists (select 1 from item_requests r join organizations o on o.id=r.org_id where email_log.entity_type='item_request' and r.id=email_log.entity_id::uuid and lower(r.title || ' — ' || o.name) like $${n})
+      or exists (select 1 from volunteer_requests r join organizations o on o.id=r.org_id where email_log.entity_type='volunteer_request' and r.id=email_log.entity_id::uuid and lower(r.title || ' — ' || o.name) like $${n})
+      or exists (select 1 from org_memberships m join users u on u.id=m.user_id join people p on p.id=u.person_id join organizations o on o.id=m.org_id where email_log.entity_type='org_membership' and m.id=email_log.entity_id::uuid and lower(p.first_name || ' ' || p.last_name || ' at ' || o.name) like $${n}))`);
+  }
   if (filters.status) {
     params.push(filters.status);
     where.push(`status = $${params.length}`);
@@ -438,7 +460,9 @@ export async function listWithFilters(ctx: DbContext, filters: EmailLogFilters =
     params.push(filters.entityId);
     where.push(`entity_id = $${params.length}`);
   }
-  params.push(Math.min(filters.limit ?? 100, 500));
+  const sortColumn = ({ createdAt: "created_at", template: "template_key", recipient: "to_email", related: "entity_type", status: "status" } as const)[filters.sort ?? "createdAt"];
+  const direction = filters.direction === "asc" ? "asc" : "desc";
+  params.push(filters.limit ?? 100);
   const limitParam = `$${params.length}`;
   params.push(filters.offset ?? 0);
   const offsetParam = `$${params.length}`;
@@ -446,11 +470,12 @@ export async function listWithFilters(ctx: DbContext, filters: EmailLogFilters =
   return withDbContext(ctx, (c) =>
     q<EmailLogEntry>(
       c,
-      `select ${COLS} from email_log ${whereSql} order by created_at desc limit ${limitParam} offset ${offsetParam}`,
+      `select ${COLS}, count(*) over() as "__total" from email_log ${whereSql} order by ${sortColumn} ${direction}, id ${direction} limit ${limitParam} offset ${offsetParam}`,
       params,
     ),
   );
 }
+
 
 /** One entry by id (ADMIN-06 detail). */
 export async function getById(ctx: DbContext, emailLogId: string): Promise<EmailLogEntry | null> {

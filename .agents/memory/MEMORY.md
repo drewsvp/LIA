@@ -40,3 +40,4 @@
 - [Optimistic mutation versions](optimistic-mutation-versions.md) — use locked monotonic versions, not timestamps; JS loses PostgreSQL microseconds and rounding permits same-millisecond overwrites.
 - [Composed rate-limit reservations](composed-rate-limit-reservations.md) — failed multi-bucket reservations must undo the failing consume plus prior consumes before later refunds can work.
 - [Email test sends](email-test-sends.md) — explicit staff tests render drafts through the real provider path, but stay entity-null and outside audiences, schedules, enabled gates, and deduplication.
+- [Paged union searches](paged-union-searches.md) — cast all-null UNION fields explicitly before timestamp formatting; typed IDs need text casts for text search.

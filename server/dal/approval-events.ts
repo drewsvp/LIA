@@ -93,6 +93,7 @@ export async function reassignActor(ctx: DbContext, fromUserId: string, toUserId
 // ADMIN-07 reads. This surface writes nothing (spec §3) — read-only fns.
 
 export type ActivityFilters = {
+  search?: string;
   entityType?: string;
   /** Filter to events with a null actor (the "Automated" option). */
   automated?: boolean;
@@ -102,6 +103,9 @@ export type ActivityFilters = {
   createdFrom?: string;
   createdTo?: string;
   limit?: number;
+  offset?: number;
+  sort?: "createdAt" | "type" | "entity" | "transition" | "actor" | "organization" | "note";
+  direction?: "asc" | "desc";
 };
 
 export type ActivityEventRow = ApprovalEvent & {
@@ -113,6 +117,13 @@ export type ActivityEventRow = ApprovalEvent & {
 export async function listWithFilters(ctx: DbContext, f: ActivityFilters = {}): Promise<ActivityEventRow[]> {
   const where: string[] = [];
   const params: unknown[] = [];
+  if (f.search) {
+    params.push(`%${f.search.toLowerCase()}%`);
+    const n = params.length;
+    const transitionLabelSql = `case when ae.entity_type = 'organization_context' and ae.to_status = 'entered' then 'Entered organization view' when ae.entity_type = 'organization_context' and ae.to_status = 'exited' then 'Exited organization view' when ae.to_status = 'archived' and ae.note = 'expired' then 'Archived automatically after expiry' when ae.to_status = 'archived' and ae.note = 'fulfilled' then 'Archived automatically when filled' when ae.to_status = 'archived' then 'Archived' when ae.entity_type = 'person' and ae.to_status = 'merged' then 'Merged' else coalesce(ae.from_status,'') || ' ' || ae.to_status end`;
+    const entityLabelSql = `coalesce((select o.name from organizations o where ae.entity_type='organization' and o.id=ae.entity_id), (select trim(coalesce(ep.first_name,'') || ' ' || coalesce(ep.last_name,'')) from people ep where ae.entity_type='person' and ep.id=ae.entity_id), (select r.title || ' — ' || o.name from item_requests r join organizations o on o.id=r.org_id where ae.entity_type='item_request' and r.id=ae.entity_id), (select r.title || ' — ' || o.name from volunteer_requests r join organizations o on o.id=r.org_id where ae.entity_type='volunteer_request' and r.id=ae.entity_id), ae.entity_type || ' ' || ae.entity_id)`;
+    where.push(`(to_char(ae.created_at at time zone 'America/Los_Angeles','Mon FMDD, YYYY HH12:MI AM') ilike $${n} or lower(ae.entity_type) like $${n} or ae.entity_id::text like $${n} or lower(${entityLabelSql}) like $${n} or lower(coalesce(co.name,'')) like $${n} or lower(${transitionLabelSql}) like $${n} or lower(coalesce(ae.note,'')) like $${n} or lower(coalesce(nullif(trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')), ''), 'Automated')) like $${n} or lower(coalesce(p.email,'')) like $${n})`);
+  }
   if (f.entityType !== undefined) {
     params.push(f.entityType);
     where.push(`ae.entity_type = $${params.length}`);
@@ -135,13 +146,15 @@ export async function listWithFilters(ctx: DbContext, f: ActivityFilters = {}): 
     params.push(f.createdTo);
     where.push(`(ae.created_at at time zone 'America/Los_Angeles')::date <= $${params.length}::date`);
   }
-  params.push(Math.min(f.limit ?? 200, 500));
-  const sql = `select ae.id, ae.entity_type as "entityType", ae.entity_id as "entityId",
+  const sortColumn = ({ createdAt: "ae.created_at", type: "ae.entity_type", entity: "ae.entity_id", transition: "ae.to_status", actor: "p.email", organization: "co.name", note: "ae.note" } as const)[f.sort ?? "createdAt"];
+  const direction = f.direction === "asc" ? "asc" : "desc";
+  params.push(f.limit ?? 200);
+  let sql = `select ae.id, ae.entity_type as "entityType", ae.entity_id as "entityId",
       ae.from_status as "fromStatus", ae.to_status as "toStatus",
       ae.actor_user_id as "actorUserId",
       ae.organization_context_id as "organizationContextId",
       ae.context_organization_id as "contextOrganizationId",
-      ae.note, ae.created_at as "createdAt",
+      ae.note, ae.created_at as "createdAt", count(*) over() as "__total",
       case when p.id is null then null
            else nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), '') end as "actorName",
       co.name as "contextOrganizationName"
@@ -150,8 +163,10 @@ export async function listWithFilters(ctx: DbContext, f: ActivityFilters = {}): 
     left join people p on p.id = u.person_id
     left join organizations co on co.id = ae.context_organization_id
     ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-    order by ae.created_at desc
+    order by ${sortColumn} ${direction}, ae.id ${direction}
     limit $${params.length}`;
+  params.push(f.offset ?? 0);
+  sql += ` offset $${params.length}`;
   return withDbContext(ctx, (c) => q<ActivityEventRow>(c, sql, params));
 }
 

@@ -5,6 +5,7 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ListCount, ListPagination, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "@/components/admin/ListControls";
 
 type CategoryRow = {
   id: string;
@@ -38,6 +39,8 @@ type ReportFilters = {
   accountState: "all" | "invited" | "active" | "disabled";
   matchingAlerts: "all" | "on" | "off";
   page: number;
+  sort: "name" | "email" | "interests" | "accountState" | "matchingAlerts";
+  direction: SortDirection;
 };
 
 const FAILURE = "That did not save. Nothing was changed.";
@@ -48,6 +51,8 @@ const DEFAULT_REPORT_FILTERS: ReportFilters = {
   accountState: "active",
   matchingAlerts: "all",
   page: 1,
+  sort: "name",
+  direction: "asc",
 };
 
 function displayName(row: ReportRow): string {
@@ -81,6 +86,9 @@ export function VolunteerCategoriesPage() {
   const [renameName, setRenameName] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [categorySort, setCategorySort] = useState<"name" | "interestCount" | "isActive">("name");
+  const [categoryDirection, setCategoryDirection] = useState<SortDirection>("asc");
   const [tab, setTab] = useState<"categories" | "report">("categories");
   const [reportFilters, setReportFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS);
   const listQuery = useQuery<{ categories: CategoryRow[] }>({
@@ -106,6 +114,14 @@ export function VolunteerCategoriesPage() {
   }
 
   const categories = listQuery.data?.categories ?? [];
+  const visibleCategories = filterAndSort(
+    categories,
+    categorySearch,
+    (row) => [row.name, row.interestCount, row.isActive ? "Active" : "Inactive"],
+    (row) => row.id,
+    (row) => row[categorySort],
+    categoryDirection,
+  );
   const reportOptionsQuery = useQuery<ReportOptions>({
     queryKey: ["/api/admin/volunteer-interest-report/options"],
     enabled: tab === "report",
@@ -119,6 +135,8 @@ export function VolunteerCategoriesPage() {
     params.set("matchingAlerts", reportFilters.matchingAlerts);
     params.set("page", String(reportFilters.page));
     params.set("pageSize", "25");
+    params.set("sort", reportFilters.sort);
+    params.set("direction", reportFilters.direction);
     return `/api/admin/volunteer-interest-report?${params.toString()}`;
   }, [reportFilters]);
   const reportQuery = useQuery<ReportResponse>({
@@ -173,15 +191,7 @@ export function VolunteerCategoriesPage() {
             Matching alerts are separate from weekly digest subscriptions.
           </p>
           <div className="adm-report-filters">
-            <label className="adm-filter">
-              Search supporters
-              <input
-                aria-label="Search supporters"
-                value={reportFilters.search}
-                placeholder="Name, email, or phone"
-                onChange={(event) => updateReportFilters({ search: event.target.value })}
-              />
-            </label>
+            <ListSearch value={reportFilters.search} label="Search supporters" onChange={(search) => updateReportFilters({ search })} onClear={() => updateReportFilters({ search: "" })} />
             <label className="adm-filter">
               Account state
               <select
@@ -199,6 +209,14 @@ export function VolunteerCategoriesPage() {
                 <option value="disabled">Disabled</option>
               </select>
             </label>
+            <label className="adm-filter">Sort by
+              <select value={reportFilters.sort} onChange={(e) => updateReportFilters({ sort: e.target.value as ReportFilters["sort"] })}>
+                <option value="name">Name</option><option value="email">Email</option><option value="interests">Interests</option><option value="accountState">Account state</option><option value="matchingAlerts">Matching alerts</option>
+              </select>
+            </label>
+            <button type="button" className="adm-btn" onClick={() => setReportFilters((f) => ({ ...f, direction: f.direction === "asc" ? "desc" : "asc", page: 1 }))}>
+              {reportFilters.direction === "asc" ? "Ascending" : "Descending"}
+            </button>
             <label className="adm-filter">
               Matching alerts
               <select
@@ -253,7 +271,7 @@ export function VolunteerCategoriesPage() {
             </select>
             <small>Hold Ctrl (Windows) or Command (Mac) to select more than one.</small>
           </label>
-          <div className="adm-report-actions">
+           <div className="adm-report-actions">
             <button className="adm-btn" onClick={() => setReportFilters(DEFAULT_REPORT_FILTERS)}>
               Clear filters
             </button>
@@ -279,14 +297,14 @@ export function VolunteerCategoriesPage() {
           ) : (
             <>
               <div className="adm-table-wrap">
-                <table className="adm-table adm-report-table">
+               <table className="adm-table adm-report-table">
                   <thead>
                     <tr>
-                      <th>Supporter</th>
-                      <th>Contact</th>
-                      <th>Selected interests</th>
-                      <th>Account state</th>
-                      <th>Matching alerts</th>
+                       <SortableHeader label="Supporter" column="name" sort={reportFilters.sort} direction={reportFilters.direction} onSort={(sort, direction) => setReportFilters((f) => ({ ...f, sort: sort as ReportFilters["sort"], direction, page: 1 }))} />
+                       <SortableHeader label="Contact" column="email" sort={reportFilters.sort} direction={reportFilters.direction} onSort={(sort, direction) => setReportFilters((f) => ({ ...f, sort: sort as ReportFilters["sort"], direction, page: 1 }))} />
+                       <SortableHeader label="Selected interests" column="interests" sort={reportFilters.sort} direction={reportFilters.direction} onSort={(sort, direction) => setReportFilters((f) => ({ ...f, sort: sort as ReportFilters["sort"], direction, page: 1 }))} />
+                       <SortableHeader label="Account state" column="accountState" sort={reportFilters.sort} direction={reportFilters.direction} onSort={(sort, direction) => setReportFilters((f) => ({ ...f, sort: sort as ReportFilters["sort"], direction, page: 1 }))} />
+                       <SortableHeader label="Matching alerts" column="matchingAlerts" sort={reportFilters.sort} direction={reportFilters.direction} onSort={(sort, direction) => setReportFilters((f) => ({ ...f, sort: sort as ReportFilters["sort"], direction, page: 1 }))} />
                     </tr>
                   </thead>
                   <tbody>
@@ -318,25 +336,7 @@ export function VolunteerCategoriesPage() {
                   </tbody>
                 </table>
               </div>
-              <div className="adm-report-pagination" aria-label="Report pagination">
-                <button
-                  className="adm-btn"
-                  disabled={reportFilters.page <= 1}
-                  onClick={() => setReportFilters((current) => ({ ...current, page: current.page - 1 }))}
-                >
-                  Previous
-                </button>
-                <span>
-                  Page {reportFilters.page} of {reportTotalPages}
-                </span>
-                <button
-                  className="adm-btn"
-                  disabled={reportFilters.page >= reportTotalPages}
-                  onClick={() => setReportFilters((current) => ({ ...current, page: current.page + 1 }))}
-                >
-                  Next
-                </button>
-              </div>
+              <ListPagination page={reportFilters.page} pageSize={reportQuery.data!.pageSize} total={reportQuery.data!.total} onPage={(page) => setReportFilters((f) => ({ ...f, page }))} />
             </>
           )}
         </section>
@@ -352,12 +352,14 @@ export function VolunteerCategoriesPage() {
         </div>
       ) : (
         <div className="adm-table-wrap">
+          <ListSearch value={categorySearch} onChange={setCategorySearch} label="Search categories" />
+          <ListCount count={visibleCategories.length} noun="categories" />
           <table className="adm-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Saved by</th>
-                <th>State</th>
+                <SortableHeader label="Name" column="name" sort={categorySort} direction={categoryDirection} onSort={(column, direction) => { setCategorySort(column); setCategoryDirection(direction); }} />
+                <SortableHeader label="Saved by" column="interestCount" sort={categorySort} direction={categoryDirection} onSort={(column, direction) => { setCategorySort(column); setCategoryDirection(direction); }} />
+                <SortableHeader label="State" column="isActive" sort={categorySort} direction={categoryDirection} onSort={(column, direction) => { setCategorySort(column); setCategoryDirection(direction); }} />
                 <th>Actions</th>
               </tr>
             </thead>
@@ -369,7 +371,7 @@ export function VolunteerCategoriesPage() {
                   </td>
                 </tr>
               ) : (
-                categories.map((category) => (
+               visibleCategories.map((category) => (
                   <tr key={category.id} className="adm-row">
                     <td>
                       {renameId === category.id ? (

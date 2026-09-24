@@ -115,12 +115,17 @@ export async function exportAll(ctx: DbContext): Promise<DigestSubscriber[]> {
 // ADMIN-08 reads and the one write (manual unsubscribe).
 
 export type SubscriberFilters = {
+  search?: string;
   status?: SubscriberStatus;
   /** Case-insensitive literal substring — position(), not LIKE, so no wildcards. */
   emailContains?: string;
   /** Inclusive YYYY-MM-DD bounds on subscribed_at. */
   subscribedFrom?: string;
   subscribedTo?: string;
+  limit?: number;
+  offset?: number;
+  sort?: "subscribedAt" | "email" | "status" | "firstName" | "lastName" | "unsubscribedAt" | "source" | "personName";
+  direction?: "asc" | "desc";
 };
 
 export type SubscriberListRow = Omit<DigestSubscriber, "unsubscribeToken"> & { personName: string | null };
@@ -133,6 +138,10 @@ export type SubscriberListRow = Omit<DigestSubscriber, "unsubscribeToken"> & { p
 export async function listWithFilters(ctx: DbContext, f: SubscriberFilters = {}): Promise<SubscriberListRow[]> {
   const where: string[] = [];
   const params: unknown[] = [];
+  if (f.search) {
+    params.push(`%${f.search.toLowerCase()}%`);
+    where.push(`(lower(s.email) like $${params.length} or lower(coalesce(s.status,'')) like $${params.length} or lower(coalesce(s.first_name,'')) like $${params.length} or lower(coalesce(s.last_name,'')) like $${params.length} or lower(coalesce(s.legacy_source,'')) like $${params.length} or to_char(s.subscribed_at at time zone 'America/Los_Angeles','YYYY-MM-DD') like $${params.length} or to_char(s.unsubscribed_at at time zone 'America/Los_Angeles','YYYY-MM-DD') like $${params.length} or lower(coalesce(p.first_name || ' ' || p.last_name,'')) like $${params.length})`);
+  }
   if (f.status !== undefined) {
     params.push(f.status);
     where.push(`s.status = $${params.length}`);
@@ -149,15 +158,22 @@ export async function listWithFilters(ctx: DbContext, f: SubscriberFilters = {})
     params.push(f.subscribedTo);
     where.push(`(s.subscribed_at at time zone 'America/Los_Angeles')::date <= $${params.length}::date`);
   }
+  const sortColumn = ({ subscribedAt: "s.subscribed_at", email: "s.email", status: "s.status", firstName: "s.first_name", lastName: "s.last_name", unsubscribedAt: "s.unsubscribed_at", source: "s.legacy_source", personName: "p.last_name" } as const)[f.sort ?? "subscribedAt"];
+  const direction = f.direction === "asc" ? "asc" : "desc";
+  const paged = f.limit !== 0;
+  if (paged) params.push(f.limit ?? 100);
+  const limitParam = `$${params.length}`;
+  if (paged) params.push(f.offset ?? 0);
+  const offsetParam = `$${params.length}`;
   const sql = `select s.id, s.person_id as "personId", s.email,
       s.first_name as "firstName", s.last_name as "lastName", s.status,
-      s.subscribed_at as "subscribedAt", s.unsubscribed_at as "unsubscribedAt", s.legacy_source as "legacySource",
+      s.subscribed_at as "subscribedAt", s.unsubscribed_at as "unsubscribedAt", s.legacy_source as "legacySource", count(*) over() as "__total",
       case when p.id is null then null
            else nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), '') end as "personName"
     from digest_subscribers s
     left join people p on p.id = s.person_id
     ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-    order by s.subscribed_at desc`;
+    order by ${sortColumn} ${direction}, s.id ${direction}${paged ? ` limit ${limitParam} offset ${offsetParam}` : ""}`;
   return withDbContext(ctx, (c) => q<SubscriberListRow>(c, sql, params));
 }
 
