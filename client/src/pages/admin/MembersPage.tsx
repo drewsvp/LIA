@@ -304,7 +304,7 @@ export function MembersPage() {
               {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}
 
               <div className="adm-actions">
-                {detail.membership.status === "pending" && (
+                {detail.membership.role === "member" && detail.membership.status === "pending" && (
                   <>
                     <button
                       className="adm-btn adm-btn-primary"
@@ -318,7 +318,7 @@ export function MembersPage() {
                     </button>
                   </>
                 )}
-                {detail.membership.status === "removed" && (
+                {detail.membership.role === "member" && detail.membership.status === "removed" && (
                   <button
                     className="adm-btn adm-btn-primary"
                     disabled={busy}
@@ -330,13 +330,13 @@ export function MembersPage() {
               </div>
 
               {/* §7/§8: a stated reason, not just a dead button. */}
-              {detail.membership.status === "pending" && orgNotApproved && (
+              {detail.membership.role === "member" && detail.membership.status === "pending" && orgNotApproved && (
                 <p className="adm-alert">
                   {detail.organization.name} is not approved yet, so this membership cannot be activated.
                 </p>
               )}
 
-              {confirm?.kind === "approve" && (
+              {detail.membership.role === "member" && confirm?.kind === "approve" && (
                 <div className="adm-confirm">
                   {/* §8 verbatim. */}
                   <p>
@@ -358,7 +358,7 @@ export function MembersPage() {
                 </div>
               )}
 
-              {confirm?.kind === "reject" && (
+              {detail.membership.role === "member" && confirm?.kind === "reject" && (
                 <div className="adm-confirm">
                   {/* §8 verbatim. */}
                   <p>

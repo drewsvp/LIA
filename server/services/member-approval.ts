@@ -10,10 +10,10 @@
  *   in has no other signal).
  *
  * Deliberate edges:
- * - All reads go through getAdminDetail, whose predicate excludes owner
- *   memberships (§7 — they activate at ADMIN-01) and platform_owner rows
- *   (§11 — staff are not members). Ids outside that world surface as
- *   MembershipNotFoundError → byte-identical 404s at the route.
+ * - Detail reads include active owners for the roster, but member actions
+ *   exclude every owner (§7 — they activate at ADMIN-01) and platform_owner
+ *   rows (§11 — staff are not members). Action ids outside that world surface
+ *   as MembershipNotFoundError → byte-identical 404s at the route.
  * - Approve/reject act strictly on pending rows; reinstate returns removed
  *   rows to PENDING so the normal approval path (and its email) still runs.
  * - Rejecting never touches people or users (§3): the person may hold a
@@ -158,7 +158,7 @@ export async function approveMembership(input: {
   const staff: DbContext = { kind: "staff", userId: input.staffUserId };
 
   const detail = await dal.memberships.getAdminDetail(staff, input.membershipId);
-  if (!detail) throw new MembershipNotFoundError(input.membershipId);
+  if (!detail || detail.role === "owner") throw new MembershipNotFoundError(input.membershipId);
   if (detail.status === "active") throw new MembershipAlreadyActiveError(input.membershipId);
   if (detail.orgStatus !== "approved") throw new MemberOrgNotApprovedError(detail.orgName);
 
@@ -383,7 +383,7 @@ export async function rejectMembership(input: {
 }): Promise<{ membership: OrgMembership; memberName: string }> {
   const staff: DbContext = { kind: "staff", userId: input.staffUserId };
   const detail = await dal.memberships.getAdminDetail(staff, input.membershipId);
-  if (!detail) throw new MembershipNotFoundError(input.membershipId);
+  if (!detail || detail.role === "owner") throw new MembershipNotFoundError(input.membershipId);
   try {
     const membership = await withDbContext(staff, (c: PoolClient) =>
       dal.memberships.rejectPendingInTx(c, input.membershipId, input.staffUserId, input.note),
@@ -400,7 +400,7 @@ export async function reinstateMembership(input: {
 }): Promise<{ membership: OrgMembership; memberName: string }> {
   const staff: DbContext = { kind: "staff", userId: input.staffUserId };
   const detail = await dal.memberships.getAdminDetail(staff, input.membershipId);
-  if (!detail) throw new MembershipNotFoundError(input.membershipId);
+  if (!detail || detail.role === "owner") throw new MembershipNotFoundError(input.membershipId);
   try {
     const membership = await withDbContext(staff, (c: PoolClient) =>
       dal.memberships.reinstateToPendingInTx(c, input.membershipId, input.staffUserId),
