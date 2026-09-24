@@ -1969,8 +1969,9 @@ export function registerAdminRoutes(app: Express): void {
   // ADMIN-03 — member approval queue (docs/specs/ADMIN-03.md)
   // --------------------------------------------------------------------------
 
-  // ---- §4: one row per membership, per status tab. Owner memberships and
-  // platform_owner rows never appear (§7/§11 — enforced in the DAL predicate).
+  // ---- §4: one row per membership, per status tab. Active owners appear as
+  // read-only roster entries; pending/removed owners and platform_owner rows
+  // stay outside the member workflow (enforced in the DAL).
   app.get("/api/admin/members", requireStaff, async (req: Request, res: Response, next) => {
     try {
       const status = typeof req.query.status === "string" ? req.query.status : "pending";

@@ -497,12 +497,12 @@ export async function convertPendingAllianceMemberInTx(
 // ---------------------------------------------------------------------------
 
 /**
- * The queue predicate (ADMIN-03 §7): owner memberships never appear — they
- * activate at ADMIN-01 in the org-approval transaction — and platform_owner
- * memberships are staff, not members (§11). Must match admin-counts.ts's
- * pendingMembers count exactly or the nav badge lies.
+ * Member-organization rows only. Pending/removed tabs remain the regular
+ * member workflow; active owners are included as read-only roster entries.
+ * The pending nav count still excludes owners because organization approval,
+ * not ADMIN-03, activates them.
  */
-const ADMIN_QUEUE_PREDICATE = `m.role <> 'owner' and o.kind = 'member_org'`;
+const MEMBER_ORG_PREDICATE = `o.kind = 'member_org'`;
 
 export type AdminMemberRow = OrgMembership & {
   firstName: string;
@@ -525,6 +525,7 @@ export async function listForAdminQueue(
   ctx: DbContext,
   status: "pending" | "active" | "removed",
 ): Promise<AdminMemberRow[]> {
+  const rolePredicate = status === "active" ? "true" : "m.role <> 'owner'";
   return withDbContext(ctx, (c) =>
     q<AdminMemberRow>(
       c,
@@ -537,7 +538,7 @@ export async function listForAdminQueue(
          join people p on p.id = u.person_id
          left join users iu on iu.id = m.invited_by
          left join people ip on ip.id = iu.person_id
-        where m.status = $1 and ${ADMIN_QUEUE_PREDICATE}
+         where m.status = $1 and ${MEMBER_ORG_PREDICATE} and ${rolePredicate}
         order by m.created_at asc`,
       [status],
     ),
@@ -545,9 +546,9 @@ export async function listForAdminQueue(
 }
 
 /**
- * One membership with person, org, and inviter context. Returns null for ids
- * outside the queue's world (owner memberships, platform_owner orgs) so the
- * routes can 404 them byte-identically with genuinely unknown ids.
+ * One membership with person, org, and inviter context. Active owners are
+ * readable for the Active roster; pending/removed owners stay outside the
+ * member workflow and platform_owner rows remain staff-only.
  */
 export async function getAdminDetail(ctx: DbContext, membershipId: string): Promise<AdminMemberDetail | null> {
   const rows = await withDbContext(ctx, (c) =>
@@ -563,7 +564,9 @@ export async function getAdminDetail(ctx: DbContext, membershipId: string): Prom
          join people p on p.id = u.person_id
          left join users iu on iu.id = m.invited_by
          left join people ip on ip.id = iu.person_id
-        where m.id = $1 and ${ADMIN_QUEUE_PREDICATE}`,
+         where m.id = $1
+           and ${MEMBER_ORG_PREDICATE}
+           and (m.role <> 'owner' or (m.role = 'owner' and m.status = 'active'))`,
       [membershipId],
     ),
   );

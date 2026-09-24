@@ -3,7 +3,9 @@
  *
  * Where staff approve people invited to join a member organization (§1).
  * Tabs Pending / Active / Removed (§4); each row names the person, their
- * organization, the inviter, and the invite date. The detail adds the one
+ * organization, role, inviter, and invite date. Active organization owners
+ * appear as read-only roster entries; owner activation remains part of
+ * organization approval, never this member approval workflow. The detail adds the one
  * piece of context that makes this queue safe (§4): the person's other
  * active memberships — a person already active elsewhere is a known
  * quantity. A needs_review flag is information, not a block (§7), so it
@@ -24,7 +26,7 @@ type Tab = "pending" | "active" | "removed";
 type QueueRow = {
   id: string;
   status: string;
-  role: string;
+  role: "owner" | "member";
   createdAt: string;
   firstName: string;
   lastName: string;
@@ -74,6 +76,10 @@ function formatDate(iso: string | null): string {
 function inviterName(row: QueueRow): string {
   const name = `${row.inviterFirstName ?? ""} ${row.inviterLastName ?? ""}`.trim();
   return name === "" ? "—" : name;
+}
+
+function roleName(role: string): string {
+  return role === "owner" ? "Owner" : "Member";
 }
 
 async function postJson(path: string, body?: unknown): Promise<{ ok: boolean; message: string }> {
@@ -200,6 +206,7 @@ export function MembersPage() {
               <th>Name</th>
               <th>Email</th>
               <th>Organization</th>
+              <th>Role</th>
               <th>Invited by</th>
               <th>Invited</th>
             </tr>
@@ -219,6 +226,7 @@ export function MembersPage() {
                 <td>{`${row.firstName} ${row.lastName}`.trim()}</td>
                 <td>{row.email}</td>
                 <td>{row.orgName}</td>
+                <td>{roleName(row.role)}</td>
                 <td>{inviterName(row)}</td>
                 <td>{formatDate(row.createdAt)}</td>
               </tr>
@@ -246,6 +254,8 @@ export function MembersPage() {
                   {detail.organization.name}
                   {detail.organization.status !== "approved" ? ` (${detail.organization.status})` : ""}
                 </dd>
+                <dt>Role</dt>
+                <dd>{roleName(detail.membership.role)}</dd>
                 <dt>Invited by</dt>
                 <dd>{detail.inviter?.name ?? "—"}</dd>
                 <dt>Invited</dt>
