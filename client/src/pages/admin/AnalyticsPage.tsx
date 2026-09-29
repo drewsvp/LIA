@@ -252,8 +252,6 @@ function AudienceTable(): ReactElement {
         <AdminCsvExportButton
           filename="analytics-audience"
           columns={[
-            { label: "Name", value: (row) => `${row.firstName} ${row.lastName}`.trim() },
-            { label: "Email", value: (row) => row.email },
             { label: "Request", value: (row) => row.requestTitle },
             { label: "Type", value: (row) => row.requestKind === "item" ? "Item" : "Volunteer" },
             { label: "Organization", value: (row) => row.orgName },
@@ -267,9 +265,12 @@ function AudienceTable(): ReactElement {
               return { rows: result.rows ?? [], total: result.total ?? 0 };
             },
           )}
-          disabled={isLoading || isError}
+          disabled={isLoading || isError || total === 0}
         />
       </div>
+      <p className="adm-note">
+        Audience CSV excludes names and email addresses. Use the reviewed export below for eligible follow-up contacts.
+      </p>
 
       {isLoading && !isError && (
         <div className="adm-loading-list" aria-busy="true" aria-label="Loading audience data">

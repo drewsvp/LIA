@@ -3301,8 +3301,8 @@ export function registerAdminRoutes(app: Express): void {
   // --------------------------------------------------------------------------
   // ADMIN-08 — Digest subscribers (docs/specs/ADMIN-08.md). Staff ADMIN
   // only (§11): an approver gets the byte-identical unknown-route 404. The
-  // list is public email addresses; the CSV export is the one export in
-  // the admin, and every export is a named operator action.
+  // list contains subscriber email addresses; CSV export is a named
+  // operator action with a confirmation in the admin UI.
 
   const parseSubscriberFilters = (
     req: Request,
@@ -3371,7 +3371,17 @@ export function registerAdminRoutes(app: Express): void {
         res.status(400).json({ message: parsed.message });
         return;
       }
-      const rows = await dal.digestSubscribers.listWithFilters(ctx, { ...parsed.f, limit: 0 });
+      const allowedSort = ["subscribedAt", "email", "status", "firstName", "lastName", "unsubscribedAt", "source", "personName"] as const;
+      const sort = typeof req.query.sort === "string" ? req.query.sort : "subscribedAt";
+      const direction = req.query.direction === "asc" ? "asc" : "desc";
+      if (!(allowedSort as readonly string[]).includes(sort) ||
+          (req.query.direction !== undefined && req.query.direction !== "asc" && req.query.direction !== "desc")) {
+        res.status(400).json({ message: "Unknown sort key or direction." });
+        return;
+      }
+      const rows = await dal.digestSubscribers.listWithFilters(ctx, {
+        ...parsed.f, limit: 0, sort: sort as (typeof allowedSort)[number], direction,
+      });
       const laDay = (v: string | Date | null): string =>
         v === null ? "" : new Date(v).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
       // CSV-quote AND neutralize spreadsheet formula injection: a leading
@@ -3379,7 +3389,7 @@ export function registerAdminRoutes(app: Express): void {
       // export, and email/name cells are public user input. The apostrophe
       // prefix makes the cell literal; quoting alone does not.
       const esc = (v: string): string => {
-        const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+        const safe = /^[\p{Cc}\p{Cf}\p{Zs}\s]*[=+\-@]/u.test(v) ? `'${v}` : v;
         return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
       };
       const lines = ["email,first_name,last_name,status,subscribed,unsubscribed,source"];

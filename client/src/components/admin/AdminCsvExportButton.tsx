@@ -29,6 +29,7 @@ export async function fetchAllAdminPages<T>(
 
   const rows: T[] = [];
   let expectedTotal: number | null = null;
+  const seenIds = new Set<string>();
 
   for (let page = 1; page <= 10_000; page += 1) {
     const pageParams = new URLSearchParams(params);
@@ -47,10 +48,22 @@ export async function fetchAllAdminPages<T>(
     }
 
     if (expectedTotal === null) expectedTotal = result.total;
+    if (result.total !== expectedTotal || result.rows.length > EXPORT_PAGE_SIZE) {
+      throw new Error("The filtered list changed during export. Please try again.");
+    }
     const remaining = expectedTotal - rows.length;
     if (remaining <= 0) return rows;
 
-    rows.push(...result.rows.slice(0, remaining));
+    for (const row of result.rows.slice(0, remaining)) {
+      const id = row && typeof row === "object" && "id" in row ? row.id : null;
+      if (typeof id === "string") {
+        if (seenIds.has(id)) {
+          throw new Error("The filtered list changed during export. Please try again.");
+        }
+        seenIds.add(id);
+      }
+      rows.push(row);
+    }
     if (rows.length >= expectedTotal) return rows;
     if (result.rows.length === 0) {
       throw new Error("The filtered list changed during export. Please try again.");
@@ -70,7 +83,7 @@ function csvCell(value: unknown): string {
         : typeof value === "object"
           ? JSON.stringify(value)
           : String(value);
-  const safeText = /^[\u0000-\u0020]*[=+\-@]/.test(text) ? `'${text}` : text;
+  const safeText = /^[\p{Cc}\p{Cf}\p{Zs}\s]*[=+\-@]/u.test(text) ? `'${text}` : text;
   return `"${safeText.replace(/"/g, '""')}"`;
 }
 
@@ -84,8 +97,10 @@ export function downloadCsv<T>(rows: T[], columns: CsvColumn<T>[], filename: str
   const link = document.createElement("a");
   link.href = objectUrl;
   link.download = filename.endsWith(".csv") ? filename : `${filename}.csv`;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(objectUrl);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
 type AdminCsvExportButtonProps<T> = {
@@ -124,6 +139,7 @@ export function AdminCsvExportButton<T>({
         type="button"
         className="adm-btn adm-btn-outline"
         disabled={disabled || exporting}
+        aria-label={`Export ${filename.replace(/[-_]/g, " ")} CSV`}
         onClick={() => void exportRows()}
       >
         {exporting ? "Preparing CSV…" : "Export CSV"}

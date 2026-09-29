@@ -267,7 +267,7 @@ export function SubscribersPage(): ReactElement {
   }
 
   async function exportCsv(): Promise<void> {
-    const confirmed = window.confirm(`Export ${rows.length} rows? The file contains email addresses.`);
+    const confirmed = window.confirm(`Export all ${total} matching subscribers? The file contains email addresses.`);
     if (!confirmed) return;
     setBusy(true);
     setActionMsg(null);
@@ -317,17 +317,6 @@ export function SubscribersPage(): ReactElement {
       <UpcomingDigestSection />
 
       <h2 className="adm-subheading">Subscriber list</h2>
-      <AdminCsvExportButton filename="subscribers" disabled={isLoading || isError || rows.length === 0}
-        columns={[
-          { label: "Email", value: r => r.email }, { label: "First name", value: r => r.firstName ?? "" },
-          { label: "Last name", value: r => r.lastName ?? "" }, { label: "Status", value: r => r.status },
-          { label: "Subscribed", value: r => fmtDateTime(r.subscribedAt) }, { label: "Unsubscribed", value: r => r.unsubscribedAt ? fmtDateTime(r.unsubscribedAt) : "" },
-          { label: "Source", value: r => r.legacySource ?? "" },
-        ]}
-        getRows={() => fetchAllAdminPages("/api/admin/subscribers", new URLSearchParams(queryString), p => {
-          const x = p as ListResponse; return { rows: x.rows, total: x.total ?? x.rows.length };
-        })} />
-
       <div className="adm-filter-row">
         <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} label="Search list" onClear={() => { setSearch(""); setFilters({ status: "subscribed", email: "", from: "", to: "" }); setPage(1); }} />
         <label className="adm-filter">
@@ -360,8 +349,8 @@ export function SubscribersPage(): ReactElement {
           To
           <input type="date" value={filters.to} onChange={(e) => { setFilters((f) => ({ ...f, to: e.target.value })); setPage(1); }} />
         </label>
-        <button className="adm-btn" type="button" onClick={() => void exportCsv()} disabled={busy || rows.length === 0}>
-          Export
+        <button className="adm-btn" type="button" onClick={() => void exportCsv()} disabled={busy || isLoading || isError || total === 0}>
+          Export CSV
         </button>
       </div>
 

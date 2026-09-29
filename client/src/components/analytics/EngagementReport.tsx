@@ -5,6 +5,7 @@
  */
 import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { AdminCsvExportButton, type CsvColumn } from "@/components/admin/AdminCsvExportButton";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,18 @@ const PERF_COLS: Array<{ key: SortKey; label: string; numeric?: boolean }> = [
   { key: "conversions", label: "Conversions", numeric: true },
   { key: "conversionRate", label: "Conv. Rate", numeric: true },
 ];
+
+const DAILY_CSV_COLUMNS: CsvColumn<DailyRow>[] = [
+  { label: "Date", value: (row) => row.date },
+  { label: "Engagement Events", value: (row) => row.engagementEvents },
+  { label: "Detail Views", value: (row) => row.detailViews },
+  { label: "Conversions", value: (row) => row.conversions },
+];
+
+const PERFORMANCE_CSV_COLUMNS: CsvColumn<PerformanceRow>[] = PERF_COLS.map((column) => ({
+  label: column.label,
+  value: (row) => row[column.key],
+}));
 
 // ── Bar Chart ──────────────────────────────────────────────────────────────
 
@@ -165,12 +178,19 @@ function PerformanceTable({ rows }: { rows: PerformanceRow[] }): ReactElement {
     });
   }, [rows, sortKey, sortDir]);
 
-  if (rows.length === 0) {
-    return <p className="adm-empty">No request performance data in this range.</p>;
-  }
-
   return (
-    <div className="adm-table-wrap">
+    <>
+      <div className="anl-export-row">
+        <AdminCsvExportButton
+          filename="analytics-request-performance"
+          columns={PERFORMANCE_CSV_COLUMNS}
+          getRows={async () => sorted}
+          disabled={rows.length === 0}
+        />
+      </div>
+      {rows.length === 0 ? (
+        <p className="adm-empty">No request performance data in this range.</p>
+      ) : <div className="adm-table-wrap">
       <table className="adm-table anl-perf-table" aria-label="Request performance">
         <thead>
           <tr>
@@ -211,7 +231,8 @@ function PerformanceTable({ rows }: { rows: PerformanceRow[] }): ReactElement {
           ))}
         </tbody>
       </table>
-    </div>
+      </div>}
+    </>
   );
 }
 
@@ -328,6 +349,14 @@ export function EngagementReport({ apiUrl, orgId, exportUrl }: EngagementReportP
 
           {/* ── Daily chart ── */}
           <h2 className="adm-subheading">Daily Engagement (event counts)</h2>
+          <div className="anl-export-row">
+            <AdminCsvExportButton
+              filename="analytics-daily-engagement"
+              columns={DAILY_CSV_COLUMNS}
+              getRows={async () => daily}
+              disabled={daily.length === 0}
+            />
+          </div>
           <BarChart daily={daily} />
 
           {/* ── Performance table ── */}
