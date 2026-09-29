@@ -57,7 +57,7 @@ Default view: last thirty days, all types, most recent first.
 
 ## 6. Actions
 
-None. Read-only. No CSV export (D25).
+Read-only. Export the currently filtered activity list as CSV, including all matching pages.
 
 ## 7. Conditional behavior
 

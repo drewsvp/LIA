@@ -13,6 +13,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { ListPagination, SortableHeader, ListCount, ListSearch, filterAndSort, type SortDirection } from "@/components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages } from "@/components/admin/AdminCsvExportButton";
 
 type SubRow = {
   id: string;
@@ -316,6 +317,16 @@ export function SubscribersPage(): ReactElement {
       <UpcomingDigestSection />
 
       <h2 className="adm-subheading">Subscriber list</h2>
+      <AdminCsvExportButton filename="subscribers" disabled={isLoading || isError || rows.length === 0}
+        columns={[
+          { label: "Email", value: r => r.email }, { label: "First name", value: r => r.firstName ?? "" },
+          { label: "Last name", value: r => r.lastName ?? "" }, { label: "Status", value: r => r.status },
+          { label: "Subscribed", value: r => fmtDateTime(r.subscribedAt) }, { label: "Unsubscribed", value: r => r.unsubscribedAt ? fmtDateTime(r.unsubscribedAt) : "" },
+          { label: "Source", value: r => r.legacySource ?? "" },
+        ]}
+        getRows={() => fetchAllAdminPages("/api/admin/subscribers", new URLSearchParams(queryString), p => {
+          const x = p as ListResponse; return { rows: x.rows, total: x.total ?? x.rows.length };
+        })} />
 
       <div className="adm-filter-row">
         <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} label="Search list" onClear={() => { setSearch(""); setFilters({ status: "subscribed", email: "", from: "", to: "" }); setPage(1); }} />

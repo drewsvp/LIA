@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages, type CsvColumn } from "../../components/admin/AdminCsvExportButton";
 
 type Person = {
   id: string;
@@ -325,6 +326,24 @@ export function PeopleReviewPage() {
   const total = listQuery.data?.total ?? 0;
   const pageSize = listQuery.data?.pageSize ?? 25;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const exportColumns: CsvColumn<QueueRow>[] = [
+    { label: "Name", value: row => fullName(row) },
+    { label: "Email", value: row => row.email },
+    { label: "Phone", value: row => row.phone },
+    { label: "Review status", value: row => row.needsReview ? row.reviewNote ?? "Needs review" : "No review needed" },
+    { label: "Attached", value: row => countsSummary(row) },
+  ];
+  const exportRows = () => {
+    const filters = new URLSearchParams({ sort, direction });
+    if (search) filters.set("search", search);
+    if (reviewStatus !== "all") filters.set("reviewStatus", reviewStatus);
+    return fetchAllAdminPages<QueueRow>("/api/admin/people", filters, payload => {
+      const value = payload as { people?: QueueRow[]; total?: number };
+      if (!Array.isArray(value.people) || typeof value.total !== "number" || !Number.isInteger(value.total) || value.total < 0) throw new Error("Invalid export response");
+      const total = value.total;
+      return { rows: value.people, total };
+    });
+  };
 
   async function saveContact(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -412,7 +431,10 @@ export function PeopleReviewPage() {
           </tbody>
         </table></div>
       )}
-      {!listQuery.isLoading && <ListCount count={total} noun="contacts" />}
+      {!listQuery.isLoading && <div className="adm-list-controls"><ListCount count={total} noun="contacts" />
+        <AdminCsvExportButton filename="people" columns={exportColumns} getRows={exportRows}
+          disabled={listQuery.isLoading || listQuery.isError || total === 0} />
+      </div>}
       {total > pageSize && <ListPagination page={page} pageSize={pageSize} total={total} onPage={setPage} />}
 
       {selectedId !== null && (

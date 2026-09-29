@@ -14,6 +14,7 @@ import { queryClient } from "@/lib/queryClient";
 import { EMAIL_TEMPLATE_NAMES, templateDisplayName } from "@shared/email-templates";
 import type { EmailFailureCategory } from "@shared/types";
 import { ListPagination, ListCount, ListSearch, SortableHeader, type SortDirection } from "@/components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages } from "@/components/admin/AdminCsvExportButton";
 
 type LogRow = {
   id: string;
@@ -167,7 +168,7 @@ export function EmailLogPage(): ReactElement {
     return qs ? `/api/admin/email?${qs}` : "/api/admin/email";
   }, [filters, search, page, sort, direction]);
 
-  const { data, isLoading } = useQuery<ListResponse>({ queryKey: [listKey] });
+  const { data, isLoading, isError } = useQuery<ListResponse>({ queryKey: [listKey] });
   const detailKey = selectedId ? `/api/admin/email/${selectedId}` : null;
   const { data: detail } = useQuery<DetailResponse>({
     queryKey: [detailKey ?? "detail-none"],
@@ -223,11 +224,31 @@ export function EmailLogPage(): ReactElement {
 
   const rows = data?.rows ?? [];
   const total = data?.total ?? rows.length;
+  const exportFilters = useMemo(() => {
+    const params = new URLSearchParams();
+    if (filters.template) params.set("template", filters.template);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.recipient.trim()) params.set("recipient", filters.recipient.trim());
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
+    if (search.trim()) params.set("search", search.trim());
+    params.set("sort", sort); params.set("direction", direction);
+    return params;
+  }, [filters, search, sort, direction]);
   function changeSort(column: typeof sort, next: SortDirection): void { setSort(column); setDirection(next); setPage(1); }
 
   return (
     <div className="adm-page">
       <h1 className="adm-heading">Email</h1>
+      <AdminCsvExportButton filename="email-log" disabled={isLoading || isError || !data || rows.length === 0}
+        columns={[
+          { label: "Created", value: r => fmtTimestamp(r.createdAt) }, { label: "Recipient", value: r => r.toEmail },
+          { label: "Template", value: r => templateDisplayName(r.templateKey) }, { label: "Status", value: r => r.status },
+          { label: "Related entity", value: r => r.entity?.name ?? "" }, { label: "Error", value: r => r.error ?? "" },
+        ]}
+        getRows={() => fetchAllAdminPages("/api/admin/email", exportFilters, p => {
+          const x = p as ListResponse; return { rows: x.rows, total: x.total ?? x.rows.length };
+        })} />
 
       {data && data.failureCount > 0 && (
         <button type="button" className="adm-banner-fail" onClick={showFailures}>

@@ -17,6 +17,7 @@ import { invalidateAdminList } from "../../components/admin/invalidateAdminList"
 import { apiRequest } from "../../lib/queryClient";
 import { useSession } from "../../hooks/useSession";
 import { OrganizationEditForm } from "../../components/admin/OrganizationEditForm";
+import { AdminCsvExportButton, fetchAllAdminPages, type CsvColumn } from "../../components/admin/AdminCsvExportButton";
 import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
 
 type QueueRow = {
@@ -197,6 +198,23 @@ export function OrganizationsPage() {
   const contact = detail?.contact ?? null;
   const contactName = contact ? `${contact.firstName} ${contact.lastName}`.trim() : null;
   const canEdit = session?.staffRole === "staff_admin";
+  const exportColumns: CsvColumn<QueueRow>[] = [
+    { label: "Name", value: row => row.name },
+    { label: "City", value: row => row.city },
+    { label: "Status", value: row => row.status },
+    { label: "Primary contact", value: row => [row.contactFirstName, row.contactLastName].filter(Boolean).join(" ") },
+    { label: "Contact email", value: row => row.contactEmail },
+    { label: "Submitted", value: row => row.createdAt },
+  ];
+  const exportRows = () => {
+    const filters = new URLSearchParams({ status: tab, search, sort, direction });
+    return fetchAllAdminPages<QueueRow>("/api/admin/organizations", filters, payload => {
+      const value = payload as { organizations?: QueueRow[]; total?: number };
+      if (!Array.isArray(value.organizations) || typeof value.total !== "number" || !Number.isInteger(value.total) || value.total < 0) throw new Error("Invalid export response");
+      const total = value.total;
+      return { rows: value.organizations, total };
+    });
+  };
 
   return (
     <main className="adm-page">
@@ -217,7 +235,10 @@ export function OrganizationsPage() {
         ))}
       </div>
       <ListSearch value={search} onChange={value => { setSearch(value); setPage(1); }} onClear={() => { setSearch(""); setPage(1); }} />
-      <ListCount count={total} noun="organizations" />
+      <div className="adm-list-controls"><ListCount count={total} noun="organizations" />
+        <AdminCsvExportButton filename="organizations" columns={exportColumns} getRows={exportRows}
+          disabled={listQuery.isLoading || listQuery.isError || total === 0} />
+      </div>
 
       {listQuery.isLoading ? (
         <p className="adm-note">Loading…</p>

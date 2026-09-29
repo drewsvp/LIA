@@ -17,6 +17,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../../hooks/useSession";
 import { OrganizationLoginAsControls } from "../../components/OrganizationContext";
 import { ListCount, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "../../components/admin/ListControls";
+import { AdminCsvExportButton } from "../../components/admin/AdminCsvExportButton";
 
 type Row = {
   id: string;
@@ -310,6 +311,19 @@ export function RolesPage() {
          <label className="adm-filter">Organization status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}><option value="all">All</option>{(["pending","active","removed"] as const).map(s => <option key={s} value={s}>{STATUS_NAMES[s]}</option>)}</select></label>
          <label className="adm-filter">Role<select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as typeof roleFilter)}><option value="all">All</option>{(Object.keys(ROLE_NAMES) as Row["role"][]).map(r => <option key={r} value={r}>{ROLE_NAMES[r]}</option>)}</select></label>
        </ListSearch>
+        <AdminCsvExportButton
+          filename="roles"
+          columns={[
+            { label: "Name", value: (row) => `${row.firstName} ${row.lastName}`.trim() },
+            { label: "Email", value: (row) => row.email },
+            { label: "Organization", value: (row) => row.orgName },
+            { label: "Type", value: (row) => row.type },
+            { label: "Status", value: (row) => STATUS_NAMES[row.status] },
+            { label: "Role", value: (row) => ROLE_NAMES[row.role] },
+          ]}
+          getRows={async () => filtered}
+          disabled={listQuery.isLoading}
+        />
        <ListCount count={filtered.length} noun="memberships" />
 
       {result && <p className={result.kind === "ok" ? "adm-ok" : "adm-alert"}>{result.text}</p>}

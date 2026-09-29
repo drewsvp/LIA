@@ -15,6 +15,7 @@ import type {
   AdminVolunteerRow,
 } from "@shared/types";
 import { ListCount, ListPagination, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages } from "../../components/admin/AdminCsvExportButton";
 
 type Tab = "donations" | "volunteers";
 type Filters = {
@@ -115,12 +116,23 @@ function DonationsView({
   const query = useQuery<AdminParticipationPage<AdminDonationRow>>({ queryKey: [url] });
   const rows = query.data?.rows ?? [];
   const hasFilters = Object.values(filters).some((value) => value.trim() !== "");
+  const exportParams = new URLSearchParams(url.split("?")[1]);
   useEffect(() => {
     if (!snapshotAt && query.data?.snapshotAt) onSnapshot(query.data.snapshotAt);
   }, [onSnapshot, query.data?.snapshotAt, snapshotAt]);
 
   return (
     <section aria-labelledby="donations-heading">
+      <AdminCsvExportButton filename="donations" disabled={query.isLoading || query.isError || rows.length === 0}
+        columns={[
+          { label: "Supporter", value: personName }, { label: "Email", value: r => r.email },
+          { label: "Phone", value: r => r.phone ?? "" }, { label: "Organization", value: r => r.organization.name },
+          { label: "Request", value: r => r.request.title }, { label: "Date", value: r => formatDateTime(r.createdAt) },
+          { label: "Status", value: r => r.status }, { label: "Notes", value: r => r.notes ?? "" },
+        ]}
+        getRows={() => fetchAllAdminPages("/api/admin/participation/donations", exportParams, p => {
+          const x = p as AdminParticipationPage<AdminDonationRow>; return { rows: x.rows, total: x.total };
+        })} />
       <h2 id="donations-heading" className="adm-subheading adm-participation-section-heading">
         Donations
       </h2>
@@ -207,12 +219,23 @@ function VolunteersView({
   const query = useQuery<AdminParticipationPage<AdminVolunteerRow>>({ queryKey: [url] });
   const rows = query.data?.rows ?? [];
   const hasFilters = Object.values(filters).some((value) => value.trim() !== "");
+  const exportParams = new URLSearchParams(url.split("?")[1]);
   useEffect(() => {
     if (!snapshotAt && query.data?.snapshotAt) onSnapshot(query.data.snapshotAt);
   }, [onSnapshot, query.data?.snapshotAt, snapshotAt]);
 
   return (
     <section aria-labelledby="volunteers-heading">
+      <AdminCsvExportButton filename="volunteers" disabled={query.isLoading || query.isError || rows.length === 0}
+        columns={[
+          { label: "Supporter", value: personName }, { label: "Email", value: r => r.email },
+          { label: "Phone", value: r => r.phone ?? "" }, { label: "Organization", value: r => r.organization.name },
+          { label: "Request", value: r => r.request.title }, { label: "Date", value: r => formatDateTime(r.createdAt) },
+          { label: "Status", value: r => r.status }, { label: "Notes", value: r => r.notes ?? "" },
+        ]}
+        getRows={() => fetchAllAdminPages("/api/admin/participation/volunteers", exportParams, p => {
+          const x = p as AdminParticipationPage<AdminVolunteerRow>; return { rows: x.rows, total: x.total };
+        })} />
       <h2 id="volunteers-heading" className="adm-subheading adm-participation-section-heading">
         Volunteers
       </h2>

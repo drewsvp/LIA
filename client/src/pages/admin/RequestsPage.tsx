@@ -21,6 +21,7 @@ import { useNavigationGuard } from "../../hooks/useNavigationGuard";
 import { ParticipationManager } from "../../components/admin/ParticipationManager";
 import { useSiteSettings } from "../../hooks/useSiteSettings";
 import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages, type CsvColumn } from "../../components/admin/AdminCsvExportButton";
 
 type RequestKind = "item" | "volunteer";
 type Tab = "pending" | "active" | "archived" | "returned";
@@ -901,6 +902,25 @@ export function RequestsPage() {
   const visible = rows;
   const total = listQuery.data?.total ?? rows.length;
   const onSort = (column: typeof sort, next: SortDirection) => { setSort(column); setDirection(next); setPage(1); };
+  const exportColumns: CsvColumn<QueueRow>[] = [
+    { label: "Type", value: row => row.type },
+    { label: "Title", value: row => row.title },
+    { label: "Organization", value: row => row.orgName },
+    { label: "City", value: row => row.orgCity },
+    { label: "Status", value: row => row.status },
+    { label: "Expiration", value: row => expirationLabel(row) },
+    { label: "Child count", value: row => row.childCount },
+  ];
+  const exportRows = () => {
+    const exportSort = sort === "submittedAt" && tab === "returned" ? "returnedAt" : sort;
+    const filters = new URLSearchParams({ status: tab, type: typeFilter, orgId, search, sort: exportSort, direction });
+    return fetchAllAdminPages<QueueRow>("/api/admin/requests", filters, payload => {
+      const value = payload as { requests?: QueueRow[]; total?: number };
+      if (!Array.isArray(value.requests) || typeof value.total !== "number" || !Number.isInteger(value.total) || value.total < 0) throw new Error("Invalid export response");
+      const total = value.total;
+      return { rows: value.requests, total };
+    });
+  };
   const detail = detailQuery.data ?? null;
   const request = detail?.request ?? null;
 
@@ -1020,7 +1040,10 @@ export function RequestsPage() {
           </select>
         </label>
       </ListSearch>
-      <ListCount count={total} noun="requests" />
+      <div className="adm-list-controls"><ListCount count={total} noun="requests" />
+        <AdminCsvExportButton filename="requests" columns={exportColumns} getRows={exportRows}
+          disabled={listQuery.isLoading || listQuery.isError || total === 0} />
+      </div>
 
       {listQuery.isError ? (
         <p className="adm-alert">{LIST_ERROR}</p>

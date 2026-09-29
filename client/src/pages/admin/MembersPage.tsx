@@ -22,6 +22,7 @@ import { OrganizationLoginAsControls } from "../../components/OrganizationContex
 import { useSession } from "../../hooks/useSession";
 import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
 import { invalidateAdminList } from "../../components/admin/invalidateAdminList";
+import { AdminCsvExportButton, fetchAllAdminPages, type CsvColumn } from "../../components/admin/AdminCsvExportButton";
 
 type Tab = "pending" | "active" | "removed";
 
@@ -168,6 +169,24 @@ export function MembersPage() {
   const rows = listQuery.data?.members ?? [];
   const total = listQuery.data?.total ?? rows.length;
   const onSort = (column: typeof sort, next: SortDirection) => { setSort(column); setDirection(next); setPage(1); };
+  const exportColumns: CsvColumn<QueueRow>[] = [
+    { label: "Name", value: row => `${row.firstName} ${row.lastName}`.trim() },
+    { label: "Email", value: row => row.email },
+    { label: "Organization", value: row => row.orgName },
+    { label: "Role", value: row => roleName(row.role) },
+    { label: "Invited by", value: row => inviterName(row) },
+    { label: "Invited", value: row => row.createdAt },
+    { label: "Status", value: row => row.status },
+  ];
+  const exportRows = () => {
+    const filters = new URLSearchParams({ status: tab, search, orgId, sort, direction });
+    return fetchAllAdminPages<QueueRow>("/api/admin/members", filters, payload => {
+      const value = payload as { members?: QueueRow[]; total?: number };
+      if (!Array.isArray(value.members) || typeof value.total !== "number" || !Number.isInteger(value.total) || value.total < 0) throw new Error("Invalid export response");
+      const total = value.total;
+      return { rows: value.members, total };
+    });
+  };
   const detail = detailQuery.data ?? null;
   const person = detail?.person ?? null;
   const personName = person ? `${person.firstName} ${person.lastName}`.trim() : "";
@@ -208,7 +227,10 @@ export function MembersPage() {
           </select>
         </label>
       </ListSearch>
-      <ListCount count={total} noun="members" />
+  <div className="adm-list-controls"><ListCount count={total} noun="members" />
+    <AdminCsvExportButton filename="members" columns={exportColumns} getRows={exportRows}
+      disabled={listQuery.isLoading || listQuery.isError || total === 0} />
+  </div>
 
       {listQuery.isError ? (
         <p className="adm-alert">{LIST_ERROR}</p>

@@ -8,6 +8,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { EngagementReport } from "@/components/analytics/EngagementReport";
 import { ListPagination, ListSearch, SortableHeader, type SortDirection } from "@/components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages } from "@/components/admin/AdminCsvExportButton";
 
 // ── Audience types ─────────────────────────────────────────────────────────
 
@@ -89,6 +90,13 @@ function AudienceTable(): ReactElement {
     if (orgId) params.set("orgId", orgId);
     return `/api/admin/analytics/audience?${params.toString()}`;
   }, [page, search, sort, direction, kind, orgId]);
+
+  const audienceExportFilters = useMemo(() => {
+    const params = new URLSearchParams({ search, sort, direction });
+    if (kind) params.set("kind", kind);
+    if (orgId) params.set("orgId", orgId);
+    return params;
+  }, [search, sort, direction, kind, orgId]);
 
   const { data, isLoading, isError, refetch } = useQuery<AudienceResponse>({ queryKey: [url] });
   const { data: analyticsData } = useQuery<{ organizations?: Array<{ id: string; name: string }> }>({
@@ -241,6 +249,26 @@ function AudienceTable(): ReactElement {
             {(analyticsData?.organizations ?? []).map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
           </select>
         </label>
+        <AdminCsvExportButton
+          filename="analytics-audience"
+          columns={[
+            { label: "Name", value: (row) => `${row.firstName} ${row.lastName}`.trim() },
+            { label: "Email", value: (row) => row.email },
+            { label: "Request", value: (row) => row.requestTitle },
+            { label: "Type", value: (row) => row.requestKind === "item" ? "Item" : "Volunteer" },
+            { label: "Organization", value: (row) => row.orgName },
+            { label: "Last Viewed", value: (row) => fmtTimestamp(row.lastViewedAt) },
+          ]}
+          getRows={() => fetchAllAdminPages(
+            "/api/admin/analytics/audience",
+            audienceExportFilters,
+            (payload) => {
+              const result = payload as Partial<AudienceResponse>;
+              return { rows: result.rows ?? [], total: result.total ?? 0 };
+            },
+          )}
+          disabled={isLoading || isError}
+        />
       </div>
 
       {isLoading && !isError && (

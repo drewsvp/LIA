@@ -18,6 +18,7 @@ import { useNavigationGuard } from "../../hooks/useNavigationGuard";
 import { EmailBodyEditor } from "@/components/EmailBodyEditor";
 import type { BodyBlock, SectionDef } from "@/components/EmailBodyEditor";
 import { ListCount, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "../../components/admin/ListControls";
+import { AdminCsvExportButton } from "../../components/admin/AdminCsvExportButton";
 
 type Copy = {
   subject: string;
@@ -574,6 +575,19 @@ export function EmailTemplatesPage(): ReactElement {
         <ListSearch value={listSearch} onChange={setListSearch} label="Search automated emails">
           <label className="adm-filter">Status<select value={enabledFilter} onChange={(e) => setEnabledFilter(e.target.value as typeof enabledFilter)}><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
         </ListSearch>
+        <AdminCsvExportButton
+          filename="email-templates"
+          columns={[
+            { label: "Email", value: (row) => row.name },
+            { label: "Sent when", value: (row) => row.trigger },
+            { label: "Goes to", value: (row) => row.recipients },
+            { label: "Status", value: (row) => row.enabled ? "Enabled" : "Disabled" },
+            { label: "Delivery", value: (row) => row.deliveryType },
+            { label: "Last updated", value: (row) => row.updatedAt ? fmtDate(row.updatedAt) : "" },
+          ]}
+          getRows={async () => visibleTemplates}
+          disabled={isLoading}
+        />
         <ListCount count={visibleTemplates.length} noun="automated emails" />
         {isLoading ? (
           <p className="adm-muted">Loading…</p>

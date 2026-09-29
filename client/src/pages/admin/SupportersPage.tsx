@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ListCount, ListPagination, ListSearch, SortableHeader, type SortDirection } from "../../components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages, type CsvColumn } from "../../components/admin/AdminCsvExportButton";
 
 type Status = "active" | "disabled";
 
@@ -207,6 +208,26 @@ export function SupportersPage(): ReactElement {
     setDirection(nextDirection);
     setPage(1);
   }
+  const exportColumns: CsvColumn<SupporterRow>[] = [
+    { label: "Name", value: row => `${row.firstName} ${row.lastName}`.trim() },
+    { label: "Email", value: row => row.email },
+    { label: "Phone", value: row => row.phone },
+    { label: "Status", value: row => row.status },
+    { label: "Last login", value: row => row.lastLoginAt },
+    { label: "Created", value: row => row.createdAt },
+    { label: "Donations", value: row => row.pledgeCount },
+    { label: "Volunteer signups", value: row => row.signupCount },
+  ];
+  const exportRows = () => {
+    const filters = new URLSearchParams({ status, sort, direction });
+    if (search) filters.set("search", search);
+    return fetchAllAdminPages<SupporterRow>("/api/admin/supporters", filters, payload => {
+      const value = payload as { supporters?: SupporterRow[]; total?: number };
+      if (!Array.isArray(value.supporters) || typeof value.total !== "number" || !Number.isInteger(value.total) || value.total < 0) throw new Error("Invalid export response");
+      const total = value.total;
+      return { rows: value.supporters, total };
+    });
+  };
 
   return (
     <main className="adm-page">
@@ -238,7 +259,10 @@ export function SupportersPage(): ReactElement {
       {!listQuery.isLoading && !listQuery.isError && rows.length === 0 ? (
         <p className="adm-muted">{search ? "No supporters match that search." : `No ${status} supporter accounts.`}</p>
       ) : null}
-      <ListCount count={total} noun="supporters" />
+      <div className="adm-list-controls"><ListCount count={total} noun="supporters" />
+        <AdminCsvExportButton filename="supporters" columns={exportColumns} getRows={exportRows}
+          disabled={listQuery.isLoading || listQuery.isError || total === 0} />
+      </div>
       {rows.length > 0 ? (
         <div className="adm-table-wrap">
           <table className="adm-table">

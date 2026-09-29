@@ -6,6 +6,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListCount, ListPagination, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "@/components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages } from "@/components/admin/AdminCsvExportButton";
 
 type CategoryRow = {
   id: string;
@@ -145,6 +146,16 @@ export function VolunteerCategoriesPage() {
   });
   const reportOptions = reportOptionsQuery.data?.categories ?? [];
   const reportTotalPages = reportQuery.data ? Math.max(1, Math.ceil(reportQuery.data.total / reportQuery.data.pageSize)) : 1;
+  const reportExportFilters = useMemo(() => {
+    const params = new URLSearchParams();
+    if (reportFilters.search.trim()) params.set("search", reportFilters.search.trim());
+    for (const categoryId of reportFilters.categoryIds) params.append("categoryId", categoryId);
+    params.set("categoryState", reportFilters.categoryState);
+    params.set("accountState", reportFilters.accountState);
+    params.set("matchingAlerts", reportFilters.matchingAlerts);
+    params.set("sort", reportFilters.sort); params.set("direction", reportFilters.direction);
+    return params;
+  }, [reportFilters]);
 
   function updateReportFilters(changes: Partial<ReportFilters>): void {
     setReportFilters((current) => ({ ...current, ...changes, page: changes.page ?? 1 }));
@@ -153,6 +164,12 @@ export function VolunteerCategoriesPage() {
   return (
     <div>
       <h1 className="adm-heading">Volunteer categories</h1>
+      <AdminCsvExportButton filename="volunteer-categories" disabled={listQuery.isLoading || listQuery.isError || visibleCategories.length === 0}
+        columns={[
+          { label: "Category", value: r => r.name }, { label: "Status", value: r => r.isActive ? "Active" : "Inactive" },
+          { label: "Interest count", value: r => r.interestCount },
+        ]}
+        getRows={async () => visibleCategories} />
       <p className="adm-muted">
         These choices appear on supporter profiles. Deactivating a category hides it from new selections without
         removing it from people who already chose it.
@@ -280,6 +297,17 @@ export function VolunteerCategoriesPage() {
                 {reportQuery.data.total.toLocaleString()} supporter{reportQuery.data.total === 1 ? "" : "s"}
               </span>
             )}
+            <AdminCsvExportButton filename="volunteer-interest-report"
+              disabled={reportQuery.isLoading || reportOptionsQuery.isLoading || reportQuery.isError || reportOptionsQuery.isError || !reportQuery.data || reportQuery.data.total === 0}
+              columns={[
+                { label: "Supporter", value: displayName }, { label: "Email", value: r => r.email },
+                { label: "Phone", value: r => r.phone ?? "" }, { label: "Interests", value: r => r.categories.map(c => c.name).join("; ") },
+                { label: "Account state", value: r => accountStateLabel(r.accountState) },
+                { label: "Matching alerts", value: r => r.matchingAlertsEnabled ? "On" : "Off" },
+              ]}
+              getRows={() => fetchAllAdminPages("/api/admin/volunteer-interest-report", reportExportFilters, p => {
+                const x = p as ReportResponse; return { rows: x.rows, total: x.total };
+              })} />
           </div>
 
           {reportOptionsQuery.isError || reportQuery.isError ? (

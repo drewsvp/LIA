@@ -9,6 +9,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ENTITY_TYPE_NAMES, entityTypeName, transitionLabel } from "@shared/transitions";
 import { ListPagination, ListCount, ListSearch, SortableHeader, type SortDirection } from "@/components/admin/ListControls";
+import { AdminCsvExportButton, fetchAllAdminPages } from "@/components/admin/AdminCsvExportButton";
 
 type ActRow = {
   id: string;
@@ -98,6 +99,17 @@ export function ActivityPage(): ReactElement {
   const { data, isLoading, isError } = useQuery<ListResponse>({ queryKey: [listKey] });
   const rows = data?.rows ?? [];
   const total = data?.total ?? rows.length;
+  const exportFilters = useMemo(() => {
+    const params = new URLSearchParams();
+    if (entityMode) { params.set("entityType", filters.entityType); params.set("entityId", filters.entityId); }
+    if (filters.type) params.set("type", filters.type);
+    if (filters.actor) params.set("actor", filters.actor);
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
+    if (search.trim()) params.set("search", search.trim());
+    params.set("sort", sort); params.set("direction", direction);
+    return params;
+  }, [filters, entityMode, search, sort, direction]);
   function changeSort(column: typeof sort, next: SortDirection): void { setSort(column); setDirection(next); setPage(1); }
 
   function showAll(): void {
@@ -108,6 +120,17 @@ export function ActivityPage(): ReactElement {
   return (
     <div className="adm-page">
       <h1 className="adm-heading">Activity</h1>
+      <AdminCsvExportButton filename="activity" disabled={isLoading || isError || rows.length === 0}
+        columns={[
+          { label: "Time", value: r => fmtTimestamp(r.createdAt) }, { label: "Type", value: r => entityTypeName(r.entityType) },
+          { label: "Entity", value: r => r.entity?.name ?? `${r.entityId} (No longer present)` },
+          { label: "Transition", value: r => transitionLabel(r.entityType, r.fromStatus, r.toStatus, r.note) },
+          { label: "Actor", value: r => r.actorUserId === null ? "Automated" : (r.actorName ?? "Unknown user") },
+          { label: "Organization", value: r => r.contextOrganizationName ?? "" }, { label: "Note", value: r => r.note ?? "" },
+        ]}
+        getRows={() => fetchAllAdminPages("/api/admin/activity", exportFilters, p => {
+          const x = p as ListResponse; return { rows: x.rows, total: x.total ?? x.rows.length };
+        })} />
 
       {entityMode && (
         <div className="adm-act-entitymode">

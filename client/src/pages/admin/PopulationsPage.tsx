@@ -19,6 +19,7 @@
 import { Fragment, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListCount, ListSearch, SortableHeader, filterAndSort, type SortDirection } from "../../components/admin/ListControls";
+import { AdminCsvExportButton } from "../../components/admin/AdminCsvExportButton";
 
 type PopulationRow = {
   id: string;
@@ -147,6 +148,18 @@ export function PopulationsPage() {
           ) : (
             <>
             <ListSearch value={populationSearch} onChange={setPopulationSearch} label="Search populations" />
+             <AdminCsvExportButton
+               filename="populations"
+               columns={[
+                 { label: "Order", value: (p) => p.sortOrder },
+                 { label: "Name", value: (p) => p.name },
+                 { label: "Slug", value: (p) => p.slug },
+                 { label: "Used by", value: (p) => p.orgCount },
+                 { label: "State", value: (p) => p.isActive ? "Active" : "Inactive" },
+               ]}
+               getRows={async () => visiblePopulations}
+               disabled={listQuery.isLoading}
+             />
             <ListCount count={visiblePopulations.length} noun="populations" />
             <div className="adm-table-wrap">
             <table className="adm-table">
@@ -364,6 +377,16 @@ export function PopulationsPage() {
           {/* §4 region 3 — the reason this surface exists. */}
           <h3 className="adm-subheading">Other values</h3>
           <ListSearch value={otherSearch} onChange={setOtherSearch} label="Search Other values" />
+          <AdminCsvExportButton
+            filename="population-other-values"
+            columns={[
+              { label: "Value", value: (g) => g.value },
+              { label: "Organizations", value: (g) => g.orgCount },
+              { label: "Organization names", value: (g) => g.orgs.map((o) => o.name) },
+            ]}
+            getRows={async () => visibleOtherValues}
+            disabled={listQuery.isLoading}
+          />
           <div className="adm-btn-row">
             <SortableHeader label="Value" column="value" sort={otherSort} direction={otherDirection} onSort={(c,d) => { setOtherSort(c); setOtherDirection(d); }} />
           </div>
