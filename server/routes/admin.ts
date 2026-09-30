@@ -3580,11 +3580,16 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       const status = requestedStatus as MembershipStatus;
+      if (req.body.expectedStatus !== undefined && !MEMBERSHIP_STATUS_VALUES.has(req.body.expectedStatus)) {
+        res.status(400).json({ message: "Invalid original membership status. Reload and try again." });
+        return;
+      }
       try {
         const result = await changeMembershipStatus({
           membershipId: id,
           staffUserId: userId,
           status,
+          expectedStatus: req.body.expectedStatus,
         });
         if (result.noop) {
           res.json({
@@ -3649,10 +3654,17 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
     const newRole = role as MembershipRole;
+    if (req.body.expectedRole !== undefined && !ROLE_VALUES.has(req.body.expectedRole)) {
+      res.status(400).json({ message: "Invalid original role. Reload and try again." });
+      return;
+    }
     try {
       const result = await withDbContext({ kind: "staff", userId }, async (c) => {
         const row = await dal.memberships.getRoleAdminRowInTx(c, id);
         if (!row) return { kind: "not_found" as const };
+        if (req.body.expectedRole && row.role !== req.body.expectedRole) {
+          return { kind: "stale" as const };
+        }
         // Regular member/owner roles are never valid at the platform owner.
         // The sole repair is the explicit pending-member → active approver
         // conversion; every other crafted target is refused.
@@ -3692,6 +3704,9 @@ export function registerAdminRoutes(app: Express): void {
       switch (result.kind) {
         case "not_found":
           sendNotFound(res);
+          return;
+        case "stale":
+          res.status(409).json({ message: "This role changed since you opened it. Review the saved role before trying again." });
           return;
         case "noop": {
           const name = `${result.row.firstName} ${result.row.lastName}`.trim();

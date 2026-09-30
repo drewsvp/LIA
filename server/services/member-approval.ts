@@ -219,6 +219,7 @@ export async function changeMembershipStatus(input: {
   membershipId: string;
   staffUserId: string;
   status: MembershipStatus;
+  expectedStatus?: MembershipStatus;
 }): Promise<{
   membership: OrgMembership;
   memberName: string;
@@ -235,6 +236,12 @@ export async function changeMembershipStatus(input: {
       if (!row) throw new MembershipNotFoundError(input.membershipId);
 
       const fromStatus = row.status;
+      if (input.expectedStatus && input.expectedStatus !== fromStatus) {
+        throw new MembershipStatusTransitionError(
+          fromStatus, input.status,
+          "This membership changed since you opened it. The saved status has been restored; review it before trying again.",
+        );
+      }
       if (fromStatus === input.status) {
         return {
           membership: row,

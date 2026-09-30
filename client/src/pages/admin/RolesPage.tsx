@@ -140,30 +140,52 @@ export function RolesPage() {
 
   async function confirmChange() {
     if (!pending) return;
+    const change = pending;
     setBusy(true);
     setResult(null);
     try {
-      const res = await fetch(`/api/admin/roles/${pending.row.id}`, {
+      const res = await fetch(`/api/admin/roles/${change.row.id}`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          pending.kind === "role" ? { role: pending.toRole } : { status: pending.toStatus },
+          change.kind === "role"
+            ? { role: change.toRole, expectedRole: change.row.role }
+            : { status: change.toStatus, expectedStatus: change.row.status },
         ),
       });
       let message = FAILURE;
+      let payload: { message?: string; noop?: boolean; membership?: Row } = {};
       try {
-        const payload = (await res.json()) as { message?: string };
+        payload = (await res.json()) as typeof payload;
         if (payload.message) message = payload.message;
       } catch {
         /* non-JSON body — keep the generic failure line */
       }
-      setResult({ kind: res.ok ? "ok" : "error", text: message });
-      if (res.ok) setPending(null);
+      // A 2xx no-op (or malformed response) is not proof that the selected
+      // value was saved. Re-read the server list rather than leaving the
+      // confirmation's provisional selection on screen.
+      if (!res.ok || payload.noop || payload.membership?.id !== change.row.id ||
+          (change.kind === "role"
+            ? payload.membership.role !== change.toRole
+            : payload.membership.status !== change.toStatus)) {
+        setResult({ kind: "error", text: payload.noop ? message : res.ok ? FAILURE : message });
+      } else {
+        const fresh = await queryClient.fetchQuery<{ memberships: Row[] }>({
+          queryKey: ["/api/admin/roles"],
+          staleTime: 0,
+        });
+        const saved = fresh.memberships.find((row) => row.id === change.row.id);
+        if (!saved || (change.kind === "role" ? saved.role !== change.toRole : saved.status !== change.toStatus)) {
+          setResult({ kind: "error", text: "The saved value could not be confirmed. Refresh the page before trying again." });
+        } else {
+          setResult({ kind: "ok", text: message });
+        }
+      }
     } catch {
-      setResult({ kind: "error", text: FAILURE });
+      setResult({ kind: "error", text: "The result could not be confirmed. Refresh the page before trying again." });
     } finally {
-      setBusy(false);
+      setPending(null);
       await queryClient.invalidateQueries({ queryKey: ["/api/admin/roles"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/admin/nav-counts"] });
       await queryClient.invalidateQueries({
@@ -171,6 +193,7 @@ export function RolesPage() {
           typeof query.queryKey[0] === "string" &&
           query.queryKey[0].startsWith("/api/admin/members"),
       });
+      setBusy(false);
     }
   }
 
@@ -308,9 +331,10 @@ export function RolesPage() {
        <ListSearch value={search} onChange={setSearch} label="Search memberships">
          <label className="adm-filter">Type<select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}><option value="all">All</option><option value="Staff">Staff</option><option value="Member">Member</option></select></label>
          <label className="adm-filter">Organization<select value={organizationFilter} onChange={(e) => setOrganizationFilter(e.target.value)}><option value="all">All</option>{Array.from(new Map(rows.map(r => [r.orgId, r.orgName]))).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-         <label className="adm-filter">Organization status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}><option value="all">All</option>{(["pending","active","removed"] as const).map(s => <option key={s} value={s}>{STATUS_NAMES[s]}</option>)}</select></label>
+          <label className="adm-filter">Membership status<select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}><option value="all">All statuses</option>{(["pending","active","removed"] as const).map(s => <option key={s} value={s}>{STATUS_NAMES[s]}</option>)}</select></label>
          <label className="adm-filter">Role<select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as typeof roleFilter)}><option value="all">All</option>{(Object.keys(ROLE_NAMES) as Row["role"][]).map(r => <option key={r} value={r}>{ROLE_NAMES[r]}</option>)}</select></label>
        </ListSearch>
+        <p className="adm-muted">Removing a membership revokes access to that organization; it does not delete the person's account or history. Removed memberships remain in All statuses and Removed. A changed row may disappear from a filtered view; choose All statuses and All roles to find it again.</p>
         <AdminCsvExportButton
           filename="roles"
           columns={[
@@ -457,7 +481,7 @@ export function RolesPage() {
                    ? " This approves the membership and sends the normal member login email."
                    : pending.toStatus === "pending"
                      ? " This returns the membership to the normal approval queue."
-                     : " They will lose access through this membership."}
+                    : " This removes access through this membership, not the person's account. They will remain in All statuses and Removed."}
                </p>
             )}
             <div className="adm-btn-row">

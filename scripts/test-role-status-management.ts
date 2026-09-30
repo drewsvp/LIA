@@ -4,8 +4,10 @@
  * The development server must be running. Fixtures are removed on exit.
  */
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { chromium } from "playwright";
 import { pool } from "../server/db/client";
+import { auth } from "../server/auth/auth";
 
 const BASE = process.env.REPLIT_DEV_DOMAIN
   ? `https://${process.env.REPLIT_DEV_DOMAIN}`
@@ -15,13 +17,13 @@ const testStartedAt = new Date();
 const peopleIds: string[] = [];
 const membershipIds: string[] = [];
 const organizationIds: string[] = [];
-let seededMembershipSnapshot: {
+const seededMembershipSnapshots: Array<{
   id: string;
   role: string;
   status: string;
   approvedAt: Date | null;
   approvedBy: string | null;
-} | null = null;
+}> = [];
 
 type MembershipStatus = "pending" | "active" | "removed";
 
@@ -88,8 +90,40 @@ async function postStatus(
   });
 }
 
+async function mintMemberCookie(email: string): Promise<string> {
+  const token = `zz-role-status-${randomBytes(18).toString("hex")}`;
+  await pool.query(
+    `insert into verification (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
+     values (gen_random_uuid(), $1, $2, now() + interval '2 minutes', now(), now())`,
+    [token, JSON.stringify({ email })],
+  );
+  try {
+    const response = await (auth.api as unknown as {
+      magicLinkVerify(input: {
+        query: { token: string; callbackURL: string };
+        headers: Headers;
+        asResponse: true;
+      }): Promise<Response>;
+    }).magicLinkVerify({
+      query: { token, callbackURL: "/dashboard" }, headers: new Headers(), asResponse: true,
+    });
+    assert(response.ok || response.status === 302, "member fixture can sign in");
+    return cookieHeader(response);
+  } finally {
+    await pool.query(`delete from verification where identifier = $1`, [token]);
+  }
+}
+
+async function saved(membershipId: string): Promise<{ role: string; status: string }> {
+  const result = await pool.query<{ role: string; status: string }>(
+    `select role, status from org_memberships where id = $1`, [membershipId],
+  );
+  if (!result.rows[0]) throw new Error("fixture membership missing");
+  return result.rows[0];
+}
+
 async function cleanup(): Promise<void> {
-  if (seededMembershipSnapshot) {
+  for (const seededMembershipSnapshot of seededMembershipSnapshots) {
     await pool.query(
       `update org_memberships
           set role = $2, status = $3, approved_at = $4, approved_by = $5
@@ -127,6 +161,9 @@ async function cleanup(): Promise<void> {
     await pool.query(`delete from users where person_id = any($1::uuid[])`, [peopleIds]);
     await pool.query(`delete from people where id = any($1::uuid[])`, [peopleIds]);
   }
+  // Magic-link verification creates a provider identity and session. Once
+  // the application fixture is gone, remove only this run's provider rows.
+  await pool.query(`delete from "user" where email = $1`, [`${marker}.role-target@example.invalid`]);
 }
 
 async function main(): Promise<void> {
@@ -145,6 +182,8 @@ async function main(): Promise<void> {
 
   const approvable = await createMember(approvedOrg.id, "approvable", "pending");
   const removable = await createMember(approvedOrg.id, "removable", "active");
+  const roleTarget = await createMember(approvedOrg.id, "role-target", "active");
+  const statusRace = await createMember(approvedOrg.id, "status-race", "active");
   const blocked = await createMember(pendingOrg.id, "blocked", "pending");
   const raceOrg = await pool.query<{ id: string }>(
     `insert into organizations (kind, name, slug, status)
@@ -156,6 +195,12 @@ async function main(): Promise<void> {
   const raceMember = await createMember(raceOrgId, "race", "pending");
 
   try {
+    const memberCookie = await mintMemberCookie(roleTarget.email);
+    const memberSession = async () => {
+      const response = await fetch(`${BASE}/api/session`, { headers: { Cookie: memberCookie } });
+      return response.json() as Promise<{ memberships: Array<{ id: string; role: string; status: string }> }>;
+    };
+    assert((await memberSession()).memberships.some((m) => m.id === roleTarget.membershipId && m.role === "member"), "member session initially has Member role");
     const listResponse = await fetch(`${BASE}/api/admin/roles`, {
       headers: { Cookie: adminCookie },
     });
@@ -181,6 +226,42 @@ async function main(): Promise<void> {
     });
     const deniedWrite = await postStatus(approverCookie, approvable.membershipId, "active");
     assert(deniedList.status === 404 && deniedWrite.status === 404, "staff approvers cannot read or change roles");
+
+    const approverSession = (await (await fetch(`${BASE}/api/session`, { headers: { Cookie: approverCookie } })).json()) as {
+      user: { id: string };
+    };
+    const approverRow = list.memberships.find((row) => row.userId === approverSession.user.id && row.role === "staff_approver");
+    if (!approverRow) throw new Error("missing non-self staff approver fixture");
+    const originalApprover = await pool.query<{
+      id: string; role: string; status: string; approvedAt: Date | null; approvedBy: string | null;
+    }>(
+      `select id, role, status, approved_at as "approvedAt", approved_by as "approvedBy" from org_memberships where id = $1`,
+      [approverRow.id],
+    );
+    seededMembershipSnapshots.push(originalApprover.rows[0]!);
+    const promoteStaff = await fetch(`${BASE}/api/admin/roles/${approverRow.id}`, {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ role: "staff_admin", expectedRole: "staff_approver" }),
+    });
+    assert(promoteStaff.ok && (await saved(approverRow.id)).role === "staff_admin", "non-self staff promotion persists");
+    assert((await fetch(`${BASE}/api/admin/roles`, { headers: { Cookie: approverCookie } })).ok, "existing approver session gains admin permissions on its next request");
+    const demoteStaff = await fetch(`${BASE}/api/admin/roles/${approverRow.id}`, {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ role: "staff_approver", expectedRole: "staff_admin" }),
+    });
+    assert(demoteStaff.ok && (await saved(approverRow.id)).role === "staff_approver", "non-self staff demotion persists");
+    assert((await fetch(`${BASE}/api/admin/roles`, { headers: { Cookie: approverCookie } })).status === 404, "demoted staff immediately loses admin permissions");
+
+    const invalidOrgRole = await fetch(`${BASE}/api/admin/roles/${roleTarget.membershipId}`, {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ role: "staff_admin" }),
+    });
+    assert(invalidOrgRole.status === 409 && (await saved(roleTarget.membershipId)).role === "member", "staff role is prohibited in a member organization");
+    const noop = await fetch(`${BASE}/api/admin/roles/${roleTarget.membershipId}`, {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ role: "member", expectedRole: "member" }),
+    });
+    assert(noop.ok && ((await noop.json()) as { noop?: boolean }).noop === true, "unchanged role is explicitly reported as a no-op");
 
     const blockedActivation = await postStatus(adminCookie, blocked.membershipId, "active");
     assert(blockedActivation.status === 409, "activation is blocked under an unapproved organization");
@@ -311,10 +392,15 @@ async function main(): Promise<void> {
          from org_memberships where id = $1`,
       [ownStaff.id],
     );
-    seededMembershipSnapshot = seededState.rows[0] ?? null;
-    if (!seededMembershipSnapshot) throw new Error("signed-in staff membership disappeared");
+    if (!seededState.rows[0]) throw new Error("signed-in staff membership disappeared");
+    seededMembershipSnapshots.push(seededState.rows[0]);
     const selfRemoval = await postStatus(adminCookie, ownStaff.id, "removed");
     assert(selfRemoval.status === 409, "a staff admin cannot remove their own staff membership");
+      const selfDemotion = await fetch(`${BASE}/api/admin/roles/${ownStaff.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ role: "staff_approver" }),
+      });
+      assert(selfDemotion.status === 409 && (await saved(ownStaff.id)).role === "staff_admin", "self-demotion is refused without changing the role");
 
     const executablePath = execFileSync("which", ["chromium"], { encoding: "utf8" }).trim();
     const browser = await chromium.launch({ headless: true, executablePath });
@@ -416,6 +502,52 @@ async function main(): Promise<void> {
         removable.membershipId,
       );
       assert(requestCount() === 1, "the role change calls the server only after approval");
+
+      const targetRow = page.locator("tr", { hasText: roleTarget.email });
+      assert(await targetRow.locator("select").nth(1).inputValue() === "member", "member role selector starts at saved value");
+      await targetRow.locator("select").nth(1).selectOption("owner");
+      assert((await page.locator(".adm-confirm").textContent())?.includes("from Member to Owner"), "role change explains the proposed role");
+      await page.locator(".adm-confirm").getByRole("button", { name: "Change role" }).click();
+      await page.getByText(/is now an owner at/).waitFor();
+      assert((await saved(roleTarget.membershipId)).role === "owner", "browser role change persists in the database");
+      assert(await targetRow.locator("select").nth(1).inputValue() === "owner", "refreshed role selector shows saved Owner role");
+      assert((await memberSession()).memberships.some((m) => m.id === roleTarget.membershipId && m.role === "owner"), "member's next authenticated request sees Owner role");
+
+      // Another administrator changes the row after the browser rendered it:
+      // confirming the old selection must not clobber the newer value.
+      await targetRow.locator("select").nth(1).selectOption("member");
+      const external = await fetch(`${BASE}/api/admin/roles/${roleTarget.membershipId}`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ role: "member", expectedRole: "owner" }),
+      });
+      assert(external.ok, "concurrent administrator can change the saved role");
+      await page.locator(".adm-confirm").getByRole("button", { name: "Change role" }).click();
+      await page.getByText(/This role changed since you opened it/).waitFor();
+      assert(await targetRow.locator("select").nth(1).inputValue() === "member", "failed stale role change restores the saved selection");
+      assert((await saved(roleTarget.membershipId)).role === "member", "stale confirmation does not rewrite saved role");
+
+      const racedRow = page.locator("tr", { hasText: statusRace.email });
+      await racedRow.locator("select").first().selectOption("removed");
+      assert((await postStatus(adminCookie, statusRace.membershipId, "removed")).ok, "another administrator can remove the membership");
+      await page.locator(".adm-confirm").getByRole("button", { name: "Change status" }).click();
+      await page.getByText(/This membership changed since you opened it/).waitFor();
+      assert(await racedRow.locator("select").first().inputValue() === "removed", "failed stale status change restores the saved status");
+
+      await targetRow.locator("select").first().selectOption("removed");
+      assert((await page.locator(".adm-confirm").textContent())?.includes("not the person's account"), "removal confirmation distinguishes membership from account");
+      await page.locator(".adm-confirm").getByRole("button", { name: "Change status" }).click();
+      await page.getByText(/membership was removed/).waitFor();
+      assert((await saved(roleTarget.membershipId)).status === "removed", "browser removal persists as Removed");
+      assert(await targetRow.locator("select").first().inputValue() === "removed", "refreshed list shows Removed status");
+      assert(!(await memberSession()).memberships.some((m) => m.id === roleTarget.membershipId), "removed membership disappears from the next session resolution");
+      const dashboardAfterRemoval = await fetch(`${BASE}/api/dashboard/overview`, { headers: { Cookie: memberCookie } });
+      assert(dashboardAfterRemoval.status === 403, "removed member loses organization access on the next request");
+      await page.getByLabel("Membership status").selectOption("active");
+      assert(await targetRow.count() === 0, "removed membership no longer appears in Active filter");
+      await page.getByLabel("Membership status").selectOption("removed");
+      assert(await targetRow.count() === 1, "removed membership remains visible in Removed filter");
+      await page.getByLabel("Membership status").selectOption("all");
+      assert((await page.getByText(/does not delete the person's account or history/).textContent()) !== null, "all-status list explains retained account and history");
       await context.close();
     } finally {
       await browser.close();
