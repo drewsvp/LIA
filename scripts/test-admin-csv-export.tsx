@@ -98,6 +98,26 @@ async function testFetchAllPages(): Promise<void> {
     await assert.rejects(exportAfterFetch(), /changed during export/);
   });
   assert.equal(downloads, 0, "repeated IDs must not start a partial download");
+
+  await withFetch(async (input) => {
+    const page = Number(new URL(input, "https://admin.example").searchParams.get("page"));
+    return response({
+      rows: page === 1
+        ? Array.from({ length: 100 }, (_, index) => ({ userId: `person-${index}`, requestId: "request-1" }))
+        : [{ userId: "person-0", requestId: "request-1" }],
+      total: 101,
+    });
+  }, async () => {
+    await assert.rejects(
+      fetchAllAdminPages(
+        "/api/admin/analytics/audience",
+        params,
+        (payload) => payload as { rows: { userId: string; requestId: string }[]; total: number },
+        (row) => `${row.userId}:${row.requestId}`,
+      ),
+      /changed during export/,
+    );
+  });
 }
 
 async function testDownloadCsv(): Promise<void> {

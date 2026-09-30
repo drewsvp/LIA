@@ -264,6 +264,7 @@ function AudienceTable(): ReactElement {
               const result = payload as Partial<AudienceResponse>;
               return { rows: result.rows ?? [], total: result.total ?? 0 };
             },
+            (row) => `${row.userId}:${row.requestKind}:${row.requestId}`,
           )}
           disabled={isLoading || isError || total === 0}
         />

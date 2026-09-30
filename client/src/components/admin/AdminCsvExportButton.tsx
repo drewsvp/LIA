@@ -22,6 +22,7 @@ export async function fetchAllAdminPages<T>(
   endpoint: string,
   filters: URLSearchParams,
   readPage: (payload: unknown) => CsvPage<T>,
+  rowKey?: (row: T) => string,
 ): Promise<T[]> {
   const params = new URLSearchParams(filters);
   params.delete("page");
@@ -55,7 +56,10 @@ export async function fetchAllAdminPages<T>(
     if (remaining <= 0) return rows;
 
     for (const row of result.rows.slice(0, remaining)) {
-      const id = row && typeof row === "object" && "id" in row ? row.id : null;
+      const id = rowKey ? rowKey(row) : row && typeof row === "object" && "id" in row ? row.id : null;
+      if (rowKey && (typeof id !== "string" || id === "")) {
+        throw new Error("The filtered list returned an invalid export response.");
+      }
       if (typeof id === "string") {
         if (seenIds.has(id)) {
           throw new Error("The filtered list changed during export. Please try again.");
